@@ -1,164 +1,138 @@
-# Setup — from zero to a live site
+# Setup — entirely in your browser
 
-About 20 minutes, all free. You need a GitHub account and a Cloudflare account
-(no credit card required for the free plan).
+No downloads, no terminal, no commands. Two browser tabs (GitHub and
+Cloudflare) and about 15 minutes.
 
-There are two halves: **make a database** (once, in a terminal) and **connect
-the repo** (once, in the Cloudflare dashboard). After that, every `git push`
-deploys automatically and you never touch the terminal again.
+You need a free Cloudflare account: <https://dash.cloudflare.com/sign-up>.
+No credit card.
 
----
-
-## Step 1 — Get the code onto your machine
-
-```bash
-git clone https://github.com/lincolnrieger/cleaning.git
-cd cleaning
-npm install
-```
-
-If you don't have Node.js, install it from <https://nodejs.org> first (the LTS
-version). `npm install` only pulls in Cloudflare's deploy tool — the website
-itself has no dependencies.
-
-## Step 2 — Sign in to Cloudflare
-
-```bash
-npx wrangler login
-```
-
-A browser window opens. Approve it, come back to the terminal.
-
-## Step 3 — Create the database
-
-```bash
-npx wrangler d1 create basecamp-cleaning
-```
-
-It prints a block like this:
-
-```
-[[d1_databases]]
-binding = "DB"
-database_name = "basecamp-cleaning"
-database_id = "a1b2c3d4-...."
-```
-
-Copy that `database_id` and paste it into `wrangler.toml`, replacing
-`REPLACE_WITH_YOUR_DATABASE_ID`.
-
-## Step 4 — Create the tables and load the checklist
-
-```bash
-npm run db:init
-```
-
-This runs `schema.sql` (the tables) and `seed.sql` (your five buildings and
-their tasks) against the live database.
-
-**Optional — photo uploads on maintenance reports:**
-
-```bash
-npx wrangler r2 bucket create basecamp-cleaning-photos
-```
-
-If you skip this, delete the `[[r2_buckets]]` block from `wrangler.toml`. The
-app detects the missing bucket and hides the photo field — nothing breaks.
-
-## Step 5 — Deploy it
-
-```bash
-npx wrangler pages deploy public
-```
-
-First run asks you to create the project — call it **basecamp-cleaning**. When
-it finishes it prints your URL, something like
-`https://basecamp-cleaning.pages.dev`.
-
-## Step 6 — Set the sign-in secret
-
-This is the key that signs login sessions. Generate a random one and store it:
-
-```bash
-npx wrangler pages secret put AUTH_SECRET --project-name basecamp-cleaning
-```
-
-It prompts for a value. Paste a long random string — generate one with:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-> **Keep this value.** Changing it later signs everybody out **and invalidates
-> every PIN**, because PINs are hashed with it. If you ever do change it, you
-> have to reset every PIN from the People screen.
-
-## Step 7 — Bind the database to the site
-
-In the Cloudflare dashboard: **Workers & Pages → basecamp-cleaning → Settings
-→ Bindings**.
-
-- Add a **D1 database binding**: variable name `DB`, database
-  `basecamp-cleaning`.
-- If you made the photo bucket, add an **R2 bucket binding**: variable name
-  `PHOTOS`, bucket `basecamp-cleaning-photos`.
-
-Then **Deployments → ⋯ → Retry deployment** so the new bindings take effect.
-
-## Step 8 — Connect GitHub so pushes deploy themselves
-
-**Settings → Build → Connect to Git**, pick your `cleaning` repo, and set:
-
-| Field | Value |
-|---|---|
-| Production branch | `main` |
-| Build command | *(leave empty)* |
-| Build output directory | `public` |
-
-From now on, `git push` publishes in under a minute. There's no build step —
-that's why it's fast.
-
-## Step 9 — Create your admin account
-
-Open your site. Because there are no accounts yet, it shows a one-time
-**first-time setup** screen. Enter your name and choose a PIN. That screen
-disappears permanently once the first account exists.
-
-Then go to **People** and add everyone else. See `README.md` for what the
-three roles can do.
+> **Why Cloudflare and not Vercel?** Vercel's free databases go to sleep after
+> a few minutes of no use, so the first cleaner to open the app after a quiet
+> hour would wait several seconds for it to wake up. Cloudflare's database
+> doesn't sleep and its code runs with no cold start. Same click-through
+> dashboard, genuinely faster for how you'll use it.
 
 ---
 
-## Changing the checklist later
+## Step 1 — Create the site
 
-Edit `data/checklist.json`, then:
+1. Go to <https://dash.cloudflare.com> and sign in.
+2. In the left sidebar choose **Compute (Workers)** → **Workers & Pages**.
+3. Click **Create** → the **Pages** tab → **Connect to Git**.
+4. Authorise Cloudflare to see your GitHub account, then pick the
+   **`cleaning`** repository.
+5. Set the build settings exactly like this:
 
-```bash
-npm run seed:build   # rewrites seed.sql
-npm run db:seed      # applies it to the live database
-git add -A && git commit -m "Update checklist" && git push
-```
+   | Field | Value |
+   |---|---|
+   | Production branch | `claude/cleaning-checklist-tracker-62r7u3` |
+   | Framework preset | **None** |
+   | Build command | **leave completely empty** |
+   | Build output directory | `public` |
 
-Re-seeding is safe to repeat. It adds new tasks, updates wording on existing
-ones, and never touches the history of what was already cleaned.
+6. Click **Save and Deploy**.
 
-## Running it on your own machine first
+It finishes in under a minute and shows you a URL like
+`https://cleaning-xyz.pages.dev`. Opening it now will show an error about a
+missing database — that's expected, you make it next.
 
-```bash
-echo "AUTH_SECRET=any-long-local-string" > .dev.vars
-npm run db:init:local
-npm run dev
-```
+> The empty build command is deliberate. Nothing needs compiling, which is a
+> large part of why the site is fast and why deploys take seconds.
 
-Then open <http://127.0.0.1:8788>. This uses a local copy of the database, so
-you can experiment without touching the real one.
+## Step 2 — Create the database
+
+1. In the left sidebar choose **Storage & Databases** → **D1 SQL Database**.
+2. Click **Create Database**.
+3. Name it `basecamp-cleaning` and click **Create**.
+
+That's all. You do **not** need to create any tables or run any SQL — the app
+does that itself the first time it runs.
+
+## Step 3 — Connect the database to the site
+
+1. Go back to **Workers & Pages** and click your **cleaning** project.
+2. Open the **Settings** tab, then find **Bindings**.
+3. Click **Add** → **D1 database** and fill in:
+   - Variable name: **`DB`** (exactly this, capital letters)
+   - D1 database: **basecamp-cleaning**
+4. Save.
+
+If you're offered a choice between **Production** and **Preview**, add it to
+**Production**. Adding it to both is fine and means test deploys work too.
+
+## Step 4 — Photos on maintenance reports (optional)
+
+Skip this if you don't want cleaners attaching photos. The app hides the photo
+field automatically when it's not set up — nothing breaks.
+
+1. Sidebar → **R2 Object Storage** → **Create bucket**, name it
+   `basecamp-cleaning-photos`. Leave it **private** (the default).
+2. Back in your Pages project → **Settings** → **Bindings** → **Add** →
+   **R2 bucket**:
+   - Variable name: **`PHOTOS`**
+   - Bucket: **basecamp-cleaning-photos**
+
+R2 asks you to "add a payment method" to activate the service even on the free
+plan. If you'd rather not, skip this step — everything else works without it.
+
+## Step 5 — Redeploy so the settings take effect
+
+Bindings only apply to deployments made *after* you added them.
+
+In your Pages project → **Deployments** tab → find the latest deployment →
+click the **⋯** menu → **Retry deployment**.
+
+## Step 6 — Create your admin account
+
+Open your `.pages.dev` URL. Because there are no accounts yet, the app shows a
+one-time **first-time setup** screen. Enter your name and choose a PIN.
+
+That screen disappears permanently the moment the first account exists — nobody
+else can use it to make themselves an admin.
+
+Then tap **People** and add your cleaners and office staff. Each person gets
+their own PIN; that PIN is how the app knows who cleaned what.
+
+**Use 6-digit PINs.** Four digits is guessable, and everyone at camp shares one
+internet connection, so the app can't lock out attackers as aggressively as it
+otherwise would.
+
+---
+
+## Changing the checklist later — also in the browser
+
+1. On GitHub open **`data/checklist.json`**.
+2. Click the **pencil icon** to edit it.
+3. Make your change. Every task is a pair: `["Item", "What to do"]`.
+4. Click **Commit changes**.
+
+Cloudflare redeploys within a minute and the app updates itself. You can add
+tasks, reword them, add or remove buildings — all from that one file.
+
+**Removing a task doesn't delete history.** It stops appearing on checklists,
+but the record of every time it was cleaned stays in the activity log and CSV
+exports. Put it back and it returns with its history intact.
+
+## Sharing it with your team
+
+Everyone uses the same URL. Tell them to open it on their phone and use
+**Add to Home Screen** (iPhone: Share → Add to Home Screen; Android: menu →
+Add to home screen). It then opens like an app, full screen, with no browser
+bar.
+
+You can give it a proper address like `cleaning.yourcamp.org` under Pages
+project → **Custom domains**, if you own a domain.
 
 ## If something goes wrong
 
-| Symptom | Cause | Fix |
+| What you see | What it means | Fix |
 |---|---|---|
-| "Server is missing AUTH_SECRET" | Step 6 not done, or done before the project existed | Re-run step 6, then retry the deployment |
-| "no such table: users" | Step 4 not run, or run against the local DB | `npm run db:init` (no `--local`) |
-| Every page says "Please sign in" in a loop | `AUTH_SECRET` changed between deploys | Set it back, or reset all PINs |
-| Photo field missing | R2 bucket not bound | Add the `PHOTOS` binding in step 7 |
-| Everyone's PIN stopped working | `AUTH_SECRET` was changed | Sign in as admin and reset each PIN |
+| "No database is connected" | The `DB` binding is missing or was added after the last deploy | Check step 3, then redeploy (step 5) |
+| Site loads but the checklist is empty | Deploy ran before the database was connected | Retry the deployment (step 5) |
+| Photo field never appears | No R2 bucket bound | That's step 4, and it's optional |
+| Everyone's PIN suddenly fails | An `AUTH_SECRET` variable was added or changed in Settings | Remove it, redeploy, and PINs work again — or reset each PIN from the People screen |
+| "Too many wrong PINs" | Someone mistyped 8+ times | Wait up to 5 minutes; it clears itself, and clears instantly on a correct PIN |
+
+There's nothing you can break from the dashboard that a **Retry deployment**
+won't fix. The one thing to leave alone is the `AUTH_SECRET` variable — the app
+manages that itself, and overwriting it invalidates every PIN.

@@ -3,3 +3,7 @@ node_modules/
 .dev.vars
 .env
 *.log
+
+# Local-only; the deployed site needs none of this
+package.json
+package-lock.json

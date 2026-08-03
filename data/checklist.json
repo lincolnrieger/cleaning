@@ -1,9 +1,12 @@
 {
-  "_comment": "Edit this file to change the checklist, then run: npm run seed:build  (regenerates seed.sql)",
+  "_comment": "This file IS the checklist. Edit it on GitHub and commit - the site redeploys and picks up the changes automatically. Each task is [\"Item\", \"What to do\"].",
+
   "contacts": {
     "office": "0402 930 714",
     "maintenance": "0437 316 386"
   },
+
+  "_sharedAreas_note": "These areas are added to every building below.",
   "sharedAreas": {
     "Bathrooms": [
       ["Toilet", "Clean including behind toilet cistern (no bugs/ants)"],
@@ -35,6 +38,8 @@
       ["Damage", "Report any maintenance or damage (broken fittings, graffiti etc) with photos"]
     ]
   },
+
+  "_buildings_note": "Each building gets the shared areas above, plus any listed in its own \"areas\".",
   "buildings": [
     { "name": "St George", "areas": [] },
     { "name": "Gilwell", "areas": [] },

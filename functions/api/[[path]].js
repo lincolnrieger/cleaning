@@ -1,6 +1,8 @@
 // Basecamp Cleaning Tracker - API
 // Single Cloudflare Pages Function handling every /api/* route.
 
+import { ensureReady, contacts } from './_setup.js';
+
 const TOKEN_TTL_HOURS = 14; // covers a long shift, expires before the next day
 const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 
@@ -35,17 +37,13 @@ const b64url = {
 
 const enc = new TextEncoder();
 
-function secret(env) {
-  const s = env.AUTH_SECRET;
-  if (!s || s.length < 16) {
-    throw new HttpError(500, 'Server is missing AUTH_SECRET. See SETUP.md step 5.');
-  }
-  return s;
-}
+// Set by ensureReady() before any handler runs - either the AUTH_SECRET set in
+// the dashboard, or the one the app generated for itself on first run.
+let signingKey = null;
 
-async function hmac(env, message) {
+async function hmac(_env, message) {
   const key = await crypto.subtle.importKey(
-    'raw', enc.encode(secret(env)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+    'raw', enc.encode(signingKey), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
   );
   return new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(message)));
 }
@@ -182,8 +180,8 @@ const routes = {
       needsBootstrap: !bootstrapped,
       photos: Boolean(env.PHOTOS),
       rollupOnly: env.OFFICE_ROLLUP_ONLY === '1',
-      officePhone: env.OFFICE_PHONE || '',
-      maintenancePhone: env.MAINTENANCE_PHONE || '',
+      officePhone: env.OFFICE_PHONE || contacts.office || '',
+      maintenancePhone: env.MAINTENANCE_PHONE || contacts.maintenance || '',
       today: localDay(env),
     });
   },
@@ -598,6 +596,15 @@ export async function onRequest(context) {
   const handler = routes[key];
 
   if (!handler) return fail(404, `No such endpoint: ${key}`);
+
+  try {
+    // Creates the tables and syncs the checklist on the first request after a
+    // deploy; a no-op on every request after that.
+    signingKey = await ensureReady(env);
+  } catch (err) {
+    console.error('setup', err);
+    return fail(503, err.message);
+  }
 
   try {
     // /config, /bootstrap and /login are the only routes reachable signed out.
