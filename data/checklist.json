@@ -1,0 +1,57 @@
+{
+  "_comment": "Edit this file to change the checklist, then run: npm run seed:build  (regenerates seed.sql)",
+  "contacts": {
+    "office": "0402 930 714",
+    "maintenance": "0437 316 386"
+  },
+  "sharedAreas": {
+    "Bathrooms": [
+      ["Toilet", "Clean including behind toilet cistern (no bugs/ants)"],
+      ["Toilet brush", "Clean off any bugs, dirt and grime"],
+      ["Sanitary bin", "Wiped over and clean"],
+      ["Urinal (boys)", "Clean, scrub and replace tablets"],
+      ["Paper towel / litter", "Pick up from floor and surfaces"],
+      ["Shower cubicle", "Wipe down surfaces and remove bugs"],
+      ["Mirror", "Wipe with glass cleaner - no streaks"],
+      ["Surfaces", "Wipe vanity and sills"],
+      ["Basin", "Clean tapware and basin thoroughly"],
+      ["Toilet paper / paper towel / soap", "Top up"],
+      ["Bins", "Empty, wipe over and replace liners"],
+      ["Toilet / shower area", "Clear any cobwebs"],
+      ["Floors", "Mop all, including shower cubicles, check drains"]
+    ],
+    "Shelter": [
+      ["Microwave", "Check empty and clean"],
+      ["Kettle", "Wipe over and clean"],
+      ["Kitchen surfaces and sink", "Wiped over and clean"],
+      ["Soap", "Refill soap / detergent"],
+      ["Supplies", "1 x dish cloth, 1 x green scourer, 1 x metal scourer"],
+      ["Bins", "Empty, wipe over and replace liners"]
+    ],
+    "Every visit": [
+      ["Litter", "Check for and pick up any litter"],
+      ["BBQ", "Check BBQ is clean - report to Maintenance if not"],
+      ["Lost property", "Deliver to Reception with a note of where it was found and the date"],
+      ["Damage", "Report any maintenance or damage (broken fittings, graffiti etc) with photos"]
+    ]
+  },
+  "buildings": [
+    { "name": "St George", "areas": [] },
+    { "name": "Gilwell", "areas": [] },
+    {
+      "name": "Brownsea",
+      "areas": [
+        {
+          "name": "Brownsea specific",
+          "tasks": [
+            ["Fridge", "Check fridge is empty and clean"],
+            ["Small bins", "Empty and replace liners in small bins inside shelter, including BBQ"],
+            ["BBQ", "Check if BBQ needs cleaning and report to office"]
+          ]
+        }
+      ]
+    },
+    { "name": "Lone's Hut", "areas": [] },
+    { "name": "Bert's Bog", "areas": [] }
+  ]
+}
