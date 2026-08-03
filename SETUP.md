@@ -16,19 +16,38 @@ No credit card.
 
 ## Step 1 — Create the site
 
+> ### ⚠️ Use the Pages flow, not the Workers flow
+>
+> Cloudflare's dashboard pushes you towards **Workers** by default. The
+> Workers setup screen has no *Build output directory* field, so if you're
+> looking for it and can't find it, you're on the wrong screen.
+>
+> On the "Create a Worker" page there's a line near the repository list:
+> **"Looking to deploy Pages? Get started"** — click that. Or go straight to
+> `dash.cloudflare.com/<your-account-id>/workers-and-pages/create/pages`.
+>
+> This matters: the app's API lives in a `functions/` folder, which is a Pages
+> convention. The Workers builder doesn't understand it, so the site would
+> load but every checklist action would fail with a 404.
+
 1. Go to <https://dash.cloudflare.com> and sign in.
-2. In the left sidebar choose **Compute (Workers)** → **Workers & Pages**.
-3. Click **Create** → the **Pages** tab → **Connect to Git**.
-4. Authorise Cloudflare to see your GitHub account, then pick the
-   **`cleaning`** repository.
+2. In the left sidebar choose **Compute** → **Workers & Pages**.
+3. Click **Create**. On the page that opens, find
+   **"Looking to deploy Pages?"** and click its **Get started** link.
+4. Choose **Connect to Git**, authorise Cloudflare to see your GitHub account,
+   then pick the **`cleaning`** repository and click **Begin setup**.
 5. Set the build settings exactly like this:
 
    | Field | Value |
    |---|---|
+   | Project name | `cleaning` (this becomes your web address) |
    | Production branch | `claude/cleaning-checklist-tracker-62r7u3` |
    | Framework preset | **None** |
    | Build command | **leave completely empty** |
    | Build output directory | `public` |
+
+   If you can't see the last two fields, expand **Build settings**. If they
+   aren't there at all, you're on the Workers screen — see the warning above.
 
 6. Click **Save and Deploy**.
 
@@ -41,7 +60,7 @@ missing database — that's expected, you make it next.
 
 ## Step 2 — Create the database
 
-1. In the left sidebar choose **Storage & Databases** → **D1 SQL Database**.
+1. In the left sidebar choose **Storage & databases** → **D1 SQL Database**.
 2. Click **Create Database**.
 3. Name it `basecamp-cleaning` and click **Create**.
 
