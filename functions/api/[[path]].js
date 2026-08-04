@@ -110,48 +110,29 @@ function clean(value, max) {
 /* ------------------------------------------------------- availability */
 
 const OLD_AVAILABILITY = /^[01]{7}$/;
-const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-const ALL_DAY = { from: '00:00', to: '23:59' };
-
-function normaliseSlot(slot) {
-  if (!slot) return null;
-  const from = HHMM.test(slot.from) ? slot.from : ALL_DAY.from;
-  const to = HHMM.test(slot.to) ? slot.to : ALL_DAY.to;
-  return from < to ? { from, to } : ALL_DAY;
-}
 
 /**
- * Reads whatever is stored into 7 slots (Mon..Sun), each null (not working)
- * or { from, to }. Understands the original all-day 7-character '0101011'
- * format from before per-day times existed, so old rows keep working.
+ * Reads whatever is stored into 7 booleans (Mon..Sun) - which days someone
+ * normally works, no times attached. Understands the older per-day
+ * time-range JSON this briefly stored, so rows saved during that period
+ * still come back as "works that day" rather than breaking.
  */
 function parseAvailability(raw) {
-  if (!raw) return Array(7).fill(ALL_DAY);
-  if (OLD_AVAILABILITY.test(raw)) return [...raw].map((c) => (c === '1' ? ALL_DAY : null));
+  if (!raw) return Array(7).fill(true);
+  if (OLD_AVAILABILITY.test(raw)) return [...raw].map((c) => c === '1');
   try {
     const arr = JSON.parse(raw);
-    if (Array.isArray(arr) && arr.length === 7) return arr.map(normaliseSlot);
+    if (Array.isArray(arr) && arr.length === 7) return arr.map(Boolean);
   } catch { /* fall through to the default below */ }
-  return Array(7).fill(ALL_DAY);
+  return Array(7).fill(true);
 }
 
 function validateAvailability(days) {
   if (!Array.isArray(days) || days.length !== 7) {
     throw new HttpError(400, 'Availability needs an entry for all seven days.');
   }
-  return days.map((slot, i) => {
-    if (!slot) return null;
-    const from = String(slot.from ?? '').trim();
-    const to = String(slot.to ?? '').trim();
-    if (!HHMM.test(from) || !HHMM.test(to)) {
-      throw new HttpError(400, `Give a valid time range for ${WEEKDAY_NAMES[i]}.`);
-    }
-    if (from >= to) throw new HttpError(400, `${WEEKDAY_NAMES[i]}: start time must be before end time.`);
-    return { from, to };
-  });
+  return days.map((on) => (on ? '1' : '0')).join('');
 }
-
-const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 /* ----------------------------------------------------------- settings */
 
@@ -903,26 +884,20 @@ const routes = {
     return json({ ok: true, name: target.name });
   },
 
-  /* --- availability: which weekdays each person normally works, and when --- */
+  /* --- availability: which weekdays each person normally works --- */
 
   'POST /availability': async (req, env, { user }) => {
+    // Cleaners' working days are managed by the office/admin, not by cleaners
+    // themselves - so this always requires an elevated role, self or not.
+    require(user, 'office', 'admin');
     const { userId, days } = await req.json();
     const target = userId ? Number(userId) : user.id;
-
-    // Anyone can set their own; only office and admin can set someone else's.
-    if (target !== user.id) require(user, 'office', 'admin');
-    const stored = JSON.stringify(validateAvailability(days));
+    const stored = validateAvailability(days);
 
     const res = await env.DB.prepare('UPDATE users SET availability = ? WHERE id = ?')
       .bind(stored, target).run();
     if (!res.meta.changes) throw new HttpError(404, 'That person no longer exists.');
     return json({ ok: true, days: parseAvailability(stored) });
-  },
-
-  'GET /availability': async (_req, env, { user }) => {
-    const row = await env.DB.prepare('SELECT availability FROM users WHERE id = ?')
-      .bind(user.id).first();
-    return json({ days: parseAvailability(row?.availability) });
   },
 
   /* --- editing the checklist from inside the app --- */

@@ -63,24 +63,23 @@ blocks sign-in.
 
 ### Availability
 
-Each person has the days and hours they normally work — **People → Days** for
-the office and admin, or **My days** in a cleaner's own nav. Tick a day on to
-set a time range for it (a native time picker, so it's fast on a phone). It's
-a general weekly pattern, not specific dates.
+Each person has the days they normally work, set from **People → Days** —
+office and admin only; cleaners can't set their own. Tick the days on. It's
+a general weekly pattern, not specific dates, and carries no times.
 
 When you assign someone in the schedule, anyone who doesn't normally work that
-weekday is listed last with a note saying so, and anyone who does shows their
-hours ("available 08:00–14:00") — but **you can still pick anyone regardless**.
-It's guidance for building the roster, never a block, because overriding it is
-the normal case when someone swaps a shift.
+weekday is listed last with a note saying so — but **you can still pick
+anyone regardless**. It's guidance for building the roster, never a block,
+because overriding it is the normal case when someone swaps a shift.
 
 ### Editing checklists in the app
 
 **Checklists** (admin only) lists every building, grouped the same way the
-schedule grid groups them, with a search box that matches building names,
-area names and individual items — type "kettle" and every building that has
-one shows up. From there you can add a building, add or rename an area, and
-add, reword or hide individual items.
+schedule grid groups them — tap a group's heading to fold or unfold it, handy
+once there are more than a few buildings in one — with a search box that
+matches building names, area names and individual items — type "kettle" and
+every building that has one shows up. From there you can add a building, add
+or rename an area, and add, reword or hide individual items.
 
 **Hiding** is the everyday tool: it takes an item or area off future
 checklists and keeps every record of it having been cleaned. Bringing it back

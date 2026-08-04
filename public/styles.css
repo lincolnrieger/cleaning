@@ -418,20 +418,6 @@ label.field > span {
 }
 .check-row.on { background: var(--accent-soft); border-color: var(--accent); }
 
-/* Availability rows: a plain div (not a label) since it holds both the
-   checkbox and separate time inputs - only the day-name half is a <label>,
-   so tapping a time field doesn't also flip the checkbox next to it. */
-.daytoggle { cursor: default; }
-.daytoggle > label { cursor: pointer; margin: 0; }
-
-.daytimes { display: flex; align-items: center; gap: 6px; flex: none; }
-.daytimes input[type="time"] {
-  width: auto;
-  min-height: 38px;
-  padding: 6px 8px;
-  font-size: 14px;
-}
-
 /* Switch row used for settings */
 .switch-row {
   display: flex;
@@ -443,16 +429,29 @@ label.field > span {
 
 .switch-row:first-child { border-top: none; }
 
-/* Group headings inside the Checklists admin list. */
+/* Fold/unfold headings that group buildings (Bell Tents, Chalets, ...) on
+   the Checklists list and the Schedule grid. Used on both a <button>
+   (a plain list) and a <div> (nested in a table cell, since colspan needs
+   the cell itself to stay a real table-cell) - .spread supplies the flex
+   layout either way, this just supplies the look and the click target. */
 .grouphead {
-  padding: 12px 16px 4px;
+  width: 100%;
+  padding: 10px 14px;
   font-size: 11.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .05em;
   color: var(--muted);
   border-top: 1px solid var(--line);
+  background: none;
+  border: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
 }
+
+.grouphead:hover { color: var(--fg); }
+.grouphead .chev { font-size: 13px; flex: none; }
 
 /* ------------------------------------------------------------ checklist */
 
