@@ -284,10 +284,11 @@ const routes = {
     const { results: buildings } = await env.DB.prepare(
       `SELECT b.id, b.name, b.grp AS grp,
         (SELECT COUNT(*) FROM tasks t JOIN areas a ON a.id = t.area_id
-           WHERE a.building_id = b.id AND t.active = 1) AS total,
+           WHERE a.building_id = b.id AND t.active = 1 AND a.active = 1) AS total,
         (SELECT COUNT(*) FROM task_log l JOIN tasks t ON t.id = l.task_id
            JOIN areas a ON a.id = t.area_id
-           WHERE a.building_id = b.id AND l.day = ?1 AND l.done = 1 AND t.active = 1) AS done,
+           WHERE a.building_id = b.id AND l.day = ?1 AND l.done = 1
+             AND t.active = 1 AND a.active = 1) AS done,
         (SELECT MAX(l.updated_at) FROM task_log l JOIN tasks t ON t.id = l.task_id
            JOIN areas a ON a.id = t.area_id
            WHERE a.building_id = b.id AND l.day = ?1) AS last_at,
@@ -371,7 +372,7 @@ const routes = {
   'GET /cleaners': async (_req, env, { user }) => {
     require(user, 'office', 'admin');
     const { results } = await env.DB.prepare(
-      `SELECT id, name, role FROM users
+      `SELECT id, name, role, availability FROM users
        WHERE active = 1 AND role IN ('cleaner', 'admin') ORDER BY name`,
     ).all();
     return json({ cleaners: results });
@@ -400,7 +401,8 @@ const routes = {
       ).bind(from, to).all(),
       env.DB.prepare(
         `SELECT a.building_id, COUNT(*) AS total FROM tasks t
-         JOIN areas a ON a.id = t.area_id WHERE t.active = 1 GROUP BY a.building_id`,
+         JOIN areas a ON a.id = t.area_id
+         WHERE t.active = 1 AND a.active = 1 GROUP BY a.building_id`,
       ).all(),
       env.DB.prepare(
         `SELECT a.building_id, l.day, COUNT(*) AS done
@@ -574,7 +576,7 @@ const routes = {
        FROM areas a
        JOIN tasks t ON t.area_id = a.id AND t.active = 1
        LEFT JOIN task_log l ON l.task_id = t.id AND l.day = ?2
-       WHERE a.building_id = ?1
+       WHERE a.building_id = ?1 AND a.active = 1
        ORDER BY a.sort_order, a.name, t.sort_order, t.id`,
     ).bind(id, day).all();
 
@@ -774,7 +776,8 @@ const routes = {
   'GET /users': async (req, env, { user }) => {
     require(user, 'admin');
     const { results } = await env.DB.prepare(
-      'SELECT id, name, role, active, created_at FROM users ORDER BY active DESC, name',
+      `SELECT id, name, role, active, availability, created_at
+       FROM users ORDER BY active DESC, name`,
     ).all();
     return json({ users: results });
   },
@@ -850,6 +853,161 @@ const routes = {
     return json({ ok: true, name: target.name });
   },
 
+  /* --- availability: which weekdays each person normally works --- */
+
+  'POST /availability': async (req, env, { user }) => {
+    const { userId, days } = await req.json();
+    const target = userId ? Number(userId) : user.id;
+
+    // Anyone can set their own; only office and admin can set someone else's.
+    if (target !== user.id) require(user, 'office', 'admin');
+    if (!/^[01]{7}$/.test(days || '')) {
+      throw new HttpError(400, 'Availability must be seven days of 0 or 1.');
+    }
+
+    const res = await env.DB.prepare('UPDATE users SET availability = ? WHERE id = ?')
+      .bind(days, target).run();
+    if (!res.meta.changes) throw new HttpError(404, 'That person no longer exists.');
+    return json({ ok: true, days });
+  },
+
+  'GET /availability': async (_req, env, { user }) => {
+    const row = await env.DB.prepare('SELECT availability FROM users WHERE id = ?')
+      .bind(user.id).first();
+    return json({ days: row?.availability ?? '1111111' });
+  },
+
+  /* --- editing the checklist from inside the app --- */
+
+  'GET /admin/checklist': async (_req, env, { user }) => {
+    require(user, 'admin');
+    const { results: buildings } = await env.DB.prepare(
+      'SELECT id, name, grp, sort_order, active FROM buildings ORDER BY sort_order, name',
+    ).all();
+    const { results: areas } = await env.DB.prepare(
+      `SELECT a.id, a.building_id, a.name, a.sort_order, a.active,
+              (SELECT COUNT(*) FROM tasks t WHERE t.area_id = a.id AND t.active = 1) AS tasks
+       FROM areas a ORDER BY a.sort_order, a.name`,
+    ).all();
+    return json({
+      buildings,
+      areas,
+      source: await getSetting(env, 'checklist_source', 'file'),
+    });
+  },
+
+  'GET /admin/area': async (_req, env, { user, url }) => {
+    require(user, 'admin');
+    const id = Number(url.searchParams.get('id'));
+    const area = await env.DB.prepare(
+      `SELECT a.id, a.name, a.active, a.building_id, b.name AS building
+       FROM areas a JOIN buildings b ON b.id = a.building_id WHERE a.id = ?`,
+    ).bind(id).first();
+    if (!area) throw new HttpError(404, 'Area not found.');
+    const { results: tasks } = await env.DB.prepare(
+      'SELECT id, item, description, sort_order, active FROM tasks WHERE area_id = ? ORDER BY sort_order, id',
+    ).bind(id).all();
+    return json({ area, tasks });
+  },
+
+  'POST /admin/building': async (req, env, { user }) => {
+    require(user, 'admin');
+    const { id, name, group, active } = await req.json();
+    const label = clean(name, 80);
+    if (!label) throw new HttpError(400, 'Give the building a name.');
+    const grp = clean(group, 60);
+
+    if (id) {
+      await env.DB.prepare('UPDATE buildings SET name = ?, grp = ?, active = ? WHERE id = ?')
+        .bind(label, grp, active ? 1 : 0, Number(id)).run();
+    } else {
+      const clash = await env.DB.prepare('SELECT id FROM buildings WHERE name = ?')
+        .bind(label).first();
+      if (clash) throw new HttpError(400, 'A building with that name already exists.');
+      const max = await env.DB.prepare('SELECT MAX(sort_order) AS m FROM buildings').first();
+      await env.DB.prepare(
+        'INSERT INTO buildings (name, grp, sort_order, active) VALUES (?, ?, ?, 1)',
+      ).bind(label, grp, (max?.m ?? 0) + 1).run();
+    }
+    await setSetting(env, 'checklist_source', 'app');
+    return json({ ok: true });
+  },
+
+  'POST /admin/area': async (req, env, { user }) => {
+    require(user, 'admin');
+    const { id, buildingId, name, active } = await req.json();
+    const label = clean(name, 80);
+    if (!label) throw new HttpError(400, 'Give the area a name.');
+
+    if (id) {
+      await env.DB.prepare('UPDATE areas SET name = ?, active = ? WHERE id = ?')
+        .bind(label, active ? 1 : 0, Number(id)).run();
+    } else {
+      const bid = Number(buildingId);
+      const clash = await env.DB.prepare(
+        'SELECT id FROM areas WHERE building_id = ? AND name = ?',
+      ).bind(bid, label).first();
+      if (clash) {
+        // Reuse the retired one rather than failing on the unique index.
+        await env.DB.prepare('UPDATE areas SET active = 1 WHERE id = ?').bind(clash.id).run();
+      } else {
+        const max = await env.DB.prepare(
+          'SELECT MAX(sort_order) AS m FROM areas WHERE building_id = ?',
+        ).bind(bid).first();
+        await env.DB.prepare(
+          'INSERT INTO areas (building_id, name, sort_order, active) VALUES (?, ?, ?, 1)',
+        ).bind(bid, label, (max?.m ?? 0) + 1).run();
+      }
+    }
+    await setSetting(env, 'checklist_source', 'app');
+    return json({ ok: true });
+  },
+
+  'POST /admin/task': async (req, env, { user }) => {
+    require(user, 'admin');
+    const { id, areaId, item, description, active } = await req.json();
+    const label = clean(item, 100);
+    if (!label) throw new HttpError(400, 'Give the item a name.');
+    const detail = clean(description, 300);
+
+    if (id) {
+      await env.DB.prepare(
+        'UPDATE tasks SET item = ?, description = ?, active = ? WHERE id = ?',
+      ).bind(label, detail, active ? 1 : 0, Number(id)).run();
+    } else {
+      const aid = Number(areaId);
+      const clash = await env.DB.prepare(
+        'SELECT id FROM tasks WHERE area_id = ? AND item = ?',
+      ).bind(aid, label).first();
+      if (clash) {
+        // Bringing back a retired item keeps everything it has ever recorded.
+        await env.DB.prepare('UPDATE tasks SET active = 1, description = ? WHERE id = ?')
+          .bind(detail, clash.id).run();
+      } else {
+        const max = await env.DB.prepare(
+          'SELECT MAX(sort_order) AS m FROM tasks WHERE area_id = ?',
+        ).bind(aid).first();
+        await env.DB.prepare(
+          'INSERT INTO tasks (area_id, item, description, sort_order, active) VALUES (?, ?, ?, ?, 1)',
+        ).bind(aid, label, detail, (max?.m ?? 0) + 1).run();
+      }
+    }
+    await setSetting(env, 'checklist_source', 'app');
+    return json({ ok: true });
+  },
+
+  /** Hands the checklist back to data/checklist.json on the next request. */
+  'POST /admin/checklist/restore': async (req, env, { user }) => {
+    require(user, 'admin');
+    const { confirm } = await req.json();
+    if (clean(confirm, 40).toLowerCase() !== 'restore') {
+      throw new HttpError(400, 'Type "restore" to confirm.');
+    }
+    await setSetting(env, 'checklist_source', 'file');
+    await setSetting(env, 'checklist_version', '');
+    return json({ ok: true });
+  },
+
   'POST /settings': async (req, env, { user }) => {
     require(user, 'admin');
     const { quickSignin } = await req.json();
@@ -911,16 +1069,17 @@ const routes = {
        ORDER BY l.day DESC, b.sort_order, a.sort_order, t.sort_order`,
     ).bind(from, to).all();
 
+    const auDay = (d) => (d ? d.split('-').reverse().join('-') : '');
     const header = 'Date,Building,Area,Item,Cleaned by,Time\n';
     const csv = results.map((r) =>
-      [r.day, r.building, r.area, r.item, r.user_name ?? '', r.updated_at ?? '']
+      [auDay(r.day), r.building, r.area, r.item, r.user_name ?? '', r.updated_at ?? '']
         .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','),
     ).join('\n');
 
     return new Response(header + csv, {
       headers: {
         'content-type': 'text/csv; charset=utf-8',
-        'content-disposition': `attachment; filename="cleaning-${from}-to-${to}.csv"`,
+        'content-disposition': `attachment; filename="cleaning-${auDay(from)}-to-${auDay(to)}.csv"`,
       },
     });
   },

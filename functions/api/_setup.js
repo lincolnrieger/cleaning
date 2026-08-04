@@ -19,6 +19,7 @@ const TABLES = [
      role       TEXT    NOT NULL CHECK (role IN ('cleaner', 'office', 'admin')),
      pin_hash   TEXT    NOT NULL UNIQUE,
      active     INTEGER NOT NULL DEFAULT 1,
+     availability TEXT  NOT NULL DEFAULT '1111111',
      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
    )`,
 
@@ -35,6 +36,7 @@ const TABLES = [
      building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
      name        TEXT    NOT NULL,
      sort_order  INTEGER NOT NULL DEFAULT 0,
+     active      INTEGER NOT NULL DEFAULT 1,
      UNIQUE (building_id, name)
    )`,
 
@@ -192,9 +194,9 @@ async function ensureColumn(db, table, column, definition) {
  */
 const joinKey = (a, b) => `${a}\u0000${b}`;
 
-async function readSetting(db, key) {
+async function readSetting(db, key, fallback = null) {
   const row = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first();
-  return row?.value ?? null;
+  return row?.value ?? fallback;
 }
 
 /**
@@ -229,8 +231,9 @@ async function syncChecklist(db) {
     for (const a of b.areas) {
       areaStatements.push(
         db.prepare(
-          `INSERT INTO areas (building_id, name, sort_order) VALUES (?, ?, ?)
-           ON CONFLICT(building_id, name) DO UPDATE SET sort_order = excluded.sort_order`,
+          `INSERT INTO areas (building_id, name, sort_order, active) VALUES (?, ?, ?, 1)
+           ON CONFLICT(building_id, name) DO UPDATE SET
+             sort_order = excluded.sort_order, active = 1`,
         ).bind(buildingId.get(b.name), a.name, a.sort),
       );
     }
@@ -296,10 +299,17 @@ async function migrate(env) {
 
   await db.batch(TABLES.map((sql) => db.prepare(sql)));
   await ensureColumn(db, 'buildings', 'grp', "TEXT NOT NULL DEFAULT ''");
+  await ensureColumn(db, 'areas', 'active', 'INTEGER NOT NULL DEFAULT 1');
+  await ensureColumn(db, 'users', 'availability', "TEXT NOT NULL DEFAULT '1111111'");
+
+  // Once an admin edits the checklist inside the app, the app owns it and the
+  // file stops being applied - otherwise the next deploy would quietly undo
+  // their work. "Restore from file" in the admin screen hands control back.
+  const source = await readSetting(db, 'checklist_source', 'file');
 
   // Only rewrite the checklist when its content actually changed.
   const version = await sha256Hex(JSON.stringify(plan()));
-  if (await readSetting(db, 'checklist_version') !== version) {
+  if (source !== 'app' && await readSetting(db, 'checklist_version') !== version) {
     await syncChecklist(db);
     await db.prepare(
       `INSERT INTO settings (key, value) VALUES ('checklist_version', ?)

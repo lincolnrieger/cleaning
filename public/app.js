@@ -40,6 +40,17 @@ function addDays(day, delta) {
 
 const asDate = (day) => new Date(`${day}T00:00:00Z`);
 
+/** Australian day-first format: 2026-08-04 -> 04-08-2026. */
+const auDate = (day) => (day ? day.split('-').reverse().join('-') : '');
+
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** Monday = 0, to match DAY_NAMES and the stored availability string. */
+const weekdayIndex = (day) => (asDate(day).getUTCDay() + 6) % 7;
+
+const worksOn = (person, day) =>
+  (person.availability ?? '1111111')[weekdayIndex(day)] === '1';
+
 function dayLabel(day) {
   if (!day) return '';
   if (day === state.config?.today) return 'Today';
@@ -157,6 +168,7 @@ const NAV = {
     ['', 'My jobs'],
     ['schedule', 'Roster'],
     ['issues', 'Issues'],
+    ['availability', 'My days'],
   ],
   office: [
     ['', 'Overview'],
@@ -169,6 +181,7 @@ const NAV = {
     ['schedule', 'Schedule'],
     ['issues', 'Issues'],
     ['history', 'Activity'],
+    ['buildings', 'Checklists'],
     ['admin', 'People'],
   ],
 };
@@ -243,7 +256,7 @@ function dayNav(day) {
       <button class="ghost" data-day="${esc(addDays(day, -1))}">‹ Prev</button>
     </span>
     <strong class="period-title">${esc(dayLabel(day))}
-      <span class="tiny muted" style="font-weight:400">${esc(day)}</span></strong>
+      <span class="tiny muted" style="font-weight:400">${esc(auDate(day))}</span></strong>
     <span class="pn-side pn-right">
       ${isToday ? '' : '<button class="ghost" data-day="today">Today</button>'}
       <button class="ghost" data-day="${esc(addDays(day, 1))}">Next ›</button>
@@ -879,17 +892,24 @@ async function openScheduleEditor(data, buildingId, day) {
         <span class="small muted" style="display:block;margin-bottom:6px;font-weight:600">
           Who is cleaning it</span>
         <div class="check-list">
-          ${state.cleaners.map((c) => `
-            <label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
-              <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
-              ${avatar(c.name)}
-              <span class="grow">${esc(c.name)}</span>
-              <span class="tiny muted">${esc(c.role)}</span>
-            </label>`).join('')
+          ${[...state.cleaners]
+            .sort((x, y) => (worksOn(y, day) ? 1 : 0) - (worksOn(x, day) ? 1 : 0))
+            .map((c) => {
+              const free = worksOn(c, day);
+              return `<label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
+                <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
+                ${avatar(c.name)}
+                <span class="grow">${esc(c.name)}
+                  ${free ? '' : `<span class="tiny" style="display:block;color:var(--warn)">
+                    doesn't usually work ${esc(DAY_NAMES[weekdayIndex(day)])}</span>`}</span>
+                <span class="tiny muted">${esc(c.role)}</span>
+              </label>`;
+            }).join('')
             || '<p class="small muted">No cleaners yet — add them under People.</p>'}
         </div>
         <p class="tiny muted" style="margin:7px 0 0">
-          More than one person can be put on the same building.</p>
+          More than one person can be put on the same building. People who don't normally
+          work that day are listed last, but you can still pick them.</p>
       </div>
 
       <label class="field"><span>Note for this job (optional)</span>
@@ -1287,7 +1307,7 @@ async function renderIssues(status = 'open') {
           <div style="margin:4px 0">${esc(i.detail)}</div>
           ${i.photo_key ? `<img class="thumb" hidden alt="Reported problem"
              data-photo="${esc(i.photo_key)}">` : ''}
-          <div class="tiny muted">Reported by ${esc(i.reported_by)} on ${esc(i.day)}
+          <div class="tiny muted">Reported by ${esc(i.reported_by)} on ${esc(auDate(i.day))}
             ${i.resolved_at ? ` · resolved by ${esc(i.resolved_by)}` : ''}</div>
           ${canResolve ? `<div style="margin-top:8px">
             <button class="ghost" data-r="${i.id}" data-reopen="${status === 'resolved'}">
@@ -1345,7 +1365,7 @@ async function renderHistory() {
       const res = await request(`/report?from=${day}&to=${day}`);
       const url = URL.createObjectURL(await res.blob());
       Object.assign(document.createElement('a'),
-        { href: url, download: `cleaning-${day}.csv` }).click();
+        { href: url, download: `cleaning-${auDate(day)}.csv` }).click();
       URL.revokeObjectURL(url);
     } catch (e) {
       toast(e.message, true);
@@ -1353,17 +1373,330 @@ async function renderHistory() {
   };
 }
 
+/* ------------------------------------------- view: availability (self) */
+
+async function renderMyAvailability() {
+  chrome({ title: 'My days', section: 'availability' });
+  const { days } = await api('/availability');
+  app.innerHTML = `
+    <div class="card">
+      <h2>Which days do you normally work?</h2>
+      <div class="pad stack">
+        <p class="small muted" style="margin:0">The office uses this when putting
+          the roster together. It's a general pattern, not specific dates — they
+          can still put you on any day if something comes up.</p>
+        <div class="check-list">${dayToggles(days)}</div>
+        <button class="primary wide" id="save">Save my days</button>
+      </div>
+    </div>`;
+  wireDayToggles(app);
+  $('#save').onclick = async () => {
+    try {
+      await api('/availability', { method: 'POST', body: { days: readDayToggles(app) } });
+      toast('Saved');
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+}
+
+function dayToggles(days) {
+  return DAY_NAMES.map((name, i) => `
+    <label class="check-row ${days[i] === '1' ? 'on' : ''}" data-day-toggle="${i}">
+      <input type="checkbox" ${days[i] === '1' ? 'checked' : ''}>
+      <span class="grow">${name}</span>
+    </label>`).join('');
+}
+
+function wireDayToggles(root) {
+  root.querySelectorAll('[data-day-toggle]').forEach((row) => {
+    const box = row.querySelector('input');
+    box.onchange = () => row.classList.toggle('on', box.checked);
+  });
+}
+
+/** "Mon-Fri" style summary of a 7-day availability string. */
+function daysSummary(days = '1111111') {
+  const on = DAY_NAMES.filter((_, i) => days[i] === '1');
+  if (on.length === 7) return 'any day';
+  if (!on.length) return 'no days set';
+  if (on.length > 4) return `${on.join(', ')}`;
+  return on.join(', ');
+}
+
+const readDayToggles = (root) => [...root.querySelectorAll('[data-day-toggle]')]
+  .map((r) => (r.querySelector('input').checked ? '1' : '0')).join('');
+
+/* ------------------------------------------ view: checklist editor (admin) */
+
+async function renderChecklistAdmin() {
+  chrome({ title: 'Checklists', section: 'buildings', wide: true });
+  const data = await api('/admin/checklist');
+  const areasFor = (id) => data.areas.filter((a) => a.building_id === id);
+
+  app.innerHTML = `
+    <div class="card">
+      <div class="banner ${data.source === 'app' ? 'info' : 'warn'}">
+        ${data.source === 'app'
+          ? `<strong>Edited in the app.</strong> These checklists are now managed here, and
+             <code>data/checklist.json</code> no longer overwrites them on deploy.`
+          : `<strong>Managed by the checklist file.</strong> The first edit you make here
+             takes over, and <code>data/checklist.json</code> stops being applied — so a
+             later deploy can't quietly undo your work.`}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Buildings — ${data.buildings.filter((b) => b.active).length} active</h2>
+      ${data.buildings.map((b) => {
+        const areas = areasFor(b.id).filter((a) => a.active);
+        const tasks = areas.reduce((n, a) => n + a.tasks, 0);
+        return `<div class="list-item" style="${b.active ? '' : 'opacity:.5'}">
+          <div class="spread wrap">
+            <strong class="grow">${esc(b.name)}
+              ${b.grp && b.grp !== b.name ? `<span class="tiny muted">· ${esc(b.grp)}</span>` : ''}
+              ${b.active ? '' : '<span class="pill idle">hidden</span>'}</strong>
+            <button class="ghost" data-editb="${b.id}">Edit</button>
+          </div>
+          <div class="small muted" style="margin:4px 0 8px">
+            ${areas.length} area${areas.length === 1 ? '' : 's'} · ${tasks} tasks</div>
+          <div class="tabs" style="margin:0">
+            ${areas.map((a) => `<button class="ghost" data-area="${a.id}">
+              ${esc(a.name)} <span class="muted">${a.tasks}</span></button>`).join('')}
+            <button class="ghost" data-addarea="${b.id}">+ Area</button>
+          </div>
+        </div>`;
+      }).join('')}
+      <div class="pad"><button class="primary wide" id="addb">Add a building</button></div>
+    </div>
+
+    <div class="card danger">
+      <h2>Restore from the checklist file</h2>
+      <div class="pad">
+        <p class="small muted" style="margin:0 0 10px">Throws away edits made here and
+          rebuilds every checklist from <code>data/checklist.json</code>. Cleaning
+          history is not affected.</p>
+        <button class="wide danger" id="restore">Restore from file</button>
+      </div>
+    </div>`;
+
+  app.querySelectorAll('[data-area]').forEach((b) => {
+    b.onclick = () => { location.hash = `#/buildings/${b.dataset.area}`; };
+  });
+  app.querySelectorAll('[data-editb]').forEach((b) => {
+    b.onclick = () => editBuilding(data.buildings.find((x) => x.id === Number(b.dataset.editb)));
+  });
+  app.querySelectorAll('[data-addarea]').forEach((b) => {
+    b.onclick = () => editArea({ building_id: Number(b.dataset.addarea) });
+  });
+  $('#addb').onclick = () => editBuilding(null);
+
+  $('#restore').onclick = async () => {
+    const typed = await askText({
+      title: 'Restore from the checklist file?',
+      body: 'Every building, area and item goes back to what <code>data/checklist.json</code> '
+        + 'says. Anything you added here that is not in the file will be hidden. '
+        + 'Cleaning records are kept.',
+      label: 'Type "restore" to confirm',
+      confirmText: 'Restore',
+    });
+    if (!typed) return;
+    try {
+      await api('/admin/checklist/restore', { method: 'POST', body: { confirm: typed } });
+      toast('Restored from file');
+      renderChecklistAdmin();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+}
+
+function editBuilding(b) {
+  const sheet = openSheet(`
+    <div class="sheet-head"><strong>${b ? 'Edit building' : 'Add a building'}</strong></div>
+    <div class="pad stack">
+      <label class="field"><span>Name</span>
+        <input id="bn" value="${esc(b?.name ?? '')}" placeholder="Bell Tent - St George 5"></label>
+      <label class="field"><span>Group (optional)</span>
+        <input id="bg" value="${esc(b?.grp ?? '')}" placeholder="Bell Tents"></label>
+      ${b ? `<label class="check-row ${b.active ? 'on' : ''}" data-act>
+          <input type="checkbox" ${b.active ? 'checked' : ''}>
+          <span class="grow">Show on checklists and the schedule
+            <span class="tiny muted" style="display:block">Turning this off hides it
+              without touching its history.</span></span>
+        </label>` : ''}
+      <p class="err" id="err"></p>
+      <button class="primary wide" id="save">${b ? 'Save' : 'Add building'}</button>
+      <button class="wide" id="cancel">Cancel</button>
+    </div>`);
+
+  const act = sheet.querySelector('[data-act] input');
+  if (act) act.onchange = () => act.closest('.check-row').classList.toggle('on', act.checked);
+  sheet.querySelector('#cancel').onclick = closeSheet;
+  sheet.querySelector('#save').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      await api('/admin/building', {
+        method: 'POST',
+        body: {
+          id: b?.id,
+          name: sheet.querySelector('#bn').value,
+          group: sheet.querySelector('#bg').value,
+          active: act ? act.checked : true,
+        },
+      });
+      closeSheet();
+      toast(b ? 'Building saved' : 'Building added');
+      renderChecklistAdmin();
+    } catch (e) {
+      sheet.querySelector('#err').textContent = e.message;
+      ev.currentTarget.disabled = false;
+    }
+  };
+}
+
+function editArea(a, onDone) {
+  const sheet = openSheet(`
+    <div class="sheet-head"><strong>${a?.id ? 'Edit area' : 'Add an area'}</strong></div>
+    <div class="pad stack">
+      <label class="field"><span>Area name</span>
+        <input id="an" value="${esc(a?.name ?? '')}" placeholder="Bathrooms"></label>
+      ${a?.id ? `<label class="check-row ${a.active ? 'on' : ''}" data-act>
+          <input type="checkbox" ${a.active ? 'checked' : ''}>
+          <span class="grow">Show on the checklist</span>
+        </label>` : ''}
+      <p class="err" id="err"></p>
+      <button class="primary wide" id="save">${a?.id ? 'Save' : 'Add area'}</button>
+      <button class="wide" id="cancel">Cancel</button>
+    </div>`);
+
+  const act = sheet.querySelector('[data-act] input');
+  if (act) act.onchange = () => act.closest('.check-row').classList.toggle('on', act.checked);
+  sheet.querySelector('#cancel').onclick = closeSheet;
+  sheet.querySelector('#save').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      await api('/admin/area', {
+        method: 'POST',
+        body: {
+          id: a?.id,
+          buildingId: a?.building_id,
+          name: sheet.querySelector('#an').value,
+          active: act ? act.checked : true,
+        },
+      });
+      closeSheet();
+      toast('Saved');
+      if (onDone) onDone(); else renderChecklistAdmin();
+    } catch (e) {
+      sheet.querySelector('#err').textContent = e.message;
+      ev.currentTarget.disabled = false;
+    }
+  };
+}
+
+async function renderAreaEditor(areaId) {
+  const data = await api(`/admin/area?id=${areaId}`);
+  chrome({ title: data.area.name, back: true, section: 'buildings' });
+
+  app.innerHTML = `
+    <div class="card">
+      <div class="pad spread wrap">
+        <div>
+          <strong>${esc(data.area.name)}</strong>
+          <div class="small muted">${esc(data.area.building)}</div>
+        </div>
+        <button class="ghost" id="editarea">Rename or hide</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Items — ${data.tasks.filter((t) => t.active).length} on the checklist</h2>
+      ${data.tasks.map((t) => `<div class="list-item" style="${t.active ? '' : 'opacity:.5'}">
+        <div class="spread wrap">
+          <span class="grow">
+            <strong>${esc(t.item)}</strong>
+            ${t.active ? '' : '<span class="pill idle">hidden</span>'}
+            <span class="small muted" style="display:block">${esc(t.description)}</span>
+          </span>
+          <button class="ghost" data-edit="${t.id}">Edit</button>
+        </div>
+      </div>`).join('') || '<div class="empty">No items yet.</div>'}
+      <div class="pad"><button class="primary wide" id="addtask">Add an item</button></div>
+    </div>
+
+    <p class="tiny muted center">Hiding an item takes it off future checklists and keeps
+      every record of it having been cleaned.</p>`;
+
+  $('#editarea').onclick = () => editArea(
+    { ...data.area, building_id: data.area.building_id },
+    () => renderAreaEditor(areaId),
+  );
+  $('#addtask').onclick = () => editTask({ area_id: areaId }, () => renderAreaEditor(areaId));
+  app.querySelectorAll('[data-edit]').forEach((b) => {
+    b.onclick = () => editTask(
+      data.tasks.find((t) => t.id === Number(b.dataset.edit)),
+      () => renderAreaEditor(areaId),
+    );
+  });
+}
+
+function editTask(t, onDone) {
+  const sheet = openSheet(`
+    <div class="sheet-head"><strong>${t?.id ? 'Edit item' : 'Add an item'}</strong></div>
+    <div class="pad stack">
+      <label class="field"><span>Item</span>
+        <input id="ti" value="${esc(t?.item ?? '')}" placeholder="Toilet"></label>
+      <label class="field"><span>What to do</span>
+        <input id="td" value="${esc(t?.description ?? '')}"
+          placeholder="Clean including behind the cistern"></label>
+      ${t?.id ? `<label class="check-row ${t.active ? 'on' : ''}" data-act>
+          <input type="checkbox" ${t.active ? 'checked' : ''}>
+          <span class="grow">Show on the checklist</span>
+        </label>` : ''}
+      <p class="err" id="err"></p>
+      <button class="primary wide" id="save">${t?.id ? 'Save' : 'Add item'}</button>
+      <button class="wide" id="cancel">Cancel</button>
+    </div>`);
+
+  const act = sheet.querySelector('[data-act] input');
+  if (act) act.onchange = () => act.closest('.check-row').classList.toggle('on', act.checked);
+  sheet.querySelector('#cancel').onclick = closeSheet;
+  sheet.querySelector('#save').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      await api('/admin/task', {
+        method: 'POST',
+        body: {
+          id: t?.id,
+          areaId: t?.area_id,
+          item: sheet.querySelector('#ti').value,
+          description: sheet.querySelector('#td').value,
+          active: act ? act.checked : true,
+        },
+      });
+      closeSheet();
+      toast('Saved');
+      onDone();
+    } catch (e) {
+      sheet.querySelector('#err').textContent = e.message;
+      ev.currentTarget.disabled = false;
+    }
+  };
+}
+
 /* ---------------------------------------------------------- view: admin */
+
 
 async function renderAdmin() {
   chrome({ title: 'People', section: 'admin' });
   const { users } = await api('/users');
 
   app.innerHTML = `
-    <div class="cols">
+    <div>
       <div class="card">
         <h2>Add someone</h2>
-        <div class="pad stack">
+        <div class="pad stack narrow">
           <label class="field"><span>Name</span><input id="n"></label>
           <label class="field"><span>Role</span>
             <select id="r">
@@ -1387,8 +1720,10 @@ async function renderAdmin() {
               data-active="${u.active}">
             <td><span class="row" style="gap:9px">${avatar(u.name)}
               <span>${esc(u.name)}</span></span></td>
-            <td class="muted">${esc(u.role)}${u.active ? '' : ' · disabled'}</td>
+            <td class="muted">${esc(u.role)}${u.active ? '' : ' · disabled'}
+              <span class="tiny" style="display:block">${daysSummary(u.availability)}</span></td>
             <td class="actions">
+              <button class="ghost" data-days>Days</button>
               <button class="ghost" data-pin>New PIN</button>
               <button class="ghost" data-tog>${u.active ? 'Disable' : 'Enable'}</button>
               <button class="ghost danger" data-del
@@ -1503,6 +1838,39 @@ async function renderAdmin() {
 
   const rowOf = (btn) => btn.closest('tr').dataset;
 
+  app.querySelectorAll('[data-days]').forEach((b) => {
+    b.onclick = () => {
+      const row = rowOf(b);
+      const person = users.find((u) => u.id === Number(row.id));
+      const sheet = openSheet(`
+        <div class="sheet-head"><strong>${esc(person.name)}</strong></div>
+        <div class="pad stack">
+          <p class="dialog-body">Which days do they normally work? Used when building the
+            roster — you can still assign them to any day.</p>
+          <div class="check-list">${dayToggles(person.availability ?? '1111111')}</div>
+          <p class="err" id="err"></p>
+          <button class="primary wide" id="save">Save</button>
+          <button class="wide" id="cancel">Cancel</button>
+        </div>`);
+      wireDayToggles(sheet);
+      sheet.querySelector('#cancel').onclick = closeSheet;
+      sheet.querySelector('#save').onclick = async () => {
+        try {
+          await api('/availability', {
+            method: 'POST',
+            body: { userId: person.id, days: readDayToggles(sheet) },
+          });
+          closeSheet();
+          state.cleaners = null;
+          toast('Days saved');
+          renderAdmin();
+        } catch (e) {
+          sheet.querySelector('#err').textContent = e.message;
+        }
+      };
+    };
+  });
+
   app.querySelectorAll('[data-pin]').forEach((b) => {
     b.onclick = async () => {
       const row = rowOf(b);
@@ -1603,6 +1971,10 @@ async function render() {
     if (head === 'issues') return await renderIssues();
     if (head === 'history') return await renderHistory();
     if (head === 'admin') return await renderAdmin();
+    if (head === 'buildings') return arg
+      ? await renderAreaEditor(Number(arg))
+      : await renderChecklistAdmin();
+    if (head === 'availability') return await renderMyAvailability();
     return state.user.role === 'cleaner'
       ? await renderCleanerHome()
       : await renderOverview();

@@ -766,6 +766,10 @@ table.grid th { color: var(--muted); font-weight: 600; font-size: 12px; text-tra
 table.grid tr:first-child th { border-top: none; }
 table.grid td:first-child { white-space: nowrap; }
 
+/* The add-someone form is short; side by side with a wide table it just
+   stretched its inputs, so it sits above at a readable width instead. */
+.card .pad.narrow { max-width: 460px; }
+
 /* Row actions stay on one line instead of stacking into a tall column. */
 table.grid td.actions { text-align: right; white-space: nowrap; width: 1%; padding-left: 0; }
 table.grid td.actions button { margin-left: 6px; }

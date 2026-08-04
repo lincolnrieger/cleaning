@@ -21,7 +21,10 @@ browser, no software to install and no commands to run.
 | Open an individual building's detail | ✅ | read-only | ✅ |
 | Mark a maintenance issue resolved | — | ✅ | ✅ |
 | Activity log + CSV export | — | ✅ | ✅ |
+| Set your own working days | ✅ | ✅ | ✅ |
+| Set anyone's working days | — | ✅ | ✅ |
 | Add people, set PINs, delete accounts | — | — | ✅ |
+| Edit buildings, areas and checklist items | — | — | ✅ |
 
 Everyone signs in with a 4–8 digit PIN. PINs are unique — the PIN *is* the
 identity, which is what makes attribution work without usernames. The header
@@ -57,6 +60,35 @@ they're assigned to, but **what they already cleaned stays in the records**
 under their name. You can't delete yourself, and you can't delete the last
 admin. Disabling remains the softer option: it keeps the account and just
 blocks sign-in.
+
+### Availability
+
+Each person has a set of days they normally work — **People → Days** for the
+office and admin, or **My days** in a cleaner's own nav. It's a general
+pattern, not specific dates.
+
+When you assign someone in the schedule, anyone who doesn't normally work that
+weekday is listed last with a note saying so — but you can still pick them.
+It's guidance for building the roster, never a block.
+
+### Editing checklists in the app
+
+**Checklists** (admin only) lists every building with its areas and item
+counts. From there you can add a building, add or rename an area, and add,
+reword or hide individual items.
+
+Nothing is ever deleted — hiding an item takes it off future checklists and
+keeps every record of it having been cleaned. Bringing it back restores that
+history with it.
+
+**The first edit you make here takes over.** After that `data/checklist.json`
+stops being applied on deploy, so a later push can't quietly undo your work.
+The banner at the top of the page tells you which is in charge. **Restore from
+file** hands it back — anything you added that isn't in the file becomes
+hidden, and cleaning history is untouched either way.
+
+So: use the file for bulk changes, use the screen for day-to-day tweaks, and
+don't expect both at once.
 
 ### A note on "only the cleaners can see"
 
@@ -103,6 +135,9 @@ their own attribution on the tasks they tick.
 recorded that day it offers to wipe those ticks and the sign-off too. Taking
 something off the plan and erasing what somebody actually did are different
 intentions, so it never assumes.
+
+Dates are shown Australian day-first throughout — `04-08-2026`, including in
+the CSV export.
 
 ## Screens and devices
 
