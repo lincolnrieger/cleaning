@@ -236,11 +236,15 @@ const viewDay = () => state.day || state.config.today;
 function dayNav(day) {
   const isToday = day === state.config.today;
   return `<div class="periodnav">
+    <span class="pn-side pn-left">
+      <button class="ghost" data-day="${esc(addDays(day, -1))}">‹ Prev</button>
+    </span>
     <strong class="period-title">${esc(dayLabel(day))}
       <span class="tiny muted" style="font-weight:400">${esc(day)}</span></strong>
-    <button class="ghost" data-day="${esc(addDays(day, -1))}">‹ Prev</button>
-    ${isToday ? '' : '<button class="ghost" data-day="today">Today</button>'}
-    <button class="ghost" data-day="${esc(addDays(day, 1))}">Next ›</button>
+    <span class="pn-side pn-right">
+      ${isToday ? '' : '<button class="ghost" data-day="today">Today</button>'}
+      <button class="ghost" data-day="${esc(addDays(day, 1))}">Next ›</button>
+    </span>
   </div>`;
 }
 
@@ -758,15 +762,16 @@ async function renderSchedule() {
   app.innerHTML = `
     <div class="card"><div class="pad">
       <div class="periodnav">
+        <span class="pn-side pn-left">
+          <button class="ghost" data-week="${esc(addDays(from, -7))}">‹ Prev</button>
+        </span>
         <strong class="period-title">
           ${esc(dayOfMonth(from))} – ${esc(dayOfMonth(addDays(from, 6)))}</strong>
-        <button class="ghost" data-week="${esc(addDays(from, -7))}">‹ Prev</button>
-        <button class="ghost" data-week="${esc(startOfWeek(state.config.today))}">This week</button>
-        <button class="ghost" data-week="${esc(addDays(from, 7))}">Next ›</button>
+        <span class="pn-side pn-right">
+          <button class="ghost" data-week="${esc(startOfWeek(state.config.today))}">This week</button>
+          <button class="ghost" data-week="${esc(addDays(from, 7))}">Next ›</button>
+        </span>
       </div>
-      ${canEdit ? `<div class="row" style="justify-content:center;margin-top:10px">
-        <button class="ghost" id="copyweek">Copy this week to next week</button>
-      </div>` : ''}
     </div></div>
 
     <div class="card">
@@ -810,31 +815,6 @@ async function renderSchedule() {
   app.querySelectorAll('[data-week]').forEach((b) => {
     b.onclick = () => { state.weekFrom = b.dataset.week; renderSchedule(); };
   });
-
-  const copyBtn = $('#copyweek');
-  if (copyBtn) {
-    copyBtn.onclick = async () => {
-      const target = addDays(from, 7);
-      const go = await ask({
-        title: 'Copy this week forward?',
-        body: `Every building scheduled between <strong>${esc(dayOfMonth(from))}</strong> and
-               <strong>${esc(dayOfMonth(addDays(from, 6)))}</strong> — with the same people and
-               priorities — will be copied onto the week starting
-               <strong>${esc(dayOfMonth(target))}</strong>.
-               Anything already scheduled on those days is overwritten.`,
-        confirmText: 'Copy week',
-      });
-      if (!go) return;
-      try {
-        const res = await api('/schedule/copy', { method: 'POST', body: { from, to: target } });
-        state.weekFrom = target;
-        toast(`Copied ${res.copied} job${res.copied === 1 ? '' : 's'}`);
-        renderSchedule();
-      } catch (e) {
-        toast(e.message, true);
-      }
-    };
-  }
 
   if (canEdit) {
     app.querySelectorAll('[data-cell]').forEach((b) => {

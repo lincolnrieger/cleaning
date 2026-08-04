@@ -273,15 +273,28 @@ main.wide { max-width: 1280px; }
 .cols { display: grid; gap: 14px; }
 @media (min-width: 900px) { .cols { grid-template-columns: 1fr 1fr; align-items: start; } }
 
-/* Prev / title / Next strip. Title takes its own line on a phone so the
-   buttons never squash into two-word wraps. */
-.periodnav { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
-.periodnav .period-title { flex: 1 1 100%; text-align: center; order: -1; font-size: 15px; }
-.periodnav button { flex: 1 1 auto; white-space: nowrap; }
+/* Prev | date | Next. The two side columns are equal-width tracks, which is
+   what actually centres the date over the card rather than over the leftover
+   space beside the buttons. */
+.periodnav {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
 
-@media (min-width: 640px) {
-  .periodnav .period-title { flex: 1; order: 0; }
-  .periodnav button { flex: 0 0 auto; }
+.periodnav .pn-side { display: flex; gap: 6px; }
+.periodnav .pn-left { justify-self: start; }
+.periodnav .pn-right { justify-self: end; }
+.periodnav .period-title { text-align: center; font-size: 15px; white-space: nowrap; }
+.periodnav button { white-space: nowrap; }
+
+/* On a phone the date takes its own row so the buttons keep their labels. */
+@media (max-width: 620px) {
+  .periodnav { grid-template-columns: 1fr 1fr; }
+  .periodnav .period-title { grid-column: 1 / -1; order: -1; }
+  .periodnav .pn-side { flex: 1; }
+  .periodnav .pn-side button { flex: 1 1 auto; }
 }
 
 /* --------------------------------------------------------------- controls */

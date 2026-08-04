@@ -96,10 +96,6 @@ More than one cleaner can be assigned to the same building — that's the case
 the whole app is built around, so they're listed together and each still gets
 their own attribution on the tasks they tick.
 
-**Copy this week to next week** duplicates a whole week's plan — same
-buildings, same people, same priorities and notes — onto the following week,
-so a steady roster takes one tap rather than twenty.
-
 **Removing a job from the schedule** asks first, and if any work was already
 recorded that day it offers to wipe those ticks and the sign-off too. Taking
 something off the plan and erasing what somebody actually did are different

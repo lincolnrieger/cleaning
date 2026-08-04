@@ -540,65 +540,6 @@ const routes = {
     return json({ ok: true });
   },
 
-  /** Copies a whole week's plan forward or back - the roster rarely changes. */
-  'POST /schedule/copy': async (req, env, { user }) => {
-    require(user, 'office', 'admin');
-    const { from, to } = await req.json();
-    if (!isDay(from) || !isDay(to)) throw new HttpError(400, 'Bad dates.');
-    if (from === to) throw new HttpError(400, 'Pick a different week.');
-
-    const fromEnd = addDays(from, 6);
-    const { results: rows } = await env.DB.prepare(
-      'SELECT id, building_id, day, priority, note FROM schedule WHERE day BETWEEN ? AND ?',
-    ).bind(from, fromEnd).all();
-    if (!rows.length) throw new HttpError(400, 'That week has nothing scheduled to copy.');
-
-    const { results: links } = await env.DB.prepare(
-      `SELECT sa.schedule_id, sa.user_id, sa.user_name
-       FROM schedule_assignees sa JOIN schedule s ON s.id = sa.schedule_id
-       WHERE s.day BETWEEN ? AND ?`,
-    ).bind(from, fromEnd).all();
-
-    const byId = new Map();
-    for (const l of links) {
-      if (!byId.has(l.schedule_id)) byId.set(l.schedule_id, []);
-      byId.get(l.schedule_id).push(l);
-    }
-
-    const shift = Math.round(
-      (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000,
-    );
-
-    let copied = 0;
-    for (const r of rows) {
-      const targetDay = addDays(r.day, shift);
-      await env.DB.prepare(
-        `INSERT INTO schedule (building_id, day, priority, note, created_by, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(building_id, day) DO UPDATE SET
-           priority = excluded.priority, note = excluded.note`,
-      ).bind(r.building_id, targetDay, r.priority, r.note, user.name, now()).run();
-
-      const target = await env.DB.prepare(
-        'SELECT id FROM schedule WHERE building_id = ? AND day = ?',
-      ).bind(r.building_id, targetDay).first();
-
-      await env.DB.prepare('DELETE FROM schedule_assignees WHERE schedule_id = ?')
-        .bind(target.id).run();
-
-      const people = byId.get(r.id) ?? [];
-      if (people.length) {
-        await env.DB.batch(people.map((pn) => env.DB.prepare(
-          `INSERT OR IGNORE INTO schedule_assignees (schedule_id, user_id, user_name)
-           VALUES (?, ?, ?)`,
-        ).bind(target.id, pn.user_id, pn.user_name)));
-      }
-      copied += 1;
-    }
-
-    return json({ ok: true, copied });
-  },
-
   'GET /activity': async (req, env, { user, url }) => {
     // Office-side reporting: cleaners see attribution on the checklist itself.
     require(user, 'office', 'admin');
