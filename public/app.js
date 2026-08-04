@@ -18,6 +18,7 @@ const state = {
   poll: null,
   building: null,  // data for the checklist currently on screen
   cleaners: null,  // cached list for the assignment picker
+  collapsedGroups: new Set(), // building groups folded shut on Schedule/Checklists
 };
 
 // Chrome/Edge/Android hold this event back until asked for it. Capturing it
@@ -711,6 +712,46 @@ function wireTiles() {
   });
 }
 
+/* -------------------------------------------------- building group folding */
+
+/**
+ * Groups buildings by their `grp` field (or their own name when ungrouped),
+ * preserving the order groups first appear. Used to fold buildings like
+ * "Bell Tents" or "Chalets" under one shared, collapsible heading.
+ */
+function groupBuildings(buildings) {
+  const groups = [];
+  for (const b of buildings) {
+    const key = b.grp || b.name;
+    let g = groups.find((x) => x.key === key);
+    if (!g) { g = { key, label: b.grp || '', buildings: [] }; groups.push(g); }
+    g.buildings.push(b);
+  }
+  return groups;
+}
+
+/**
+ * Wires a group-heading element as a fold/unfold toggle: flips its entry in
+ * `state.collapsedGroups`, updates the chevron and aria-expanded, then hands
+ * control to `onToggle` to actually show or hide that group's rows - the
+ * two callers (a table and a plain list) do that differently.
+ */
+function wireGroupToggle(el, key, onToggle) {
+  const toggle = () => {
+    const collapsed = state.collapsedGroups.has(key);
+    if (collapsed) state.collapsedGroups.delete(key); else state.collapsedGroups.add(key);
+    const nowCollapsed = !collapsed;
+    el.setAttribute('aria-expanded', String(!nowCollapsed));
+    const chev = el.querySelector('.chev');
+    if (chev) chev.textContent = nowCollapsed ? '▸' : '▾';
+    onToggle(nowCollapsed);
+  };
+  el.onclick = toggle;
+  el.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  };
+}
+
 /* ------------------------------------------------------ view: cleaner home */
 
 async function renderCleanerHome() {
@@ -857,15 +898,26 @@ async function renderSchedule() {
             }).join('')}
           </tr></thead>
           <tbody>
-            ${data.buildings.map((b) => {
-              const weekCount = data.days
-                .filter((d) => data.cells[`${b.id}:${d}`]?.priority != null).length;
-              return `<tr>
-                <th class="rowhead">${esc(b.name)}
-                  <small>${b.grp && b.grp !== b.name ? `${esc(b.grp)} · ` : ''}${weekCount
-                    ? `${weekCount} this week` : 'not scheduled'}</small></th>
-                ${data.days.map((d) => cell(b, d)).join('')}
-              </tr>`;
+            ${groupBuildings(data.buildings).map((g) => {
+              const folded = g.label && state.collapsedGroups.has(g.key);
+              const head = g.label ? `<tr class="grouphead-row">
+                <th colspan="${1 + data.days.length}">
+                  <div class="grouphead spread" data-grouptoggle="${esc(g.key)}"
+                    role="button" tabindex="0" aria-expanded="${!folded}">
+                    <span class="grow">${esc(g.label)}
+                      <span class="muted" style="font-weight:400">· ${g.buildings.length}</span></span>
+                    <span class="chev">${folded ? '▸' : '▾'}</span>
+                  </div>
+                </th></tr>` : '';
+              return head + g.buildings.map((b) => {
+                const weekCount = data.days
+                  .filter((d) => data.cells[`${b.id}:${d}`]?.priority != null).length;
+                return `<tr data-group="${esc(g.key)}" ${folded ? 'hidden' : ''}>
+                  <th class="rowhead">${esc(b.name)}
+                    <small>${weekCount ? `${weekCount} this week` : 'not scheduled'}</small></th>
+                  ${data.days.map((d) => cell(b, d)).join('')}
+                </tr>`;
+              }).join('');
             }).join('')}
           </tbody>
         </table>
@@ -885,6 +937,15 @@ async function renderSchedule() {
 
   app.querySelectorAll('[data-week]').forEach((b) => {
     b.onclick = () => { state.weekFrom = b.dataset.week; renderSchedule(); };
+  });
+
+  app.querySelectorAll('[data-grouptoggle]').forEach((head) => {
+    const key = head.dataset.grouptoggle;
+    wireGroupToggle(head, key, (collapsed) => {
+      app.querySelectorAll(`tr[data-group]`).forEach((row) => {
+        if (row.dataset.group === key) row.hidden = collapsed;
+      });
+    });
   });
 
   if (canEdit) {
@@ -941,9 +1002,8 @@ async function openScheduleEditor(data, buildingId, day) {
           ${[...state.cleaners]
             .sort((x, y) => (worksOn(y, day) ? 1 : 0) - (worksOn(x, day) ? 1 : 0))
             .map((c) => {
-              const slot = Array.isArray(c.availability) ? c.availability[weekdayIndex(day)] : null;
-              const note = slot
-                ? `<span class="tiny muted" style="display:block">available ${slot.from}–${slot.to}</span>`
+              const note = worksOn(c, day)
+                ? ''
                 : `<span class="tiny" style="display:block;color:var(--warn)">
                     doesn't usually work ${esc(DAY_NAMES[weekdayIndex(day)])}</span>`;
               return `<label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
@@ -1423,71 +1483,36 @@ async function renderHistory() {
 
 /* ------------------------------------ availability helpers (admin editor) */
 
-const DEFAULT_SLOT = { from: '08:00', to: '16:00' };
-
-/** `days`: 7 entries, each null (not working) or { from, to }. */
+/** `days`: 7 booleans (Mon..Sun) - just which days someone works, no times. */
 function dayToggles(days) {
   return DAY_NAMES.map((name, i) => {
-    const slot = days[i];
-    const on = Boolean(slot);
-    const from = slot?.from ?? DEFAULT_SLOT.from;
-    const to = slot?.to ?? DEFAULT_SLOT.to;
-    return `<div class="check-row daytoggle ${on ? 'on' : ''}" data-day-toggle="${i}">
-      <label class="row">
-        <input type="checkbox" ${on ? 'checked' : ''}>
-        <span class="grow">${name}</span>
-      </label>
-      <span class="daytimes" ${on ? '' : 'hidden'}>
-        <input type="time" class="dayfrom" value="${from}" step="900">
-        <span class="muted">–</span>
-        <input type="time" class="dayto" value="${to}" step="900">
-      </span>
-    </div>`;
+    const on = Boolean(days[i]);
+    return `<label class="check-row ${on ? 'on' : ''}" data-day-toggle="${i}">
+      <input type="checkbox" ${on ? 'checked' : ''}>
+      <span class="grow">${name}</span>
+    </label>`;
   }).join('');
 }
 
 function wireDayToggles(root) {
   root.querySelectorAll('[data-day-toggle]').forEach((row) => {
     const box = row.querySelector('input[type="checkbox"]');
-    const times = row.querySelector('.daytimes');
-    box.onchange = () => {
-      row.classList.toggle('on', box.checked);
-      times.hidden = !box.checked;
-    };
+    box.onchange = () => row.classList.toggle('on', box.checked);
   });
 }
 
-/** "Mon-Fri, 8am-4pm" style summary. Groups identical time ranges together. */
+/** "Mon, Tue, Wed" style summary of which days someone works. */
 function daysSummary(days) {
-  if (!Array.isArray(days)) return 'any time';
-  const on = days.map((s, i) => (s ? { day: DAY_NAMES[i], ...s } : null)).filter(Boolean);
+  if (!Array.isArray(days)) return 'every day';
+  const on = DAY_NAMES.filter((_, i) => days[i]);
   if (!on.length) return 'no days set';
-
-  const hhmm = (t) => t.replace(/^0/, '').replace(':00', '') + (t < '12:00' ? 'am' : 'pm');
-  const groups = new Map();
-  for (const s of on) {
-    const key = `${s.from}-${s.to}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(s.day);
-  }
-  return [...groups.entries()]
-    .map(([key, ds]) => {
-      const [from, to] = key.split('-');
-      return `${ds.join(', ')} ${hhmm(from)}–${hhmm(to)}`;
-    })
-    .join(' · ');
+  if (on.length === 7) return 'every day';
+  return on.join(', ');
 }
 
-/** Reads the sheet back into the 7-slot shape the API expects. */
+/** Reads the sheet back into the 7-boolean shape the API expects. */
 const readDayToggles = (root) => [...root.querySelectorAll('[data-day-toggle]')]
-  .map((row) => {
-    const box = row.querySelector('input[type="checkbox"]');
-    if (!box.checked) return null;
-    return {
-      from: row.querySelector('.dayfrom').value || DEFAULT_SLOT.from,
-      to: row.querySelector('.dayto').value || DEFAULT_SLOT.to,
-    };
-  });
+  .map((row) => row.querySelector('input[type="checkbox"]').checked);
 
 /* ------------------------------------------ view: checklist editor (admin) */
 
@@ -1498,21 +1523,17 @@ async function renderChecklistAdmin() {
 
   // Grouped by building.grp, in the order groups first appear - matches the
   // schedule grid's ordering so the two screens read the same way. With 20+
-  // buildings a flat list was a wall of text; headings make it scannable.
-  const groups = [];
-  for (const b of data.buildings) {
-    const key = b.grp || b.name;
-    let g = groups.find((x) => x.key === key);
-    if (!g) { g = { key, label: b.grp || '', buildings: [] }; groups.push(g); }
-    g.buildings.push(b);
-  }
+  // buildings a flat list was a wall of text; folding groups shut makes it
+  // scannable.
+  const groups = groupBuildings(data.buildings);
 
-  const buildingRow = (b) => {
+  const buildingRow = (b, groupKey, folded) => {
     const areas = areasFor(b.id).filter((a) => a.active);
     const tasks = areas.reduce((n, a) => n + a.tasks, 0);
     const search = [b.name, b.grp, ...areas.flatMap((a) => [a.name, ...(a.items ?? [])])]
       .join(' ').toLowerCase();
-    return `<div class="list-item" data-search="${esc(search)}" style="${b.active ? '' : 'opacity:.5'}">
+    return `<div class="list-item" data-search="${esc(search)}" data-group="${esc(groupKey)}"
+        ${folded ? 'hidden' : ''} style="${b.active ? '' : 'opacity:.5'}">
       <div class="spread wrap">
         <strong class="grow">${esc(b.name)}
           ${b.active ? '' : '<span class="pill idle">hidden</span>'}</strong>
@@ -1527,6 +1548,31 @@ async function renderChecklistAdmin() {
       </div>
     </div>`;
   };
+
+  /** Re-applies search-match and fold state together, so folding a group
+      that's mid-search doesn't fight with the search filter. */
+  function applyChecklistFilter(q) {
+    app.querySelectorAll('[data-search]').forEach((el) => {
+      const matches = !q || el.dataset.search.includes(q);
+      const folded = !q && state.collapsedGroups.has(el.dataset.group);
+      el.hidden = !matches || folded;
+    });
+    // Hide any group heading whose buildings are now all filtered out. Stops
+    // at the first element that isn't a building row - the last group's
+    // heading sits right before the "Add a building" button, which must
+    // never count as a visible row or that group's heading never hides.
+    // Folding (rather than filtering) never hides the heading itself.
+    app.querySelectorAll('.grouphead').forEach((head) => {
+      if (!q) { head.hidden = false; return; }
+      let sib = head.nextElementSibling;
+      let anyVisible = false;
+      while (sib && sib.matches('[data-search]')) {
+        if (!sib.hidden) anyVisible = true;
+        sib = sib.nextElementSibling;
+      }
+      head.hidden = !anyVisible;
+    });
+  }
 
   app.innerHTML = `
     <div class="card">
@@ -1546,10 +1592,16 @@ async function renderChecklistAdmin() {
       </div>
       <h2 style="border:none;padding-bottom:0">
         Buildings — ${data.buildings.filter((b) => b.active).length} active</h2>
-      ${groups.map((g) => `
-        ${g.label ? `<div class="grouphead">${esc(g.label)}</div>` : ''}
-        ${g.buildings.map(buildingRow).join('')}
-      `).join('')}
+      ${groups.map((g) => {
+        const folded = g.label && state.collapsedGroups.has(g.key);
+        const head = g.label ? `<button class="grouphead spread" data-grouptoggle="${esc(g.key)}"
+            aria-expanded="${!folded}">
+          <span class="grow">${esc(g.label)}
+            <span class="muted" style="font-weight:400">· ${g.buildings.length}</span></span>
+          <span class="chev">${folded ? '▸' : '▾'}</span>
+        </button>` : '';
+        return head + g.buildings.map((b) => buildingRow(b, g.key, folded)).join('');
+      }).join('')}
       <div class="pad"><button class="primary wide" id="addb">Add a building</button></div>
     </div>
 
@@ -1574,25 +1626,13 @@ async function renderChecklistAdmin() {
   });
   $('#addb').onclick = () => editBuilding(null);
 
-  $('#search').oninput = (ev) => {
-    const q = ev.currentTarget.value.trim().toLowerCase();
-    app.querySelectorAll('[data-search]').forEach((el) => {
-      el.hidden = !(!q || el.dataset.search.includes(q));
+  $('#search').oninput = (ev) => applyChecklistFilter(ev.currentTarget.value.trim().toLowerCase());
+
+  app.querySelectorAll('[data-grouptoggle]').forEach((head) => {
+    wireGroupToggle(head, head.dataset.grouptoggle, () => {
+      applyChecklistFilter($('#search').value.trim().toLowerCase());
     });
-    // Hide any group heading whose buildings are now all filtered out. Stops
-    // at the first element that isn't a building row - the last group's
-    // heading sits right before the "Add a building" button, which must
-    // never count as a visible row or that group's heading never hides.
-    app.querySelectorAll('.grouphead').forEach((head) => {
-      let sib = head.nextElementSibling;
-      let anyVisible = false;
-      while (sib && sib.matches('[data-search]')) {
-        if (!sib.hidden) anyVisible = true;
-        sib = sib.nextElementSibling;
-      }
-      head.hidden = !anyVisible;
-    });
-  };
+  });
 
   $('#restore').onclick = async () => {
     const typed = await askText({
