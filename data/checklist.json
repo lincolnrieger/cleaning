@@ -85,6 +85,20 @@
       ["Outdoor table and chairs", "Clean"]
     ],
 
+    "Bell tent full clean": [
+      ["Mattresses", "Wipe over and inspect for stains"],
+      ["Tables and chairs", "Wipe down and place inside the tent"],
+      ["Floors", "Sweep, vacuum and mop"]
+    ],
+
+    "Bell tent check clean": [
+      ["Floors", "Check for dead bugs"],
+      ["Linen", "Check what is needed with Reception"],
+      ["BBQ and bins", "Check both"],
+      ["Air freshener", "Spray through"],
+      ["Poles", "Check for bugs and water around the poles"]
+    ],
+
     "Chalet check clean": [
       ["Bugs and cobwebs", "Check throughout"],
       ["Windows", "Open during summer"],
@@ -119,26 +133,35 @@
     { "name": "Bert's Bog", "group": "Basecamp", "areas": ["Bathrooms", "Shelter"] },
 
     {
-      "name": "Bell Tents",
+      "name": "Bell Tent - St George 1",
+      "group": "Bell Tents",
+      "areas": ["Bell tent full clean", "Bell tent check clean"]
+    },
+    {
+      "name": "Bell Tent - St George 2",
+      "group": "Bell Tents",
+      "areas": ["Bell tent full clean", "Bell tent check clean"]
+    },
+    {
+      "name": "Bell Tent - St George 3",
+      "group": "Bell Tents",
+      "areas": ["Bell tent full clean", "Bell tent check clean"]
+    },
+    {
+      "name": "Bell Tent - St George 4",
+      "group": "Bell Tents",
+      "areas": ["Bell tent full clean", "Bell tent check clean"]
+    },
+    {
+      "name": "Bell Tent - Tube Slide",
       "group": "Bell Tents",
       "areas": [
+        "Bell tent full clean",
+        "Bell tent check clean",
         {
-          "name": "Full clean",
+          "name": "Tube Slide specific",
           "tasks": [
-            ["Mattresses", "Wipe over and inspect for stains"],
-            ["Tables and chairs", "Wipe down and place inside the tent"],
-            ["Floors", "Sweep, vacuum and mop"],
-            ["Tube Slide linen", "Replace mattress protector and sheet"]
-          ]
-        },
-        {
-          "name": "Check clean",
-          "tasks": [
-            ["Floors", "Check for dead bugs"],
-            ["Linen", "Check what is needed with Reception"],
-            ["BBQ and bins", "Check both"],
-            ["Air freshener", "Spray through"],
-            ["Poles", "Check for bugs and water around the poles"]
+            ["Linen", "Replace the mattress protector and sheet"]
           ]
         }
       ]

@@ -126,6 +126,32 @@ header.bar h1 {
   text-overflow: ellipsis;
 }
 
+/* Long building names ("Bell Tent - St George 1") get squeezed out of the
+   header on a phone, so the back button drops to just an arrow and the
+   signed-in name gets tighter. */
+#back { gap: 6px; }
+
+@media (max-width: 560px) {
+  .back-label { display: none; }
+  #back { padding: 0 9px; }
+  .who-name { max-width: 9ch; }
+  header.bar { gap: 8px; }
+
+  /* On a building page the name is what matters, so the signed-in text steps
+     aside and leaves the coloured avatar to identify you. The title may take
+     two lines rather than being cut off mid-word. */
+  header.bar.has-back .who-text { display: none; }
+
+  header.bar.has-back h1 {
+    white-space: normal;
+    font-size: 15px;
+    line-height: 1.2;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+}
+
 .who-box {
   display: flex;
   align-items: center;

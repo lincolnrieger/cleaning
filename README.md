@@ -91,6 +91,9 @@ What that feeds:
 - **The office overview** becomes a run sheet: scheduled buildings first in
   priority order with "4 of 4 left" at the top, unscheduled buildings in a
   second column, and a banner naming any scheduled building with nobody on it.
+  The percentage and task counts across the top cover **only what is scheduled
+  for the day being viewed** — totalling every task in the park would read
+  "0 of 586" and say nothing useful about how the day is going.
 
 More than one cleaner can be assigned to the same building — that's the case
 the whole app is built around, so they're listed together and each still gets
@@ -124,10 +127,11 @@ layout respects the notch and home indicator via safe-area insets.
 - **Two cleaners can work the same room.** Each item is tracked independently,
   and each open checklist refreshes every 20 seconds, so they see each other's
   ticks appear with the other person's name against them.
-- **Sign-off is separate from ticking.** "Mark building complete" is the
-  cleaner telling the office they're done — it warns if items are still
-  unticked, but doesn't force them. That replaces the "phone the office when
-  finished" step on the paper checklist.
+- **Sign-off is separate from ticking.** *Done — mark this building complete*
+  is the cleaner telling the office they've finished. It confirms first,
+  saying how many items are still unticked, then hands them back to their job
+  list so they can pick up the next building. That replaces the "phone the
+  office when finished" step on the paper checklist.
 - **Maintenance and lost property** are reported from inside the building,
   optionally with a photo, and stay open until the office resolves them.
 
@@ -141,9 +145,10 @@ on a weak mobile signal.
 
 ## The checklist
 
-`data/checklist.json` holds all 17 buildings across the park — Basecamp,
-Bell Tents, Bunkhouse, the three Chalets, Lower Rymill, Manor, both Offices,
-Rymill Centre, Seeonee and Stags — about 530 tasks in total.
+`data/checklist.json` holds all 21 buildings across the park — the five
+Basecamp locations, five Bell Tents, Bunkhouse, three Chalets, Lower Rymill,
+Manor, both Offices, Rymill Centre, Seeonee and Stags — just under 600 tasks
+in total.
 
 It has three parts:
 

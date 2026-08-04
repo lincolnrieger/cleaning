@@ -177,6 +177,9 @@ function chrome({ title, back = false, section = '', wide = false }) {
   bar.hidden = !state.user;
   $('#title').textContent = title;
   $('#back').hidden = !back;
+  // Detail pages have a back button AND a long building name; the stylesheet
+  // uses this to reclaim space on a phone.
+  bar.classList.toggle('has-back', back);
   $('#signout').hidden = !state.user;
   document.querySelector('main').classList.toggle('wide', wide);
 
@@ -502,18 +505,23 @@ async function renderOverview() {
   const day = viewDay();
   const { buildings } = await api(`/overview?day=${day}`);
 
-  const totals = buildings.reduce((acc, b) => ({
-    done: acc.done + b.done,
-    total: acc.total + b.total,
-    issues: acc.issues + b.open_issues,
-    signed: acc.signed + (b.completed_at ? 1 : 0),
-    scheduled: acc.scheduled + (b.scheduled ? 1 : 0),
-  }), { done: 0, total: 0, issues: 0, signed: 0, scheduled: 0 });
-
-  const pct = totals.total ? Math.round((totals.done / totals.total) * 100) : 0;
   // The API returns scheduled buildings first, already in priority order.
   const runSheet = buildings.filter((b) => b.scheduled);
   const rest = buildings.filter((b) => !b.scheduled);
+
+  // Progress counts only what is actually on today's plan. Totalling every
+  // task in the park gives "0 of 1100", which says nothing about the day.
+  const totals = runSheet.reduce((acc, b) => ({
+    done: acc.done + b.done,
+    total: acc.total + b.total,
+    signed: acc.signed + (b.completed_at ? 1 : 0),
+  }), { done: 0, total: 0, signed: 0 });
+
+  // Open issues stay camp-wide - a broken cistern matters whether or not that
+  // building is on today's list.
+  totals.issues = buildings.reduce((n, b) => n + b.open_issues, 0);
+
+  const pct = totals.total ? Math.round((totals.done / totals.total) * 100) : 0;
   const outstanding = runSheet.filter((b) => !b.completed_at).length;
   const unassigned = runSheet.filter((b) => !b.assignees.length);
   const stale = rest.filter((b) => staleDays(b, day) >= 7);
@@ -523,9 +531,9 @@ async function renderOverview() {
 
     <div class="card">
       <div class="stats">
-        <div class="stat"><b>${pct}%</b><span>tasks done</span></div>
-        <div class="stat"><b>${totals.signed}/${totals.scheduled || buildings.length}</b>
-          <span>scheduled signed off</span></div>
+        <div class="stat"><b>${pct}%</b><span>of today's tasks</span></div>
+        <div class="stat"><b>${totals.signed}/${runSheet.length}</b>
+          <span>buildings signed off</span></div>
         <div class="stat"><b style="color:var(--${outstanding ? 'warn' : 'done'})">${outstanding}</b>
           <span>still to do</span></div>
         <div class="stat"><b style="color:var(--${totals.issues ? 'warn' : 'muted'})">${totals.issues}</b>
@@ -534,7 +542,11 @@ async function renderOverview() {
       <div class="pad" style="padding-top:12px">
         <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
         <div class="tiny muted center" style="margin-top:6px">
-          ${totals.done} of ${totals.total} tasks across ${buildings.length} buildings</div>
+          ${runSheet.length
+            ? `${totals.done} of ${totals.total} tasks across
+               ${runSheet.length} building${runSheet.length === 1 ? '' : 's'} scheduled
+               ${dayLabel(day) === 'Today' ? 'today' : 'that day'}`
+            : `Nothing scheduled — ${buildings.length} buildings in the park`}</div>
       </div>
     </div>
 
@@ -1015,22 +1027,35 @@ async function renderBuilding(id) {
     $('#complete').onclick = async () => {
       const { done, total } = counts(state.building);
       const undo = Boolean(state.building.completed);
-      if (!undo && done < total) {
-        const go = await ask({
-          title: 'Mark complete anyway?',
-          body: `<strong>${total - done}</strong> item${total - done > 1 ? 's are' : ' is'}
-                 still unticked on this checklist.`,
-          confirmText: 'Mark complete',
-        });
-        if (!go) return;
-      }
+      const left = total - done;
+
+      const go = await ask({
+        title: undo ? 'Reopen this building?' : `Finished ${data.building.name}?`,
+        body: undo
+          ? 'It goes back to in-progress and the office will see it as unfinished.'
+          : left
+            ? `<strong>${left}</strong> item${left === 1 ? ' is' : 's are'} still unticked.
+               You can still mark it done — the office sees ${done} of ${total} ticked.`
+            : `All <strong>${total}</strong> items are ticked. The office will see it
+               as finished.`,
+        confirmText: undo ? 'Reopen' : 'Yes, all done',
+      });
+      if (!go) return;
+
       try {
         const res = await api('/building/complete', {
           method: 'POST', body: { buildingId: id, day, undo },
         });
-        state.building.completed = res.completed;
-        paintBuilding(state.building, locked);
-        toast(undo ? 'Building reopened' : 'Marked complete — office can see it');
+        if (undo) {
+          state.building.completed = res.completed;
+          paintBuilding(state.building, locked);
+          toast('Building reopened');
+          return;
+        }
+        // Finishing a building ends the job, so hand them back their list
+        // rather than leaving them on a checklist they are done with.
+        toast(`${data.building.name} marked complete`);
+        location.hash = '#/';
       } catch (e) {
         toast(e.message, true);
       }
@@ -1095,7 +1120,9 @@ function paintBuilding(data, locked) {
     </div>`).join('');
 
   if (!locked) {
-    $('#complete').textContent = data.completed ? 'Reopen building' : 'Mark building complete';
+    $('#complete').textContent = data.completed
+      ? 'Reopen this building'
+      : 'Done — mark this building complete';
   }
 }
 
