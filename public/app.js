@@ -66,6 +66,29 @@ function sinceLabel(day, today) {
 
 const firstName = (name) => String(name).split(/[\s(]/)[0];
 
+const initials = (name) => String(name)
+  .replace(/\(.*?\)/g, '')
+  .trim()
+  .split(/\s+/)
+  .slice(0, 2)
+  .map((w) => w[0] || '')
+  .join('')
+  .toUpperCase() || '?';
+
+/** Stable hue per person, so the same face is the same colour everywhere. */
+function hueFor(name) {
+  let h = 0;
+  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+
+const avatar = (name, size = '') =>
+  `<span class="avatar ${size}" style="--h:${hueFor(name)}" title="${esc(name)}"
+     >${esc(initials(name))}</span>`;
+
+const avatarStack = (people, size = 'xs') =>
+  `<span class="avatar-stack">${people.map((p) => avatar(p.name ?? p, size)).join('')}</span>`;
+
 let toastTimer;
 function toast(message, bad = false) {
   document.querySelector('.toast')?.remove();
@@ -161,10 +184,19 @@ function chrome({ title, back = false, section = '', wide = false }) {
   who.hidden = !state.user;
   if (state.user) {
     $('#whoName').textContent = state.user.name;
-    const chip = $('#whoRole');
-    chip.textContent = state.user.role;
-    chip.className = `role-chip ${state.user.role}`;
+    const role = $('#whoRole');
+    role.textContent = state.user.role;
+    role.className = `who-role ${state.user.role}`;
+    const av = $('#whoAvatar');
+    av.textContent = initials(state.user.name);
+    av.style.setProperty('--h', hueFor(state.user.name));
   }
+
+  // Impossible to forget that PIN-less sign-in is switched on.
+  const testbar = $('#testbar');
+  testbar.hidden = !state.config?.quickSignin;
+  testbar.textContent = 'Test mode — anyone can sign in without a PIN. '
+    + 'Turn this off under People before real use.';
 
   const items = state.user ? NAV[state.user.role] ?? [] : [];
   nav.hidden = !items.length;
@@ -233,11 +265,63 @@ function closeSheet() {
 
 /* ------------------------------------------------------------ view: login */
 
-function renderLogin() {
+async function renderLogin() {
   bar.hidden = true;
   nav.hidden = true;
+  $('#testbar').hidden = !state.config.quickSignin;
+  $('#testbar').textContent = 'Test mode — tap any name to sign in, no PIN needed.';
   if (state.config.needsBootstrap) return renderBootstrap();
+  if (state.config.quickSignin) return renderPeoplePicker();
+  return renderPinPad();
+}
 
+/** Test mode: a list of everyone, tap to sign in. */
+async function renderPeoplePicker() {
+  let people = [];
+  try {
+    people = (await api('/people')).people;
+  } catch {
+    return renderPinPad(); // setting flipped off mid-session
+  }
+
+  app.innerHTML = `<div class="login card">
+    <h2>Who are you?</h2>
+    ${people.map((p) => `<button class="person" data-uid="${p.id}">
+      ${avatar(p.name, 'lg')}
+      <span class="grow">
+        <span class="pname" style="display:block">${esc(p.name)}</span>
+        <span class="prole">${esc(p.role)}</span>
+      </span>
+      <span class="muted" aria-hidden="true">›</span>
+    </button>`).join('') || '<p class="empty">Nobody has been added yet.</p>'}
+    <div class="pad"><button class="wide ghost" id="usepin">Use a PIN instead</button></div>
+  </div>
+  <p class="err center" id="err"></p>`;
+
+  app.querySelectorAll('[data-uid]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        await signIn({ userId: Number(b.dataset.uid) });
+      } catch (e) {
+        $('#err').textContent = e.message;
+        b.disabled = false;
+      }
+    };
+  });
+  $('#usepin').onclick = renderPinPad;
+}
+
+async function signIn(body) {
+  const { token, user } = await api('/login', { method: 'POST', body });
+  state.token = token;
+  state.user = user;
+  localStorage.setItem('bc.token', token);
+  localStorage.setItem('bc.user', JSON.stringify(user));
+  await render();
+}
+
+function renderPinPad() {
   app.innerHTML = `<div class="login card">
     <h2>Basecamp Cleaning</h2>
     <div class="pad stack center">
@@ -250,8 +334,13 @@ function renderLogin() {
         <button data-k="0">0</button>
         <button class="primary" data-k="go">→</button>
       </div>
+      ${state.config.quickSignin
+        ? '<button class="wide ghost" id="uselist">← Pick from the list instead</button>'
+        : ''}
     </div>
   </div>`;
+
+  $('#uselist')?.addEventListener('click', renderPeoplePicker);
 
   let pin = '';
   const dots = $('#dots');
@@ -262,12 +351,7 @@ function renderLogin() {
     if (pin.length < 4) return;
     err.textContent = '';
     try {
-      const { token, user } = await api('/login', { method: 'POST', body: { pin } });
-      state.token = token;
-      state.user = user;
-      localStorage.setItem('bc.token', token);
-      localStorage.setItem('bc.user', JSON.stringify(user));
-      render();
+      await signIn({ pin });
     } catch (e) {
       pin = '';
       draw();
@@ -378,7 +462,7 @@ async function renderOverview() {
           : 'nothing scheduled'}</h2>
         ${runSheet.length
           ? runSheet.map(overviewTile).join('')
-          : `<div class="pad center muted small">Nothing is scheduled for this day.
+          : `<div class="empty"><b>Nothing scheduled</b>
              Open <strong>Schedule</strong> to plan the week.</div>`}
       </div>
 
@@ -386,7 +470,7 @@ async function renderOverview() {
         <h2>Not scheduled ${dayLabel(day).toLowerCase() === 'today' ? 'today' : 'this day'}</h2>
         ${rest.length
           ? rest.map(overviewTile).join('')
-          : '<div class="pad center muted small">Every building is on the run sheet.</div>'}
+          : '<div class="empty">Every building is on the run sheet.</div>'}
       </div>
     </div>
 
@@ -429,12 +513,17 @@ function overviewTile(b) {
     b.open_issues ? `${b.open_issues} open issue${b.open_issues > 1 ? 's' : ''}` : null,
   ].filter(Boolean).join(' · ');
 
-  return `<button class="tile${b.scheduled && !b.completed_at ? ' flagged' : ''}"
+  // Only the green 'done' edge earns its place - the status pill already
+  // carries 'outstanding', and every run-sheet row is outstanding by definition.
+  const edge = b.completed_at ? ' finished' : '';
+
+  return `<button class="tile${edge}"
       ${canDrillIn() ? `data-b="${b.id}"` : 'disabled'}>
     <div class="spread">
-      <span class="row" style="gap:7px;min-width:0">
+      <span class="row" style="gap:8px;min-width:0">
         ${b.scheduled ? `<span class="prio">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
+        ${b.assignees.length ? avatarStack(b.assignees) : ''}
       </span>
       ${status}
     </div>
@@ -478,8 +567,9 @@ async function renderCleanerHome() {
     ${mine.length ? `<div class="card">
       <h2>Your buildings today — ${doneCount}/${mine.length} done</h2>
       ${mine.map((b) => jobTile(b, true)).join('')}
-    </div>` : `<div class="card"><div class="pad center muted small">
-      Nothing is assigned to you today. Pick any building below.
+    </div>` : `<div class="card"><div class="empty">
+      <b>Nothing assigned to you today</b>
+      Pick any building below and start whenever you like.
     </div></div>`}
 
     ${otherScheduled.length ? `<div class="card">
@@ -515,11 +605,12 @@ function jobTile(b, isMine = false) {
     ? `${isMine ? 'with' : 'for'} ${others.map((a) => esc(firstName(a.name))).join(', ')}`
     : '';
 
-  return `<button class="tile" data-b="${b.id}">
+  return `<button class="tile${b.completed_at ? ' finished' : ''}" data-b="${b.id}">
     <div class="spread">
-      <span class="row" style="gap:7px;min-width:0">
+      <span class="row" style="gap:8px;min-width:0">
         ${b.scheduled ? `<span class="prio">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
+        ${others.length ? avatarStack(others) : ''}
       </span>
       ${status}
     </div>
@@ -541,6 +632,8 @@ async function renderSchedule() {
   const data = await api(`/schedule?from=${from}&days=7`);
   const canEdit = data.canEdit;
 
+  const isWeekend = (d) => [0, 6].includes(asDate(d).getUTCDay());
+
   const cell = (b, day) => {
     const c = data.cells[`${b.id}:${day}`] ?? {};
     const scheduled = c.priority != null;
@@ -549,22 +642,30 @@ async function renderSchedule() {
       'cell',
       scheduled ? 'on' : '',
       c.completedAt ? 'complete' : '',
-      day === data.today ? 'today' : '',
+      scheduled && !c.assignees?.length && !c.completedAt ? 'unassigned' : '',
     ].filter(Boolean).join(' ');
 
-    const inner = scheduled || c.done || c.completedAt
-      ? `<div class="cell-top">
-           ${scheduled ? `<span class="prio">${c.priority}</span>` : ''}
-           ${c.completedAt ? '<span class="tickmark">✓</span>' : ''}
-         </div>
-         ${c.assignees?.length
-           ? `<div class="names">${c.assignees.map((a) => esc(firstName(a.name))).join(', ')}</div>`
-           : scheduled ? '<div class="names" style="color:var(--warn)">unassigned</div>' : ''}
-         ${c.done ? `<div class="mini ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>` : ''}`
-      : (canEdit ? '<span class="plus">+</span>' : '');
+    let inner;
+    if (scheduled || c.done || c.completedAt) {
+      inner = `<div class="cell-top">
+          ${scheduled ? `<span class="prio">${c.priority}</span>` : ''}
+          ${c.assignees?.length ? avatarStack(c.assignees) : ''}
+          ${c.completedAt ? '<span class="tickmark">✓</span>' : ''}
+        </div>
+        ${c.assignees?.length
+          ? `<div class="names">${c.assignees.map((a) => esc(firstName(a.name))).join(', ')}</div>`
+          : scheduled ? '<div class="warn-dot">unassigned</div>' : ''}
+        ${c.done ? `<div class="mini ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>` : ''}`;
+    } else {
+      inner = canEdit ? '<span class="plus">+</span>' : '';
+    }
 
-    return `<td><button class="${classes}" data-cell="${b.id}|${day}"
-      ${canEdit ? '' : 'disabled'}>${inner}</button></td>`;
+    const tdCls = [day === data.today ? 'today-col' : '', isWeekend(day) ? 'weekend' : '']
+      .filter(Boolean).join(' ');
+    return `<td class="${tdCls}">
+      <button class="${classes}" data-cell="${b.id}|${day}"
+        title="${esc(b.name)} — ${esc(dayLabel(day))}"
+        ${canEdit ? '' : 'disabled'}>${inner}</button></td>`;
   };
 
   app.innerHTML = `
@@ -583,16 +684,29 @@ async function renderSchedule() {
         <table class="sched">
           <thead><tr>
             <th class="corner">Building</th>
-            ${data.days.map((d) => `<th class="${d === data.today ? 'is-today' : ''}">
-              ${esc(weekdayShort(d))}<small>${esc(dayOfMonth(d))}</small></th>`).join('')}
+            ${data.days.map((d) => {
+              const cls = [d === data.today ? 'is-today' : '', isWeekend(d) ? 'weekend' : '']
+                .filter(Boolean).join(' ');
+              return `<th class="${cls}">${esc(weekdayShort(d))}<small>${esc(dayOfMonth(d))}</small></th>`;
+            }).join('')}
           </tr></thead>
           <tbody>
-            ${data.buildings.map((b) => `<tr>
-              <th class="rowhead">${esc(b.name)}</th>
-              ${data.days.map((d) => cell(b, d)).join('')}
-            </tr>`).join('')}
+            ${data.buildings.map((b) => {
+              const weekCount = data.days
+                .filter((d) => data.cells[`${b.id}:${d}`]?.priority != null).length;
+              return `<tr>
+                <th class="rowhead">${esc(b.name)}
+                  <small>${weekCount ? `${weekCount} this week` : 'not scheduled'}</small></th>
+                ${data.days.map((d) => cell(b, d)).join('')}
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)"></i>Scheduled</span>
+        <span><i style="background:var(--done-bg);box-shadow:inset 0 0 0 1px var(--done)"></i>Signed off</span>
+        <span><i style="background:var(--warn)"></i>Nobody assigned</span>
       </div>
     </div>
 
@@ -641,26 +755,33 @@ async function openScheduleEditor(data, buildingId, day) {
   const picked = new Set((cell.assignees ?? []).map((a) => a.id));
 
   const sheet = openSheet(`
-    <div class="pad stack">
-      <div class="spread">
+    <div class="sheet-head">
+      <div>
         <strong>${esc(building.name)}</strong>
-        <span class="small muted">${esc(dayLabel(day))}</span>
+        <div class="small muted">${esc(dayLabel(day))} · ${esc(dayOfMonth(day))}</div>
       </div>
-
-      <label class="field"><span>Order of priority (1 = do first)</span>
+      ${scheduled ? '<span class="pill open">Scheduled</span>' : ''}
+    </div>
+    <div class="pad stack">
+      <label class="field"><span>Order of priority — 1 gets done first</span>
         <input id="prio" type="number" min="1" max="99" inputmode="numeric"
           value="${scheduled ? cell.priority : nextPriority(data, day)}"></label>
 
       <div>
-        <span class="small muted" style="display:block;margin-bottom:5px">Assign to</span>
+        <span class="small muted" style="display:block;margin-bottom:6px;font-weight:600">
+          Who is cleaning it</span>
         <div class="check-list">
           ${state.cleaners.map((c) => `
             <label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
               <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
-              <span>${esc(c.name)}</span>
+              ${avatar(c.name)}
+              <span class="grow">${esc(c.name)}</span>
+              <span class="tiny muted">${esc(c.role)}</span>
             </label>`).join('')
             || '<p class="small muted">No cleaners yet — add them under People.</p>'}
         </div>
+        <p class="tiny muted" style="margin:7px 0 0">
+          More than one person can be put on the same building.</p>
       </div>
 
       <label class="field"><span>Note for the cleaner (optional)</span>
@@ -1020,7 +1141,8 @@ async function renderIssues(status = 'open') {
             <button class="ghost" data-r="${i.id}" data-reopen="${status === 'resolved'}">
               ${status === 'resolved' ? 'Reopen' : 'Mark resolved'}</button></div>` : ''}
         </div>`).join('')
-        : `<p class="pad muted center">Nothing ${status === 'open' ? 'outstanding' : 'here'}.</p>`}
+        : `<div class="empty"><b>Nothing ${status === 'open' ? 'outstanding' : 'here yet'}</b>
+           ${status === 'open' ? 'Every reported problem has been dealt with.' : ''}</div>`}
     </div>`;
 
   app.querySelectorAll('[data-photo]').forEach((img) => loadPhoto(img, img.dataset.photo));
@@ -1061,7 +1183,7 @@ async function renderHistory() {
             — ${esc(a.detail)}</div>
           <div class="tiny muted">${esc(a.building)} · ${esc(time(a.created_at))}</div>
         </div>`).join('')
-        : '<p class="pad muted center">No activity on this day.</p>'}
+        : '<div class="empty">No activity on this day.</div>'}
     </div>
     <button class="wide" id="csv">Download CSV for this day</button>`;
 
@@ -1105,23 +1227,60 @@ async function renderAdmin() {
       </div>
 
       <div class="card">
-        <h2>Everyone</h2>
+        <h2>Everyone — ${users.filter((u) => u.active).length} active</h2>
         <table class="grid">
           <tr><th>Name</th><th>Role</th><th></th></tr>
-          ${users.map((u) => `<tr style="${u.active ? '' : 'opacity:.5'}"
+          ${users.map((u) => `<tr style="${u.active ? '' : 'opacity:.45'}"
               data-id="${u.id}" data-name="${esc(u.name)}" data-role="${esc(u.role)}"
               data-active="${u.active}">
-            <td>${esc(u.name)}</td>
+            <td><span class="row" style="gap:9px">${avatar(u.name)}
+              <span>${esc(u.name)}</span></span></td>
             <td class="muted">${esc(u.role)}${u.active ? '' : ' · disabled'}</td>
-            <td>
+            <td class="actions">
               <button class="ghost" data-pin>New PIN</button>
               <button class="ghost ${u.active ? 'danger' : ''}" data-tog>
                 ${u.active ? 'Disable' : 'Enable'}</button>
             </td></tr>`).join('')}
         </table>
+        <p class="tiny muted pad" style="padding-top:0">
+          PINs are stored hashed — they can be replaced, never read back.</p>
       </div>
     </div>
-    <p class="tiny muted center">PINs are stored hashed — they can be replaced, never read back.</p>`;
+
+    <div class="card">
+      <h2>Sign-in</h2>
+      <label class="switch-row" style="cursor:pointer">
+        <input type="checkbox" id="quick" ${state.config.quickSignin ? 'checked' : ''}
+          style="width:20px;height:20px;min-height:20px;flex:none;accent-color:var(--accent)">
+        <span class="grow">
+          <strong style="display:block;font-size:14.5px">Test mode — tap a name to sign in</strong>
+          <span class="small muted">Skips the PIN entirely. Handy while you set things up.
+            <strong>Anyone with the link can sign in as anyone, including you.</strong>
+            Turn it off before the cleaners start using it for real.</span>
+        </span>
+      </label>
+    </div>
+
+    <div class="card danger">
+      <h2>Danger zone</h2>
+      <div class="pad stack">
+        <p class="small muted" style="margin:0">
+          Clears every cleaning record, schedule, sign-off and maintenance report so you
+          can start fresh after testing. Your buildings and checklists are
+          <strong>not</strong> touched — those come from the checklist file. Tables are
+          never deleted.</p>
+        <label class="check-row" id="peoplerow">
+          <input type="checkbox" id="wipepeople">
+          <span class="grow">Also remove everyone except me
+            <span class="tiny muted" style="display:block">You stay signed in as admin.</span></span>
+        </label>
+        <label class="field"><span>Type <code class="phrase">clear database</code> to confirm</span>
+          <input id="confirm" placeholder="clear database" autocapitalize="none"
+            autocomplete="off" spellcheck="false"></label>
+        <p class="err" id="reseterr"></p>
+        <button class="destroy wide" id="reset" disabled>Clear the database</button>
+      </div>
+    </div>`;
 
   $('#add').onclick = async () => {
     try {
@@ -1134,6 +1293,51 @@ async function renderAdmin() {
       renderAdmin();
     } catch (e) {
       $('#err').textContent = e.message;
+    }
+  };
+
+  $('#quick').onchange = async (ev) => {
+    const on = ev.currentTarget.checked;
+    try {
+      const res = await api('/settings', { method: 'POST', body: { quickSignin: on } });
+      state.config.quickSignin = res.quickSignin;
+      state.configAt = Date.now();
+      toast(on ? 'Test mode on — no PIN needed' : 'Test mode off — PIN required');
+      renderAdmin();
+    } catch (e) {
+      ev.currentTarget.checked = !on;
+      toast(e.message, true);
+    }
+  };
+
+  // The button only wakes up once the phrase is typed exactly.
+  const confirmBox = $('#confirm');
+  const resetBtn = $('#reset');
+  const phraseOk = () => confirmBox.value.trim().toLowerCase() === 'clear database';
+  confirmBox.oninput = () => { resetBtn.disabled = !phraseOk(); };
+
+  $('#wipepeople').onchange = (ev) => {
+    ev.currentTarget.closest('.check-row').classList.toggle('on', ev.currentTarget.checked);
+  };
+
+  resetBtn.onclick = async () => {
+    const alsoPeople = $('#wipepeople').checked;
+    if (!confirm(alsoPeople
+      ? 'Delete all cleaning records AND everyone except you? This cannot be undone.'
+      : 'Delete all cleaning records, schedules and reports? This cannot be undone.')) return;
+
+    resetBtn.disabled = true;
+    try {
+      const res = await api('/admin/reset', {
+        method: 'POST',
+        body: { confirm: confirmBox.value, includePeople: alsoPeople },
+      });
+      state.cleaners = null;
+      toast(`Database cleared${res.removedPeople ? ` · ${res.removedPeople} people removed` : ''}`);
+      location.hash = '#/';
+    } catch (e) {
+      $('#reseterr').textContent = e.message;
+      resetBtn.disabled = !phraseOk();
     }
   };
 

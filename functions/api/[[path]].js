@@ -107,6 +107,28 @@ function clean(value, max) {
   return String(value ?? '').trim().slice(0, max);
 }
 
+/* ----------------------------------------------------------- settings */
+
+async function getSetting(env, key, fallback = null) {
+  const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?')
+    .bind(key).first();
+  return row?.value ?? fallback;
+}
+
+async function setSetting(env, key, value) {
+  await env.DB.prepare(
+    `INSERT INTO settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).bind(key, String(value)).run();
+}
+
+/**
+ * Test mode: tap a name to sign in, no PIN. Convenient while setting the app
+ * up, and a wide open door once real rosters are in it - so the UI shows a
+ * banner on every screen while it is on.
+ */
+const quickSigninOn = async (env) => (await getSetting(env, 'quick_signin', '1')) === '1';
+
 /* ------------------------------------------------------------------- auth */
 
 async function currentUser(request, env) {
@@ -185,6 +207,7 @@ const routes = {
     const bootstrapped = await env.DB.prepare('SELECT 1 FROM users LIMIT 1').first();
     return json({
       needsBootstrap: !bootstrapped,
+      quickSignin: await quickSigninOn(env),
       photos: Boolean(env.PHOTOS),
       rollupOnly: env.OFFICE_ROLLUP_ONLY === '1',
       officePhone: env.OFFICE_PHONE || contacts.office || '',
@@ -210,16 +233,32 @@ const routes = {
     return json({ ok: true });
   },
 
+  // Only reachable while test mode is on; it is what fills the tap-to-sign-in list.
+  'GET /people': async (_req, env) => {
+    if (!await quickSigninOn(env)) throw new HttpError(403, 'Sign in with your PIN.');
+    const { results } = await env.DB.prepare(
+      'SELECT id, name, role FROM users WHERE active = 1 ORDER BY role, name',
+    ).all();
+    return json({ people: results });
+  },
+
   'POST /login': async (req, env) => {
     const ip = req.headers.get('cf-connecting-ip') || 'unknown';
     const guard = await loginGuard(env, ip);
 
-    const { pin } = await req.json();
-    const user = /^\d{4,8}$/.test(pin || '')
-      ? await env.DB.prepare(
-          'SELECT id, name, role FROM users WHERE pin_hash = ? AND active = 1',
-        ).bind(await hashPin(env, pin)).first()
-      : null;
+    const { pin, userId } = await req.json();
+    let user = null;
+
+    if (userId != null) {
+      if (!await quickSigninOn(env)) throw new HttpError(403, 'Sign in with your PIN.');
+      user = await env.DB.prepare(
+        'SELECT id, name, role FROM users WHERE id = ? AND active = 1',
+      ).bind(Number(userId)).first();
+    } else if (/^\d{4,8}$/.test(pin || '')) {
+      user = await env.DB.prepare(
+        'SELECT id, name, role FROM users WHERE pin_hash = ? AND active = 1',
+      ).bind(await hashPin(env, pin)).first();
+    }
 
     if (!user) {
       await recordFail(env, ip, guard);
@@ -763,6 +802,52 @@ const routes = {
     return json({ ok: true });
   },
 
+  'POST /settings': async (req, env, { user }) => {
+    require(user, 'admin');
+    const { quickSignin } = await req.json();
+    if (quickSignin !== undefined) {
+      await setSetting(env, 'quick_signin', quickSignin ? '1' : '0');
+    }
+    return json({ ok: true, quickSignin: await quickSigninOn(env) });
+  },
+
+  /**
+   * Wipes operational data so the camp can start clean after testing.
+   * Deliberately never drops a table and never touches the checklist itself -
+   * buildings, areas and tasks come from checklist.json.
+   */
+  'POST /admin/reset': async (req, env, { user }) => {
+    require(user, 'admin');
+    const { confirm, includePeople } = await req.json();
+    if (clean(confirm, 40).toLowerCase() !== 'clear database') {
+      throw new HttpError(400, 'Type "clear database" exactly to confirm.');
+    }
+
+    // Bin the stored photos first, while we can still read their keys.
+    if (env.PHOTOS) {
+      const { results: photos } = await env.DB.prepare(
+        'SELECT photo_key FROM maintenance WHERE photo_key IS NOT NULL',
+      ).all();
+      await Promise.all(photos.map((p) => env.PHOTOS.delete(p.photo_key).catch(() => {})));
+    }
+
+    const tables = [
+      'schedule_assignees', 'schedule', 'task_log',
+      'activity', 'building_status', 'maintenance', 'login_attempts',
+    ];
+    await env.DB.batch(tables.map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+
+    let removedPeople = 0;
+    if (includePeople) {
+      // Everyone except you - otherwise nobody could sign back in.
+      const res = await env.DB.prepare('DELETE FROM users WHERE id != ?')
+        .bind(user.id).run();
+      removedPeople = res.meta.changes ?? 0;
+    }
+
+    return json({ ok: true, cleared: tables, removedPeople });
+  },
+
   'GET /report': async (req, env, { user, url }) => {
     require(user, 'office', 'admin');
     const from = isDay(url.searchParams.get('from')) ? url.searchParams.get('from') : localDay(env);
@@ -815,7 +900,8 @@ export async function onRequest(context) {
 
   try {
     // /config, /bootstrap and /login are the only routes reachable signed out.
-    const open = ['GET /config', 'POST /bootstrap', 'POST /login'].includes(key);
+    const open = ['GET /config', 'POST /bootstrap', 'POST /login', 'GET /people']
+      .includes(key);
     const user = open ? null : await currentUser(request, env);
     if (!open && !user) return fail(401, 'Please sign in.');
     return await handler(request, env, { user, url });
