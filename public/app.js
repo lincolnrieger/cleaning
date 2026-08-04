@@ -6,6 +6,7 @@
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 const bar = $('#bar');
+const nav = $('#nav');
 
 const state = {
   token: localStorage.getItem('bc.token') || '',
@@ -13,8 +14,10 @@ const state = {
   config: null,
   configAt: 0,
   day: null,       // day being viewed; null means "today"
+  weekFrom: null,  // first column of the schedule grid
   poll: null,
   building: null,  // data for the checklist currently on screen
+  cleaners: null,  // cached list for the assignment picker
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -28,18 +31,40 @@ function time(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+/** Calendar maths on YYYY-MM-DD, in UTC so daylight saving can't shift a day. */
+function addDays(day, delta) {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+const asDate = (day) => new Date(`${day}T00:00:00Z`);
+
 function dayLabel(day) {
   if (!day) return '';
   if (day === state.config?.today) return 'Today';
-  return new Date(`${day}T12:00:00`)
-    .toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  if (day === addDays(state.config?.today, -1)) return 'Yesterday';
+  if (day === addDays(state.config?.today, 1)) return 'Tomorrow';
+  return asDate(day).toLocaleDateString([], {
+    weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
+  });
 }
 
-function shiftDay(day, delta) {
-  const d = new Date(`${day}T12:00:00`);
-  d.setDate(d.getDate() + delta);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const weekdayShort = (day) =>
+  asDate(day).toLocaleDateString([], { weekday: 'short', timeZone: 'UTC' });
+const dayOfMonth = (day) =>
+  asDate(day).toLocaleDateString([], { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+/** "3 days ago" style text for the last time a building was signed off. */
+function sinceLabel(day, today) {
+  if (!day) return 'never signed off';
+  const gap = Math.round((asDate(today) - asDate(day)) / 86400000);
+  if (gap <= 0) return 'signed off today';
+  if (gap === 1) return 'signed off yesterday';
+  return `signed off ${gap} days ago`;
 }
+
+const firstName = (name) => String(name).split(/[\s(]/)[0];
 
 let toastTimer;
 function toast(message, bad = false) {
@@ -95,6 +120,7 @@ async function loadPhoto(img, key) {
 function signOut() {
   state.token = '';
   state.user = null;
+  state.cleaners = null;
   localStorage.removeItem('bc.token');
   localStorage.removeItem('bc.user');
   location.hash = '';
@@ -103,14 +129,54 @@ function signOut() {
 
 /* --------------------------------------------------------------- chrome */
 
-function chrome({ title, back = false }) {
+const NAV = {
+  cleaner: [
+    ['', 'My jobs'],
+    ['schedule', 'Roster'],
+    ['issues', 'Issues'],
+  ],
+  office: [
+    ['', 'Overview'],
+    ['schedule', 'Schedule'],
+    ['issues', 'Issues'],
+    ['history', 'Activity'],
+  ],
+  admin: [
+    ['', 'Overview'],
+    ['schedule', 'Schedule'],
+    ['issues', 'Issues'],
+    ['history', 'Activity'],
+    ['admin', 'People'],
+  ],
+};
+
+function chrome({ title, back = false, section = '', wide = false }) {
   bar.hidden = !state.user;
   $('#title').textContent = title;
   $('#back').hidden = !back;
   $('#signout').hidden = !state.user;
+  document.querySelector('main').classList.toggle('wide', wide);
+
+  const who = $('#who');
+  who.hidden = !state.user;
+  if (state.user) {
+    $('#whoName').textContent = state.user.name;
+    const chip = $('#whoRole');
+    chip.textContent = state.user.role;
+    chip.className = `role-chip ${state.user.role}`;
+  }
+
+  const items = state.user ? NAV[state.user.role] ?? [] : [];
+  nav.hidden = !items.length;
+  nav.innerHTML = items.map(([route, label]) =>
+    `<button data-route="${route}" aria-current="${route === section}">${esc(label)}</button>`,
+  ).join('');
+  nav.querySelectorAll('[data-route]').forEach((b) => {
+    b.onclick = () => { location.hash = `#/${b.dataset.route}`; };
+  });
 }
 
-$('#back').onclick = () => (location.hash = '#/');
+$('#back').onclick = () => { location.hash = '#/'; };
 $('#signout').onclick = () => confirm('Sign out?') && signOut();
 
 function stopPolling() {
@@ -131,27 +197,45 @@ const viewDay = () => state.day || state.config.today;
 /* Day-picker strip, used by the office views. */
 function dayNav(day) {
   const isToday = day === state.config.today;
-  return `<div class="row" style="gap:8px">
-    <button class="ghost" data-day="${esc(shiftDay(day, -1))}">‹ Prev</button>
-    <div class="grow center"><strong>${esc(dayLabel(day))}</strong>
-      <div class="tiny muted">${esc(day)}</div></div>
-    <button class="ghost" data-day="${esc(shiftDay(day, 1))}" ${isToday ? 'disabled' : ''}>Next ›</button>
+  return `<div class="periodnav">
+    <strong class="period-title">${esc(dayLabel(day))}
+      <span class="tiny muted" style="font-weight:400">${esc(day)}</span></strong>
+    <button class="ghost" data-day="${esc(addDays(day, -1))}">‹ Prev</button>
+    ${isToday ? '' : '<button class="ghost" data-day="today">Today</button>'}
+    <button class="ghost" data-day="${esc(addDays(day, 1))}">Next ›</button>
   </div>`;
 }
 
 function wireDayNav(root, rerender) {
   root.querySelectorAll('[data-day]').forEach((b) => {
     b.onclick = () => {
-      state.day = b.dataset.day === state.config.today ? null : b.dataset.day;
+      const target = b.dataset.day === 'today' ? state.config.today : b.dataset.day;
+      state.day = target === state.config.today ? null : target;
       rerender();
     };
   });
+}
+
+/** Bottom sheet used for scheduling. Returns a node you fill and wire up. */
+function openSheet(html) {
+  closeSheet();
+  const bg = document.createElement('div');
+  bg.className = 'sheet-bg';
+  bg.innerHTML = `<div class="sheet">${html}</div>`;
+  bg.onclick = (e) => { if (e.target === bg) closeSheet(); };
+  document.body.append(bg);
+  return bg;
+}
+
+function closeSheet() {
+  document.querySelector('.sheet-bg')?.remove();
 }
 
 /* ------------------------------------------------------------ view: login */
 
 function renderLogin() {
   bar.hidden = true;
+  nav.hidden = true;
   if (state.config.needsBootstrap) return renderBootstrap();
 
   app.innerHTML = `<div class="login card">
@@ -172,7 +256,7 @@ function renderLogin() {
   let pin = '';
   const dots = $('#dots');
   const err = $('#err');
-  const draw = () => (dots.textContent = '•'.repeat(pin.length));
+  const draw = () => { dots.textContent = '•'.repeat(pin.length); };
 
   async function submit() {
     if (pin.length < 4) return;
@@ -241,7 +325,7 @@ function renderBootstrap() {
 /* ------------------------------------------------- view: office overview */
 
 async function renderOverview() {
-  chrome({ title: 'Cleaning overview' });
+  chrome({ title: 'Overview', section: '', wide: true });
   const day = viewDay();
   const { buildings } = await api(`/overview?day=${day}`);
 
@@ -250,105 +334,393 @@ async function renderOverview() {
     total: acc.total + b.total,
     issues: acc.issues + b.open_issues,
     signed: acc.signed + (b.completed_at ? 1 : 0),
-  }), { done: 0, total: 0, issues: 0, signed: 0 });
+    scheduled: acc.scheduled + (b.scheduled ? 1 : 0),
+  }), { done: 0, total: 0, issues: 0, signed: 0, scheduled: 0 });
 
   const pct = totals.total ? Math.round((totals.done / totals.total) * 100) : 0;
+  // The API returns scheduled buildings first, already in priority order.
+  const runSheet = buildings.filter((b) => b.scheduled);
+  const rest = buildings.filter((b) => !b.scheduled);
+  const outstanding = runSheet.filter((b) => !b.completed_at).length;
+  const unassigned = runSheet.filter((b) => !b.assignees.length);
+  const stale = rest.filter((b) => staleDays(b, day) >= 7);
 
   app.innerHTML = `
     <div class="card"><div class="pad">${dayNav(day)}</div></div>
 
     <div class="card">
-      <div class="pad">
-        <div class="spread">
-          <div>
-            <div style="font-size:30px;font-weight:700">${pct}%</div>
-            <div class="small muted">${totals.done} of ${totals.total} tasks ·
-              ${totals.signed}/${buildings.length} buildings signed off</div>
-          </div>
-          <div class="center">
-            <div style="font-size:26px;font-weight:700;color:var(--${totals.issues ? 'warn' : 'muted'})">
-              ${totals.issues}</div>
-            <div class="tiny muted">open issues</div>
-          </div>
-        </div>
+      <div class="stats">
+        <div class="stat"><b>${pct}%</b><span>tasks done</span></div>
+        <div class="stat"><b>${totals.signed}/${totals.scheduled || buildings.length}</b>
+          <span>scheduled signed off</span></div>
+        <div class="stat"><b style="color:var(--${outstanding ? 'warn' : 'done'})">${outstanding}</b>
+          <span>still to do</span></div>
+        <div class="stat"><b style="color:var(--${totals.issues ? 'warn' : 'muted'})">${totals.issues}</b>
+          <span>open issues</span></div>
+      </div>
+      <div class="pad" style="padding-top:12px">
         <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
+        <div class="tiny muted center" style="margin-top:6px">
+          ${totals.done} of ${totals.total} tasks across ${buildings.length} buildings</div>
       </div>
     </div>
 
-    <div class="card">
-      <h2>Buildings</h2>
-      ${buildings.map(buildingTile).join('')}
+    ${unassigned.length ? `<div class="card">
+      <div class="pad small" style="background:var(--warn-bg);color:var(--warn)">
+        <strong>Nobody assigned to
+        ${unassigned.map((b) => esc(b.name)).join(', ')}.</strong>
+        Open <strong>Schedule</strong> to put a cleaner on ${unassigned.length > 1 ? 'them' : 'it'}.
+      </div></div>` : ''}
+
+    <div class="cols">
+      <div class="card">
+        <h2>Run sheet — ${runSheet.length ? `${outstanding} of ${runSheet.length} left`
+          : 'nothing scheduled'}</h2>
+        ${runSheet.length
+          ? runSheet.map(overviewTile).join('')
+          : `<div class="pad center muted small">Nothing is scheduled for this day.
+             Open <strong>Schedule</strong> to plan the week.</div>`}
+      </div>
+
+      <div class="card">
+        <h2>Not scheduled ${dayLabel(day).toLowerCase() === 'today' ? 'today' : 'this day'}</h2>
+        ${rest.length
+          ? rest.map(overviewTile).join('')
+          : '<div class="pad center muted small">Every building is on the run sheet.</div>'}
+      </div>
     </div>
 
-    <div class="tabs">
-      <button data-go="#/issues">Maintenance &amp; lost property</button>
-      <button data-go="#/history">Activity log</button>
-      ${state.user.role === 'admin' ? '<button data-go="#/admin">People</button>' : ''}
-    </div>`;
+    ${stale.length ? `<div class="card"><div class="pad small muted">
+      Not cleaned in a week or more:
+      <strong>${stale.map((b) => esc(b.name)).join(', ')}</strong>.
+    </div></div>` : ''}`;
 
   wireTiles();
   wireDayNav(app, renderOverview);
   poll(renderOverview, 30000);
 }
 
-/** True when this user is allowed to open an individual building's checklist. */
-const canDrillIn = () =>
-  state.user.role !== 'office' || !state.config.rollupOnly;
+/**
+ * Days since this building was last signed off. Returns 0 for a building that
+ * has never been signed off, so a brand new camp doesn't get flagged on day
+ * one - each tile already says "never signed off" on its own.
+ */
+function staleDays(b, day) {
+  if (!b.lastCleaned) return 0;
+  return Math.round((asDate(day) - asDate(b.lastCleaned)) / 86400000);
+}
 
-function buildingTile(b) {
+function overviewTile(b) {
   const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
   const status = b.completed_at
     ? `<span class="pill done">Signed off ${esc(time(b.completed_at))}</span>`
     : b.done
       ? '<span class="pill open">In progress</span>'
-      : '<span class="pill idle">Not started</span>';
+      : b.scheduled
+        ? '<span class="pill late">Not started</span>'
+        : '<span class="pill idle">Not started</span>';
 
-  const detail = [
-    b.crew.length ? b.crew.map(esc).join(', ') : 'No one yet',
+  const meta = [
+    b.assignees.length
+      ? `for ${b.assignees.map((a) => esc(firstName(a.name))).join(', ')}`
+      : b.scheduled ? '<span style="color:var(--warn)">unassigned</span>' : null,
+    b.crew.length ? `worked by ${b.crew.map((c) => esc(firstName(c))).join(', ')}` : null,
     b.last_at ? `last ${esc(time(b.last_at))}` : null,
     b.open_issues ? `${b.open_issues} open issue${b.open_issues > 1 ? 's' : ''}` : null,
   ].filter(Boolean).join(' · ');
 
-  return `<button class="tile" ${canDrillIn() ? `data-b="${b.id}"` : 'disabled'}>
+  return `<button class="tile${b.scheduled && !b.completed_at ? ' flagged' : ''}"
+      ${canDrillIn() ? `data-b="${b.id}"` : 'disabled'}>
     <div class="spread">
-      <span class="name">${esc(b.name)}</span>
+      <span class="row" style="gap:7px;min-width:0">
+        ${b.scheduled ? `<span class="prio">${b.priority}</span>` : ''}
+        <span class="name">${esc(b.name)}</span>
+      </span>
       ${status}
     </div>
     <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
     <div class="spread small muted" style="margin-top:6px">
-      <span class="grow">${detail}</span>
+      <span class="grow">${meta || 'not scheduled'}</span>
       <span>${b.done}/${b.total}</span>
     </div>
+    <div class="tiny muted" style="margin-top:2px">
+      ${esc(sinceLabel(b.lastCleaned, state.config.today))}${b.note ? ` · ${esc(b.note)}` : ''}</div>
   </button>`;
 }
 
+/** True when this user is allowed to open an individual building's checklist. */
+const canDrillIn = () => state.user.role !== 'office' || !state.config.rollupOnly;
+
 function wireTiles() {
   app.querySelectorAll('[data-b]').forEach((el) => {
-    el.onclick = () => (location.hash = `#/b/${el.dataset.b}`);
+    el.onclick = () => { location.hash = `#/b/${el.dataset.b}`; };
   });
   app.querySelectorAll('[data-go]').forEach((el) => {
-    el.onclick = () => (location.hash = el.dataset.go);
+    el.onclick = () => { location.hash = el.dataset.go; };
   });
 }
 
 /* ------------------------------------------------------ view: cleaner home */
 
 async function renderCleanerHome() {
-  chrome({ title: `Hi ${state.user.name}` });
-  const { buildings } = await api(`/overview?day=${state.config.today}`);
+  chrome({ title: `Hi ${firstName(state.user.name)}`, section: '' });
+  const today = state.config.today;
+  const { buildings } = await api(`/overview?day=${today}`);
+
+  const mine = buildings.filter((b) =>
+    b.assignees.some((a) => a.id === state.user.id));
+  const otherScheduled = buildings.filter((b) => b.scheduled && !mine.includes(b));
+  const rest = buildings.filter((b) => !b.scheduled);
+
+  const doneCount = mine.filter((b) => b.completed_at).length;
 
   app.innerHTML = `
-    <div class="card">
-      <h2>Pick a building</h2>
-      ${buildings.map(buildingTile).join('')}
-    </div>
-    <div class="tabs"><button data-go="#/issues">Reported issues</button></div>
+    ${mine.length ? `<div class="card">
+      <h2>Your buildings today — ${doneCount}/${mine.length} done</h2>
+      ${mine.map((b) => jobTile(b, true)).join('')}
+    </div>` : `<div class="card"><div class="pad center muted small">
+      Nothing is assigned to you today. Pick any building below.
+    </div></div>`}
+
+    ${otherScheduled.length ? `<div class="card">
+      <h2>Also scheduled today</h2>
+      ${otherScheduled.map(jobTile).join('')}
+    </div>` : ''}
+
+    ${rest.length ? `<div class="card">
+      <h2>Other buildings</h2>
+      ${rest.map(jobTile).join('')}
+    </div>` : ''}
+
     <p class="tiny muted center">
       Office ${esc(state.config.officePhone)} · Maintenance ${esc(state.config.maintenancePhone)}
     </p>`;
 
   wireTiles();
   poll(renderCleanerHome, 60000);
+}
+
+function jobTile(b, isMine = false) {
+  const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
+  const status = b.completed_at
+    ? `<span class="pill done">Done ${esc(time(b.completed_at))}</span>`
+    : b.done ? '<span class="pill open">In progress</span>'
+             : '<span class="pill idle">Not started</span>';
+
+  // On your own jobs, name the other people on it - not yourself.
+  const others = isMine
+    ? b.assignees.filter((a) => a.id !== state.user.id)
+    : b.assignees;
+  const who = others.length
+    ? `${isMine ? 'with' : 'for'} ${others.map((a) => esc(firstName(a.name))).join(', ')}`
+    : '';
+
+  return `<button class="tile" data-b="${b.id}">
+    <div class="spread">
+      <span class="row" style="gap:7px;min-width:0">
+        ${b.scheduled ? `<span class="prio">${b.priority}</span>` : ''}
+        <span class="name">${esc(b.name)}</span>
+      </span>
+      ${status}
+    </div>
+    <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
+    <div class="spread small muted" style="margin-top:6px">
+      <span class="grow">${who}${b.note ? `${who ? ' · ' : ''}${esc(b.note)}` : ''}</span>
+      <span>${b.done}/${b.total}</span>
+    </div>
+  </button>`;
+}
+
+/* --------------------------------------------------- view: schedule grid */
+
+async function renderSchedule() {
+  chrome({ title: 'Schedule', section: 'schedule', wide: true });
+  const from = state.weekFrom || startOfWeek(state.config.today);
+  state.weekFrom = from;
+
+  const data = await api(`/schedule?from=${from}&days=7`);
+  const canEdit = data.canEdit;
+
+  const cell = (b, day) => {
+    const c = data.cells[`${b.id}:${day}`] ?? {};
+    const scheduled = c.priority != null;
+    const pct = b.total && c.done ? Math.round((c.done / b.total) * 100) : 0;
+    const classes = [
+      'cell',
+      scheduled ? 'on' : '',
+      c.completedAt ? 'complete' : '',
+      day === data.today ? 'today' : '',
+    ].filter(Boolean).join(' ');
+
+    const inner = scheduled || c.done || c.completedAt
+      ? `<div class="cell-top">
+           ${scheduled ? `<span class="prio">${c.priority}</span>` : ''}
+           ${c.completedAt ? '<span class="tickmark">✓</span>' : ''}
+         </div>
+         ${c.assignees?.length
+           ? `<div class="names">${c.assignees.map((a) => esc(firstName(a.name))).join(', ')}</div>`
+           : scheduled ? '<div class="names" style="color:var(--warn)">unassigned</div>' : ''}
+         ${c.done ? `<div class="mini ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>` : ''}`
+      : (canEdit ? '<span class="plus">+</span>' : '');
+
+    return `<td><button class="${classes}" data-cell="${b.id}|${day}"
+      ${canEdit ? '' : 'disabled'}>${inner}</button></td>`;
+  };
+
+  app.innerHTML = `
+    <div class="card"><div class="pad">
+      <div class="periodnav">
+        <strong class="period-title">
+          ${esc(dayOfMonth(from))} – ${esc(dayOfMonth(addDays(from, 6)))}</strong>
+        <button class="ghost" data-week="${esc(addDays(from, -7))}">‹ Prev</button>
+        <button class="ghost" data-week="${esc(startOfWeek(state.config.today))}">This week</button>
+        <button class="ghost" data-week="${esc(addDays(from, 7))}">Next ›</button>
+      </div>
+    </div></div>
+
+    <div class="card">
+      <div class="grid-wrap">
+        <table class="sched">
+          <thead><tr>
+            <th class="corner">Building</th>
+            ${data.days.map((d) => `<th class="${d === data.today ? 'is-today' : ''}">
+              ${esc(weekdayShort(d))}<small>${esc(dayOfMonth(d))}</small></th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${data.buildings.map((b) => `<tr>
+              <th class="rowhead">${esc(b.name)}</th>
+              ${data.days.map((d) => cell(b, d)).join('')}
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="tiny muted center">
+      ${canEdit
+        ? 'Tap any square to schedule that building, choose who cleans it, and set its order.'
+        : 'This is the roster. The office sets it — tap a building on your home screen to start cleaning.'}
+    </p>`;
+
+  app.querySelectorAll('[data-week]').forEach((b) => {
+    b.onclick = () => { state.weekFrom = b.dataset.week; renderSchedule(); };
+  });
+
+  if (canEdit) {
+    app.querySelectorAll('[data-cell]').forEach((b) => {
+      b.onclick = () => {
+        const [bid, day] = b.dataset.cell.split('|');
+        openScheduleEditor(data, Number(bid), day);
+      };
+    });
+  }
+
+  poll(renderSchedule, 45000);
+}
+
+/** Monday of the week containing `day`. */
+function startOfWeek(day) {
+  const d = asDate(day);
+  const dow = (d.getUTCDay() + 6) % 7; // 0 = Monday
+  return addDays(day, -dow);
+}
+
+async function openScheduleEditor(data, buildingId, day) {
+  const building = data.buildings.find((b) => b.id === buildingId);
+  const cell = data.cells[`${buildingId}:${day}`] ?? {};
+  const scheduled = cell.priority != null;
+
+  if (!state.cleaners) {
+    try {
+      state.cleaners = (await api('/cleaners')).cleaners;
+    } catch (e) {
+      return toast(e.message, true);
+    }
+  }
+
+  const picked = new Set((cell.assignees ?? []).map((a) => a.id));
+
+  const sheet = openSheet(`
+    <div class="pad stack">
+      <div class="spread">
+        <strong>${esc(building.name)}</strong>
+        <span class="small muted">${esc(dayLabel(day))}</span>
+      </div>
+
+      <label class="field"><span>Order of priority (1 = do first)</span>
+        <input id="prio" type="number" min="1" max="99" inputmode="numeric"
+          value="${scheduled ? cell.priority : nextPriority(data, day)}"></label>
+
+      <div>
+        <span class="small muted" style="display:block;margin-bottom:5px">Assign to</span>
+        <div class="check-list">
+          ${state.cleaners.map((c) => `
+            <label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
+              <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
+              <span>${esc(c.name)}</span>
+            </label>`).join('')
+            || '<p class="small muted">No cleaners yet — add them under People.</p>'}
+        </div>
+      </div>
+
+      <label class="field"><span>Note for the cleaner (optional)</span>
+        <input id="note" maxlength="200" value="${esc(cell.note ?? '')}"
+          placeholder="Group arriving 2pm — finish by 1pm"></label>
+
+      <p class="err" id="err"></p>
+      <button class="primary wide" id="save">${scheduled ? 'Save changes' : 'Add to schedule'}</button>
+      ${scheduled ? '<button class="wide danger" id="clear">Remove from schedule</button>' : ''}
+      <button class="wide" id="cancel">Cancel</button>
+    </div>`);
+
+  sheet.querySelectorAll('[data-pick]').forEach((row) => {
+    const box = row.querySelector('input');
+    row.onclick = (e) => {
+      if (e.target !== box) box.checked = !box.checked;
+      row.classList.toggle('on', box.checked);
+    };
+  });
+
+  sheet.querySelector('#cancel').onclick = closeSheet;
+
+  sheet.querySelector('#save').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      const assignees = [...sheet.querySelectorAll('[data-pick]')]
+        .filter((r) => r.querySelector('input').checked)
+        .map((r) => Number(r.dataset.pick));
+      await api('/schedule', {
+        method: 'POST',
+        body: {
+          buildingId, day,
+          priority: Number(sheet.querySelector('#prio').value) || 1,
+          note: sheet.querySelector('#note').value,
+          assignees,
+        },
+      });
+      closeSheet();
+      toast('Schedule updated');
+      renderSchedule();
+    } catch (e) {
+      sheet.querySelector('#err').textContent = e.message;
+      ev.currentTarget.disabled = false;
+    }
+  };
+
+  sheet.querySelector('#clear')?.addEventListener('click', async () => {
+    await api('/schedule/clear', { method: 'POST', body: { buildingId, day } });
+    closeSheet();
+    toast('Removed from schedule');
+    renderSchedule();
+  });
+}
+
+/** Suggests the next free priority number for a day. */
+function nextPriority(data, day) {
+  const used = data.buildings
+    .map((b) => data.cells[`${b.id}:${day}`]?.priority)
+    .filter((p) => p != null);
+  return used.length ? Math.max(...used) + 1 : 1;
 }
 
 /* ---------------------------------------------- view: building checklist */
@@ -535,7 +907,7 @@ async function toggleTask(el, buildingId, day) {
 
 function renderReport(data) {
   stopPolling();
-  chrome({ title: 'Report a problem', back: true });
+  chrome({ title: 'Report', back: true });
 
   app.innerHTML = `<div class="card">
     <h2>${esc(data.building.name)}</h2>
@@ -566,7 +938,7 @@ function renderReport(data) {
   if (photoInput) {
     photoInput.onchange = async () => {
       const file = photoInput.files[0];
-      if (!file) return (photoBlob = null);
+      if (!file) { photoBlob = null; return; }
       photoBlob = await shrinkImage(file);
       const preview = $('#preview');
       preview.src = URL.createObjectURL(photoBlob);
@@ -622,7 +994,7 @@ async function shrinkImage(file, max = 1280, quality = 0.75) {
 /* ----------------------------------------------------- view: issues list */
 
 async function renderIssues(status = 'open') {
-  chrome({ title: 'Maintenance & lost property', back: true });
+  chrome({ title: 'Issues', section: 'issues' });
   const { items } = await api(`/maintenance?status=${status}`);
   const canResolve = state.user.role !== 'cleaner';
 
@@ -672,10 +1044,11 @@ async function renderIssues(status = 'open') {
 const VERB = {
   done: 'ticked', undone: 'un-ticked', completed: 'signed off',
   reopened: 'reopened', issue: 'reported', lost_property: 'logged lost property',
+  scheduled: 'scheduled',
 };
 
 async function renderHistory() {
-  chrome({ title: 'Activity log', back: true });
+  chrome({ title: 'Activity', section: 'history' });
   const day = viewDay();
   const { activity } = await api(`/activity?day=${day}`);
 
@@ -709,42 +1082,44 @@ async function renderHistory() {
 /* ---------------------------------------------------------- view: admin */
 
 async function renderAdmin() {
-  chrome({ title: 'People', back: true });
+  chrome({ title: 'People', section: 'admin' });
   const { users } = await api('/users');
 
   app.innerHTML = `
-    <div class="card">
-      <h2>Add someone</h2>
-      <div class="pad stack">
-        <label class="field"><span>Name</span><input id="n"></label>
-        <label class="field"><span>Role</span>
-          <select id="r">
-            <option value="cleaner">Cleaner — ticks checklists</option>
-            <option value="office">Office — sees the overview, resolves issues</option>
-            <option value="admin">Admin — everything, including people</option>
-          </select></label>
-        <label class="field"><span>PIN (4-8 digits)</span>
-          <input id="p" inputmode="numeric" pattern="\\d*"></label>
-        <p class="err" id="err"></p>
-        <button class="primary wide" id="add">Add person</button>
+    <div class="cols">
+      <div class="card">
+        <h2>Add someone</h2>
+        <div class="pad stack">
+          <label class="field"><span>Name</span><input id="n"></label>
+          <label class="field"><span>Role</span>
+            <select id="r">
+              <option value="cleaner">Cleaner — ticks checklists</option>
+              <option value="office">Office — sees the overview, sets the schedule</option>
+              <option value="admin">Admin — everything, including people</option>
+            </select></label>
+          <label class="field"><span>PIN (4-8 digits)</span>
+            <input id="p" inputmode="numeric" pattern="\\d*"></label>
+          <p class="err" id="err"></p>
+          <button class="primary wide" id="add">Add person</button>
+        </div>
       </div>
-    </div>
 
-    <div class="card">
-      <h2>Everyone</h2>
-      <table class="grid">
-        <tr><th>Name</th><th>Role</th><th></th></tr>
-        ${users.map((u) => `<tr style="${u.active ? '' : 'opacity:.5'}"
-            data-id="${u.id}" data-name="${esc(u.name)}" data-role="${esc(u.role)}"
-            data-active="${u.active}">
-          <td>${esc(u.name)}</td>
-          <td class="muted">${esc(u.role)}${u.active ? '' : ' · disabled'}</td>
-          <td>
-            <button class="ghost" data-pin>New PIN</button>
-            <button class="ghost ${u.active ? 'danger' : ''}" data-tog>
-              ${u.active ? 'Disable' : 'Enable'}</button>
-          </td></tr>`).join('')}
-      </table>
+      <div class="card">
+        <h2>Everyone</h2>
+        <table class="grid">
+          <tr><th>Name</th><th>Role</th><th></th></tr>
+          ${users.map((u) => `<tr style="${u.active ? '' : 'opacity:.5'}"
+              data-id="${u.id}" data-name="${esc(u.name)}" data-role="${esc(u.role)}"
+              data-active="${u.active}">
+            <td>${esc(u.name)}</td>
+            <td class="muted">${esc(u.role)}${u.active ? '' : ' · disabled'}</td>
+            <td>
+              <button class="ghost" data-pin>New PIN</button>
+              <button class="ghost ${u.active ? 'danger' : ''}" data-tog>
+                ${u.active ? 'Disable' : 'Enable'}</button>
+            </td></tr>`).join('')}
+        </table>
+      </div>
     </div>
     <p class="tiny muted center">PINs are stored hashed — they can be replaced, never read back.</p>`;
 
@@ -754,6 +1129,7 @@ async function renderAdmin() {
         method: 'POST',
         body: { name: $('#n').value, role: $('#r').value, pin: $('#p').value },
       });
+      state.cleaners = null; // the assignment picker must pick up the new person
       toast('Person added');
       renderAdmin();
     } catch (e) {
@@ -794,6 +1170,7 @@ async function renderAdmin() {
             active: row.active === '1' ? 0 : 1,
           },
         });
+        state.cleaners = null;
         renderAdmin();
       } catch (e) {
         toast(e.message, true);
@@ -813,6 +1190,7 @@ async function loadConfig() {
 
 async function render() {
   stopPolling();
+  closeSheet();
 
   try {
     await loadConfig();
@@ -827,6 +1205,7 @@ async function render() {
 
   try {
     if (head === 'b' && arg) return await renderBuilding(Number(arg));
+    if (head === 'schedule') return await renderSchedule();
     if (head === 'issues') return await renderIssues();
     if (head === 'history') return await renderHistory();
     if (head === 'admin') return await renderAdmin();

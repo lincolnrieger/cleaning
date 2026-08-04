@@ -89,6 +89,13 @@ function localDay(env, date = new Date()) {
 
 const isDay = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
+/** Calendar arithmetic on YYYY-MM-DD, done in UTC so DST can't shift a day. */
+function addDays(day, delta) {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
 function dayParam(url, env) {
   const d = url.searchParams.get('day');
   return isDay(d) ? d : localDay(env);
@@ -272,14 +279,214 @@ const routes = {
       byBuilding.get(c.building_id).push(c.name);
     }
 
+    // What was planned for this day, and who it was given to.
+    const { results: planned } = await env.DB.prepare(
+      `SELECT s.id, s.building_id, s.priority, s.note FROM schedule s WHERE s.day = ?`,
+    ).bind(day).all();
+
+    const { results: assigned } = await env.DB.prepare(
+      `SELECT sa.schedule_id, sa.user_id, sa.user_name
+       FROM schedule_assignees sa JOIN schedule s ON s.id = sa.schedule_id
+       WHERE s.day = ? ORDER BY sa.user_name`,
+    ).bind(day).all();
+
+    const assigneesFor = new Map();
+    for (const a of assigned) {
+      if (!assigneesFor.has(a.schedule_id)) assigneesFor.set(a.schedule_id, []);
+      assigneesFor.get(a.schedule_id).push({ id: a.user_id, name: a.user_name });
+    }
+    const planFor = new Map(planned.map((p) => [p.building_id, p]));
+
+    // Last time each building was signed off, for the "not done in N days" flag.
+    const { results: lastDone } = await env.DB.prepare(
+      `SELECT building_id, MAX(day) AS last_day FROM building_status
+       WHERE day <= ? GROUP BY building_id`,
+    ).bind(day).all();
+    const lastFor = new Map(lastDone.map((r) => [r.building_id, r.last_day]));
+
+    const enriched = buildings.map((b) => {
+      const plan = planFor.get(b.id);
+      return {
+        ...b,
+        crew: byBuilding.get(b.id) ?? [],
+        scheduled: Boolean(plan),
+        priority: plan?.priority ?? null,
+        note: plan?.note ?? null,
+        assignees: plan ? (assigneesFor.get(plan.id) ?? []) : [],
+        lastCleaned: lastFor.get(b.id) ?? null,
+      };
+    });
+
+    // Scheduled buildings first in priority order, then everything else.
+    enriched.sort((x, y) => {
+      if (x.scheduled !== y.scheduled) return x.scheduled ? -1 : 1;
+      if (x.scheduled && x.priority !== y.priority) return x.priority - y.priority;
+      return 0;
+    });
+
+    return json({ day, buildings: enriched });
+  },
+
+  /* --- scheduling and assignment --- */
+
+  'GET /cleaners': async (_req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const { results } = await env.DB.prepare(
+      `SELECT id, name, role FROM users
+       WHERE active = 1 AND role IN ('cleaner', 'admin') ORDER BY name`,
+    ).all();
+    return json({ cleaners: results });
+  },
+
+  // The day-grid: every building crossed with a range of days.
+  'GET /schedule': async (_req, env, { user, url }) => {
+    canRead(user);
+    const from = isDay(url.searchParams.get('from'))
+      ? url.searchParams.get('from') : localDay(env);
+    const span = Math.min(Math.max(Number(url.searchParams.get('days')) || 7, 1), 31);
+    const days = Array.from({ length: span }, (_, i) => addDays(from, i));
+    const to = days[days.length - 1];
+
+    const [buildings, rows, assignees, totals, progress, completions] = await Promise.all([
+      env.DB.prepare(
+        'SELECT id, name FROM buildings WHERE active = 1 ORDER BY sort_order, name',
+      ).all(),
+      env.DB.prepare(
+        'SELECT id, building_id, day, priority, note FROM schedule WHERE day BETWEEN ? AND ?',
+      ).bind(from, to).all(),
+      env.DB.prepare(
+        `SELECT sa.schedule_id, sa.user_id, sa.user_name
+         FROM schedule_assignees sa JOIN schedule s ON s.id = sa.schedule_id
+         WHERE s.day BETWEEN ? AND ? ORDER BY sa.user_name`,
+      ).bind(from, to).all(),
+      env.DB.prepare(
+        `SELECT a.building_id, COUNT(*) AS total FROM tasks t
+         JOIN areas a ON a.id = t.area_id WHERE t.active = 1 GROUP BY a.building_id`,
+      ).all(),
+      env.DB.prepare(
+        `SELECT a.building_id, l.day, COUNT(*) AS done
+         FROM task_log l
+         JOIN tasks t ON t.id = l.task_id AND t.active = 1
+         JOIN areas a ON a.id = t.area_id
+         WHERE l.done = 1 AND l.day BETWEEN ? AND ?
+         GROUP BY a.building_id, l.day`,
+      ).bind(from, to).all(),
+      env.DB.prepare(
+        `SELECT building_id, day, completed_at, completed_by
+         FROM building_status WHERE day BETWEEN ? AND ?`,
+      ).bind(from, to).all(),
+    ]);
+
+    const byScheduleId = new Map();
+    for (const a of assignees.results) {
+      if (!byScheduleId.has(a.schedule_id)) byScheduleId.set(a.schedule_id, []);
+      byScheduleId.get(a.schedule_id).push({ id: a.user_id, name: a.user_name });
+    }
+
+    const cells = {};
+    const put = (bid, day, patch) => {
+      const key = `${bid}:${day}`;
+      cells[key] = { ...(cells[key] ?? {}), ...patch };
+    };
+    for (const r of rows.results) {
+      put(r.building_id, r.day, {
+        priority: r.priority,
+        note: r.note,
+        assignees: byScheduleId.get(r.id) ?? [],
+      });
+    }
+    for (const p of progress.results) put(p.building_id, p.day, { done: p.done });
+    for (const c of completions.results) {
+      put(c.building_id, c.day, { completedAt: c.completed_at, completedBy: c.completed_by });
+    }
+
     return json({
-      day,
-      buildings: buildings.map((b) => ({ ...b, crew: byBuilding.get(b.id) ?? [] })),
+      from,
+      days,
+      today: localDay(env),
+      buildings: buildings.results.map((b) => ({
+        ...b,
+        total: totals.results.find((t) => t.building_id === b.id)?.total ?? 0,
+      })),
+      cells,
+      canEdit: user.role !== 'cleaner',
     });
   },
 
+  'POST /schedule': async (req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const { buildingId, day: rawDay, priority, note, assignees } = await req.json();
+    const day = isDay(rawDay) ? rawDay : localDay(env);
+    const id = Number(buildingId);
+
+    const building = await env.DB.prepare(
+      'SELECT name FROM buildings WHERE id = ? AND active = 1',
+    ).bind(id).first();
+    if (!building) throw new HttpError(404, 'Building not found.');
+
+    await env.DB.prepare(
+      `INSERT INTO schedule (building_id, day, priority, note, created_by, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT(building_id, day) DO UPDATE SET
+         priority = excluded.priority, note = excluded.note`,
+    ).bind(
+      id, day, Math.min(Math.max(Number(priority) || 1, 1), 99),
+      clean(note, 200) || null, user.name, now(),
+    ).run();
+
+    const row = await env.DB.prepare(
+      'SELECT id FROM schedule WHERE building_id = ? AND day = ?',
+    ).bind(id, day).first();
+
+    // Replace the assignee list wholesale - simpler than diffing, and the
+    // lists are tiny.
+    await env.DB.prepare('DELETE FROM schedule_assignees WHERE schedule_id = ?')
+      .bind(row.id).run();
+
+    const wanted = Array.isArray(assignees) ? assignees.map(Number).slice(0, 20) : [];
+    if (wanted.length) {
+      const { results: valid } = await env.DB.prepare(
+        `SELECT id, name FROM users
+         WHERE active = 1 AND id IN (${wanted.map(() => '?').join(',')})`,
+      ).bind(...wanted).all();
+      if (valid.length) {
+        await env.DB.batch(valid.map((u) => env.DB.prepare(
+          `INSERT OR IGNORE INTO schedule_assignees (schedule_id, user_id, user_name)
+           VALUES (?, ?, ?)`,
+        ).bind(row.id, u.id, u.name)));
+      }
+    }
+
+    await logActivity(env, {
+      day, buildingId: id, kind: 'scheduled',
+      detail: wanted.length ? 'Scheduled and assigned' : 'Scheduled',
+      userName: user.name,
+    });
+
+    return json({ ok: true });
+  },
+
+  'POST /schedule/clear': async (req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const { buildingId, day: rawDay } = await req.json();
+    const day = isDay(rawDay) ? rawDay : localDay(env);
+    const id = Number(buildingId);
+
+    const row = await env.DB.prepare(
+      'SELECT id FROM schedule WHERE building_id = ? AND day = ?',
+    ).bind(id, day).first();
+    if (row) {
+      // Explicit child delete: D1 does not enable foreign key cascades.
+      await env.DB.prepare('DELETE FROM schedule_assignees WHERE schedule_id = ?')
+        .bind(row.id).run();
+      await env.DB.prepare('DELETE FROM schedule WHERE id = ?').bind(row.id).run();
+    }
+    return json({ ok: true });
+  },
+
   'GET /activity': async (req, env, { user, url }) => {
-    canRead(user);
+    // Office-side reporting: cleaners see attribution on the checklist itself.
+    require(user, 'office', 'admin');
     const day = dayParam(url, env);
     const { results } = await env.DB.prepare(
       `SELECT ac.id, ac.kind, ac.detail, ac.user_name, ac.created_at, b.name AS building

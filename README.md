@@ -16,13 +16,16 @@ browser, no software to install and no commands to run.
 | Sign a building off as complete | ✅ | — | ✅ |
 | Report maintenance / lost property | ✅ | ✅ | ✅ |
 | Camp-wide progress overview | ✅ | ✅ | ✅ |
+| See the week's roster | read-only | ✅ | ✅ |
+| Schedule buildings, assign cleaners, set priority | — | ✅ | ✅ |
 | Open an individual building's detail | ✅ | read-only | ✅ |
 | Mark a maintenance issue resolved | — | ✅ | ✅ |
 | Activity log + CSV export | — | ✅ | ✅ |
 | Add people, set PINs | — | — | ✅ |
 
 Everyone signs in with a 4–8 digit PIN. PINs are unique — the PIN *is* the
-identity, which is what makes attribution work without usernames.
+identity, which is what makes attribution work without usernames. The header
+shows who is signed in and their role on every screen.
 
 ### A note on "only the cleaners can see"
 
@@ -36,6 +39,42 @@ variable `OFFICE_ROLLUP_ONLY` set to `1` (Pages project → Settings →
 Variables and Secrets) and redeploy. Building tiles stop being clickable for
 office accounts, and the API refuses the request too — it's a real
 restriction, not just a hidden button.
+
+## Scheduling and assignment
+
+**Schedule** is a week grid: buildings down the side, days across the top. Tap
+any square to put that building on the roster for that day, choose who cleans
+it, give it a priority number, and add a note ("group arriving 2pm — finish by
+1pm"). Tap a scheduled square again to change or remove it.
+
+Each square shows its priority, who's assigned, and how the clean is going —
+green with a tick once it's signed off. Today's column is outlined.
+
+What that feeds:
+
+- **Cleaners** open the app to **Your buildings today**, in priority order,
+  with the office's note attached. Anything scheduled for someone else, and
+  then everything unscheduled, appears below — a cleaner is never blocked from
+  a building they weren't formally assigned.
+- **The office overview** becomes a run sheet: scheduled buildings first in
+  priority order with "4 of 4 left" at the top, unscheduled buildings in a
+  second column, and a banner naming any scheduled building with nobody on it.
+
+More than one cleaner can be assigned to the same building — that's the case
+the whole app is built around, so they're listed together and each still gets
+their own attribution on the tasks they tick.
+
+## Screens and devices
+
+One layout, built for both. On a phone it's a single column with 48px tap
+targets; on a desktop the overview splits into two columns and the week grid
+shows all seven days at once. The grid scrolls sideways on a narrow screen
+with the building names pinned in place.
+
+Text inputs are set to 16px, which is the threshold below which iOS Safari
+zooms the page when you tap a field — so it never does that. Buttons use
+`touch-action: manipulation` to drop the double-tap-to-zoom delay, and the
+layout respects the notch and home indicator via safe-area insets.
 
 ## How the tracking works
 
@@ -58,7 +97,7 @@ restriction, not just a hidden button.
 ## Speed
 
 There is no build step and no framework. The whole front end is three static
-files served from Cloudflare's edge (~37 KB total, uncompressed), and the API
+files served from Cloudflare's edge (~50 KB total, uncompressed), and the API
 runs at the edge against SQLite, which doesn't sleep between uses. Photos are
 resized to 1280px in the browser before upload, so reporting a problem works
 on a weak mobile signal.
