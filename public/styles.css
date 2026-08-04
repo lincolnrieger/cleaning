@@ -578,12 +578,13 @@ table.sched thead th.is-today small {
 }
 td.today-col { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 
-th.rowhead {
+/* Full selector so it outranks `table.sched th { padding: 0 }`. */
+table.sched th.rowhead {
   position: sticky;
   left: 0;
   z-index: 2;
   background: var(--card);
-  padding: 10px 14px;
+  padding: 11px 16px;
   text-align: left;
   font-size: 13.5px;
   font-weight: 640;
@@ -592,15 +593,17 @@ th.rowhead {
   border-right: 1px solid var(--line);
 }
 
-th.rowhead small { display: block; font-weight: 500; font-size: 11px; color: var(--faint); margin-top: 1px; }
+table.sched th.rowhead small {
+  display: block; font-weight: 500; font-size: 11px; color: var(--faint); margin-top: 1px;
+}
 
-thead th.corner {
+table.sched thead th.corner {
   position: sticky;
   left: 0;
   z-index: 4;
   background: var(--card);
   text-align: left;
-  padding-left: 14px;
+  padding: 9px 16px 10px;
   border-right: 1px solid var(--line);
   font-size: 11px;
   text-transform: uppercase;
@@ -644,6 +647,13 @@ td.weekend { background: color-mix(in srgb, var(--bg) 55%, transparent); }
 .cell .plus { color: var(--faint); font-size: 20px; line-height: 1; opacity: 0; transition: opacity .14s; }
 .cell:hover .plus { opacity: .8; }
 .cell .warn-dot { font-size: 10px; color: var(--warn); font-weight: 700; }
+
+/* Read-only for cleaners means "can't change it", not "can't read it" -
+   so the roster stays at full contrast, it just doesn't respond. */
+.cell[disabled] { opacity: 1; cursor: default; }
+.cell[disabled]:hover { background: none; }
+.cell.on[disabled]:hover { background: var(--accent-soft); }
+.cell.complete[disabled]:hover { background: var(--done-bg); }
 
 /* Touch devices have no hover, so the affordance must always show. */
 @media (hover: none) {
@@ -776,3 +786,6 @@ code.phrase {
 }
 
 .sheet-head strong { font-size: 17px; letter-spacing: -0.02em; }
+
+.dialog-body { font-size: 14px; line-height: 1.5; color: var(--ink-2); margin: 0; }
+.dialog-body strong { color: var(--ink); }

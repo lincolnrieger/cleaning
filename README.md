@@ -21,7 +21,7 @@ browser, no software to install and no commands to run.
 | Open an individual building's detail | ✅ | read-only | ✅ |
 | Mark a maintenance issue resolved | — | ✅ | ✅ |
 | Activity log + CSV export | — | ✅ | ✅ |
-| Add people, set PINs | — | — | ✅ |
+| Add people, set PINs, delete accounts | — | — | ✅ |
 
 Everyone signs in with a 4–8 digit PIN. PINs are unique — the PIN *is* the
 identity, which is what makes attribution work without usernames. The header
@@ -50,6 +50,13 @@ after that. Optionally it also removes everyone except you.
 It never drops a table, and it never touches your buildings, areas or tasks —
 those come from `data/checklist.json`. Photos attached to cleared maintenance
 reports are deleted from storage too.
+
+Individual people can also be **deleted** outright from the People table, not
+just disabled. Deleting removes them from the list and from any buildings
+they're assigned to, but **what they already cleaned stays in the records**
+under their name. You can't delete yourself, and you can't delete the last
+admin. Disabling remains the softer option: it keeps the account and just
+blocks sign-in.
 
 ### A note on "only the cleaners can see"
 
@@ -88,6 +95,15 @@ What that feeds:
 More than one cleaner can be assigned to the same building — that's the case
 the whole app is built around, so they're listed together and each still gets
 their own attribution on the tasks they tick.
+
+**Copy this week to next week** duplicates a whole week's plan — same
+buildings, same people, same priorities and notes — onto the following week,
+so a steady roster takes one tap rather than twenty.
+
+**Removing a job from the schedule** asks first, and if any work was already
+recorded that day it offers to wipe those ticks and the sign-off too. Taking
+something off the plan and erasing what somebody actually did are different
+intentions, so it never assumes.
 
 ## Screens and devices
 

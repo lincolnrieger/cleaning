@@ -209,7 +209,13 @@ function chrome({ title, back = false, section = '', wide = false }) {
 }
 
 $('#back').onclick = () => { location.hash = '#/'; };
-$('#signout').onclick = () => confirm('Sign out?') && signOut();
+$('#signout').onclick = async () => {
+  if (await ask({
+    title: 'Sign out?',
+    body: `You are signed in as <strong>${esc(state.user?.name ?? '')}</strong>.`,
+    confirmText: 'Sign out',
+  })) signOut();
+};
 
 function stopPolling() {
   if (state.poll) clearInterval(state.poll);
@@ -261,6 +267,85 @@ function openSheet(html) {
 
 function closeSheet() {
   document.querySelector('.sheet-bg')?.remove();
+}
+
+// Esc closes whatever sheet or dialog is open.
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSheet();
+});
+
+/**
+ * In-app replacement for window.confirm, so every prompt matches the app's
+ * theme instead of dropping a browser chrome dialog on top of it.
+ * Resolves false on cancel, true on confirm, or { checked } when `checkbox`
+ * is supplied.
+ */
+function ask({
+  title, body = '', confirmText = 'Confirm', cancelText = 'Cancel',
+  danger = false, checkbox = null,
+}) {
+  return new Promise((resolve) => {
+    const bg = openSheet(`
+      <div class="sheet-head"><strong>${esc(title)}</strong></div>
+      <div class="pad stack">
+        ${body ? `<p class="dialog-body">${body}</p>` : ''}
+        ${checkbox ? `<label class="check-row" data-extra>
+            <input type="checkbox">
+            <span class="grow">${checkbox}</span>
+          </label>` : ''}
+        <button class="${danger ? 'destroy' : 'primary'} wide" data-ok>${esc(confirmText)}</button>
+        <button class="wide" data-cancel>${esc(cancelText)}</button>
+      </div>`);
+
+    const box = bg.querySelector('[data-extra] input');
+    if (box) box.onchange = () => box.closest('.check-row').classList.toggle('on', box.checked);
+
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      closeSheet();
+      resolve(value);
+    };
+
+    bg.querySelector('[data-ok]').onclick = () => done(checkbox ? { checked: box.checked } : true);
+    bg.querySelector('[data-cancel]').onclick = () => done(false);
+    bg.onclick = (e) => { if (e.target === bg) done(false); };
+    new MutationObserver(() => { if (!document.body.contains(bg)) done(false); })
+      .observe(document.body, { childList: true });
+  });
+}
+
+/** In-app replacement for window.prompt. Resolves null on cancel. */
+function askText({ title, body = '', label, value = '', confirmText = 'Save', numeric = false }) {
+  return new Promise((resolve) => {
+    const bg = openSheet(`
+      <div class="sheet-head"><strong>${esc(title)}</strong></div>
+      <div class="pad stack">
+        ${body ? `<p class="dialog-body">${body}</p>` : ''}
+        <label class="field"><span>${esc(label)}</span>
+          <input id="askv" value="${esc(value)}" autocomplete="off"
+            ${numeric ? 'inputmode="numeric" pattern="\\d*"' : ''}></label>
+        <button class="primary wide" data-ok>${esc(confirmText)}</button>
+        <button class="wide" data-cancel>Cancel</button>
+      </div>`);
+
+    const input = bg.querySelector('#askv');
+    setTimeout(() => input.focus(), 30);
+
+    let settled = false;
+    const done = (v) => {
+      if (settled) return;
+      settled = true;
+      closeSheet();
+      resolve(v);
+    };
+
+    bg.querySelector('[data-ok]').onclick = () => done(input.value);
+    bg.querySelector('[data-cancel]').onclick = () => done(null);
+    input.onkeydown = (e) => { if (e.key === 'Enter') done(input.value); };
+    bg.onclick = (e) => { if (e.target === bg) done(null); };
+  });
 }
 
 /* ------------------------------------------------------------ view: login */
@@ -677,6 +762,9 @@ async function renderSchedule() {
         <button class="ghost" data-week="${esc(startOfWeek(state.config.today))}">This week</button>
         <button class="ghost" data-week="${esc(addDays(from, 7))}">Next ›</button>
       </div>
+      ${canEdit ? `<div class="row" style="justify-content:center;margin-top:10px">
+        <button class="ghost" id="copyweek">Copy this week to next week</button>
+      </div>` : ''}
     </div></div>
 
     <div class="card">
@@ -719,6 +807,31 @@ async function renderSchedule() {
   app.querySelectorAll('[data-week]').forEach((b) => {
     b.onclick = () => { state.weekFrom = b.dataset.week; renderSchedule(); };
   });
+
+  const copyBtn = $('#copyweek');
+  if (copyBtn) {
+    copyBtn.onclick = async () => {
+      const target = addDays(from, 7);
+      const go = await ask({
+        title: 'Copy this week forward?',
+        body: `Every building scheduled between <strong>${esc(dayOfMonth(from))}</strong> and
+               <strong>${esc(dayOfMonth(addDays(from, 6)))}</strong> — with the same people and
+               priorities — will be copied onto the week starting
+               <strong>${esc(dayOfMonth(target))}</strong>.
+               Anything already scheduled on those days is overwritten.`,
+        confirmText: 'Copy week',
+      });
+      if (!go) return;
+      try {
+        const res = await api('/schedule/copy', { method: 'POST', body: { from, to: target } });
+        state.weekFrom = target;
+        toast(`Copied ${res.copied} job${res.copied === 1 ? '' : 's'}`);
+        renderSchedule();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  }
 
   if (canEdit) {
     app.querySelectorAll('[data-cell]').forEach((b) => {
@@ -784,7 +897,7 @@ async function openScheduleEditor(data, buildingId, day) {
           More than one person can be put on the same building.</p>
       </div>
 
-      <label class="field"><span>Note for the cleaner (optional)</span>
+      <label class="field"><span>Note for this job (optional)</span>
         <input id="note" maxlength="200" value="${esc(cell.note ?? '')}"
           placeholder="Group arriving 2pm — finish by 1pm"></label>
 
@@ -794,12 +907,12 @@ async function openScheduleEditor(data, buildingId, day) {
       <button class="wide" id="cancel">Cancel</button>
     </div>`);
 
+  // The <label> wraps the checkbox, so the whole row is already a hit target.
+  // Just mirror the resulting state into the class - flipping it by hand here
+  // would undo the browser's own toggle.
   sheet.querySelectorAll('[data-pick]').forEach((row) => {
     const box = row.querySelector('input');
-    row.onclick = (e) => {
-      if (e.target !== box) box.checked = !box.checked;
-      row.classList.toggle('on', box.checked);
-    };
+    box.onchange = () => row.classList.toggle('on', box.checked);
   });
 
   sheet.querySelector('#cancel').onclick = closeSheet;
@@ -829,9 +942,31 @@ async function openScheduleEditor(data, buildingId, day) {
   };
 
   sheet.querySelector('#clear')?.addEventListener('click', async () => {
-    await api('/schedule/clear', { method: 'POST', body: { buildingId, day } });
+    const workDone = (cell.done ?? 0) > 0 || Boolean(cell.completedAt);
+    const res = await ask({
+      title: 'Remove from schedule?',
+      body: workDone
+        ? `<strong>${esc(building.name)}</strong> already has
+           <strong>${cell.done ?? 0}</strong> item${(cell.done ?? 0) === 1 ? '' : 's'} ticked
+           for ${esc(dayLabel(day).toLowerCase())}${cell.completedAt ? ' and is signed off' : ''}.
+           Taking it off the plan leaves that record in place.`
+        : `<strong>${esc(building.name)}</strong> will come off the plan for
+           ${esc(dayLabel(day).toLowerCase())}.`,
+      confirmText: 'Remove',
+      danger: true,
+      checkbox: workDone
+        ? `Also wipe that day's ticks and sign-off
+           <span class="tiny muted" style="display:block">The building goes back to 0 done.</span>`
+        : null,
+    });
+    if (!res) return;
+
+    await api('/schedule/clear', {
+      method: 'POST',
+      body: { buildingId, day, clearProgress: Boolean(res.checked) },
+    });
     closeSheet();
-    toast('Removed from schedule');
+    toast(res.checked ? 'Removed and progress cleared' : 'Removed from schedule');
     renderSchedule();
   });
 }
@@ -897,8 +1032,15 @@ async function renderBuilding(id) {
     $('#complete').onclick = async () => {
       const { done, total } = counts(state.building);
       const undo = Boolean(state.building.completed);
-      if (!undo && done < total &&
-          !confirm(`${total - done} item(s) still unticked. Mark complete anyway?`)) return;
+      if (!undo && done < total) {
+        const go = await ask({
+          title: 'Mark complete anyway?',
+          body: `<strong>${total - done}</strong> item${total - done > 1 ? 's are' : ' is'}
+                 still unticked on this checklist.`,
+          confirmText: 'Mark complete',
+        });
+        if (!go) return;
+      }
       try {
         const res = await api('/building/complete', {
           method: 'POST', body: { buildingId: id, day, undo },
@@ -1238,8 +1380,10 @@ async function renderAdmin() {
             <td class="muted">${esc(u.role)}${u.active ? '' : ' · disabled'}</td>
             <td class="actions">
               <button class="ghost" data-pin>New PIN</button>
-              <button class="ghost ${u.active ? 'danger' : ''}" data-tog>
-                ${u.active ? 'Disable' : 'Enable'}</button>
+              <button class="ghost" data-tog>${u.active ? 'Disable' : 'Enable'}</button>
+              <button class="ghost danger" data-del
+                ${u.id === state.user.id ? 'disabled title="You cannot delete yourself"' : ''}
+                >Delete</button>
             </td></tr>`).join('')}
         </table>
         <p class="tiny muted pad" style="padding-top:0">
@@ -1322,9 +1466,15 @@ async function renderAdmin() {
 
   resetBtn.onclick = async () => {
     const alsoPeople = $('#wipepeople').checked;
-    if (!confirm(alsoPeople
-      ? 'Delete all cleaning records AND everyone except you? This cannot be undone.'
-      : 'Delete all cleaning records, schedules and reports? This cannot be undone.')) return;
+    const go = await ask({
+      title: 'Clear the database?',
+      body: `This deletes every tick, sign-off, schedule and report${alsoPeople
+        ? ', <strong>and removes everyone except you</strong>' : ''}.
+        Your buildings and checklists are kept. <strong>This cannot be undone.</strong>`,
+      confirmText: alsoPeople ? 'Clear everything' : 'Clear records',
+      danger: true,
+    });
+    if (!go) return;
 
     resetBtn.disabled = true;
     try {
@@ -1346,7 +1496,13 @@ async function renderAdmin() {
   app.querySelectorAll('[data-pin]').forEach((b) => {
     b.onclick = async () => {
       const row = rowOf(b);
-      const pin = prompt(`New PIN for ${row.name} (4-8 digits)`);
+      const pin = await askText({
+        title: 'Set a new PIN',
+        body: `For <strong>${esc(row.name)}</strong>. They will need this to sign in.`,
+        label: 'New PIN (4-8 digits)',
+        confirmText: 'Set PIN',
+        numeric: true,
+      });
       if (!pin) return;
       try {
         await api('/users', {
@@ -1357,6 +1513,30 @@ async function renderAdmin() {
           },
         });
         toast('PIN updated');
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+
+  app.querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = async () => {
+      const row = rowOf(b);
+      const go = await ask({
+        title: `Delete ${row.name}?`,
+        body: `They will be removed from the people list and taken off any
+               buildings they are assigned to. <strong>What they have already
+               cleaned stays in the records</strong> under their name.
+               Disabling instead keeps the account and blocks sign-in.`,
+        confirmText: 'Delete permanently',
+        danger: true,
+      });
+      if (!go) return;
+      try {
+        await api('/users/delete', { method: 'POST', body: { id: Number(row.id) } });
+        state.cleaners = null;
+        toast(`${row.name} deleted`);
+        renderAdmin();
       } catch (e) {
         toast(e.message, true);
       }

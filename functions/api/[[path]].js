@@ -507,7 +507,7 @@ const routes = {
 
   'POST /schedule/clear': async (req, env, { user }) => {
     require(user, 'office', 'admin');
-    const { buildingId, day: rawDay } = await req.json();
+    const { buildingId, day: rawDay, clearProgress } = await req.json();
     const day = isDay(rawDay) ? rawDay : localDay(env);
     const id = Number(buildingId);
 
@@ -520,7 +520,83 @@ const routes = {
         .bind(row.id).run();
       await env.DB.prepare('DELETE FROM schedule WHERE id = ?').bind(row.id).run();
     }
+
+    // Optional, because un-planning a day and erasing the work someone already
+    // did that day are two different intentions.
+    if (clearProgress) {
+      await env.DB.batch([
+        env.DB.prepare(
+          `DELETE FROM task_log WHERE day = ?1 AND task_id IN (
+             SELECT t.id FROM tasks t JOIN areas a ON a.id = t.area_id
+             WHERE a.building_id = ?2)`,
+        ).bind(day, id),
+        env.DB.prepare('DELETE FROM building_status WHERE building_id = ? AND day = ?')
+          .bind(id, day),
+        env.DB.prepare('DELETE FROM activity WHERE building_id = ? AND day = ?')
+          .bind(id, day),
+      ]);
+    }
+
     return json({ ok: true });
+  },
+
+  /** Copies a whole week's plan forward or back - the roster rarely changes. */
+  'POST /schedule/copy': async (req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const { from, to } = await req.json();
+    if (!isDay(from) || !isDay(to)) throw new HttpError(400, 'Bad dates.');
+    if (from === to) throw new HttpError(400, 'Pick a different week.');
+
+    const fromEnd = addDays(from, 6);
+    const { results: rows } = await env.DB.prepare(
+      'SELECT id, building_id, day, priority, note FROM schedule WHERE day BETWEEN ? AND ?',
+    ).bind(from, fromEnd).all();
+    if (!rows.length) throw new HttpError(400, 'That week has nothing scheduled to copy.');
+
+    const { results: links } = await env.DB.prepare(
+      `SELECT sa.schedule_id, sa.user_id, sa.user_name
+       FROM schedule_assignees sa JOIN schedule s ON s.id = sa.schedule_id
+       WHERE s.day BETWEEN ? AND ?`,
+    ).bind(from, fromEnd).all();
+
+    const byId = new Map();
+    for (const l of links) {
+      if (!byId.has(l.schedule_id)) byId.set(l.schedule_id, []);
+      byId.get(l.schedule_id).push(l);
+    }
+
+    const shift = Math.round(
+      (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000,
+    );
+
+    let copied = 0;
+    for (const r of rows) {
+      const targetDay = addDays(r.day, shift);
+      await env.DB.prepare(
+        `INSERT INTO schedule (building_id, day, priority, note, created_by, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(building_id, day) DO UPDATE SET
+           priority = excluded.priority, note = excluded.note`,
+      ).bind(r.building_id, targetDay, r.priority, r.note, user.name, now()).run();
+
+      const target = await env.DB.prepare(
+        'SELECT id FROM schedule WHERE building_id = ? AND day = ?',
+      ).bind(r.building_id, targetDay).first();
+
+      await env.DB.prepare('DELETE FROM schedule_assignees WHERE schedule_id = ?')
+        .bind(target.id).run();
+
+      const people = byId.get(r.id) ?? [];
+      if (people.length) {
+        await env.DB.batch(people.map((pn) => env.DB.prepare(
+          `INSERT OR IGNORE INTO schedule_assignees (schedule_id, user_id, user_name)
+           VALUES (?, ?, ?)`,
+        ).bind(target.id, pn.user_id, pn.user_name)));
+      }
+      copied += 1;
+    }
+
+    return json({ ok: true, copied });
   },
 
   'GET /activity': async (req, env, { user, url }) => {
@@ -800,6 +876,37 @@ const routes = {
     await env.DB.prepare('INSERT INTO users (name, role, pin_hash) VALUES (?, ?, ?)')
       .bind(who, role, await hashPin(env, pin)).run();
     return json({ ok: true });
+  },
+
+  /**
+   * Removes a person outright. Their past work stays readable because
+   * task_log and activity keep the name they had at the time.
+   */
+  'POST /users/delete': async (req, env, { user }) => {
+    require(user, 'admin');
+    const id = Number((await req.json()).id);
+
+    if (id === user.id) throw new HttpError(400, 'You cannot delete your own account.');
+
+    const target = await env.DB.prepare('SELECT id, name, role, active FROM users WHERE id = ?')
+      .bind(id).first();
+    if (!target) throw new HttpError(404, 'That person no longer exists.');
+
+    if (target.role === 'admin' && target.active) {
+      const others = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?`,
+      ).bind(id).first();
+      if (!others.n) throw new HttpError(400, 'That is the only admin left.');
+    }
+
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM schedule_assignees WHERE user_id = ?').bind(id),
+      // Keep the history, drop the link.
+      env.DB.prepare('UPDATE task_log SET user_id = NULL WHERE user_id = ?').bind(id),
+      env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
+    ]);
+
+    return json({ ok: true, name: target.name });
   },
 
   'POST /settings': async (req, env, { user }) => {
