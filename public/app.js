@@ -176,7 +176,6 @@ const NAV = {
     ['', 'My jobs'],
     ['schedule', 'Roster'],
     ['issues', 'Issues'],
-    ['availability', 'My days'],
   ],
   office: [
     ['', 'Overview'],
@@ -561,9 +560,9 @@ function renderBootstrap() {
 /* ------------------------------------------------- view: office overview */
 
 async function renderOverview() {
-  chrome({ title: 'Overview', section: '', wide: true });
   const day = viewDay();
   const { buildings } = await api(`/overview?day=${day}`);
+  chrome({ title: 'Overview', section: '', wide: true });
 
   // The API returns scheduled buildings first, already in priority order.
   const runSheet = buildings.filter((b) => b.scheduled);
@@ -715,9 +714,9 @@ function wireTiles() {
 /* ------------------------------------------------------ view: cleaner home */
 
 async function renderCleanerHome() {
-  chrome({ title: `Hi ${firstName(state.user.name)}`, section: '' });
   const today = state.config.today;
   const { buildings } = await api(`/overview?day=${today}`);
+  chrome({ title: `Hi ${firstName(state.user.name)}`, section: '' });
 
   const mine = buildings.filter((b) =>
     b.assignees.some((a) => a.id === state.user.id));
@@ -788,11 +787,11 @@ function jobTile(b, isMine = false) {
 /* --------------------------------------------------- view: schedule grid */
 
 async function renderSchedule() {
-  chrome({ title: 'Schedule', section: 'schedule', wide: true });
   const from = state.weekFrom || startOfWeek(state.config.today);
   state.weekFrom = from;
 
   const data = await api(`/schedule?from=${from}&days=7`);
+  chrome({ title: 'Schedule', section: 'schedule', wide: true });
   const canEdit = data.canEdit;
 
   const isWeekend = (d) => [0, 6].includes(asDate(d).getUTCDay());
@@ -1336,8 +1335,8 @@ async function shrinkImage(file, max = 1280, quality = 0.75) {
 /* ----------------------------------------------------- view: issues list */
 
 async function renderIssues(status = 'open') {
-  chrome({ title: 'Issues', section: 'issues' });
   const { items } = await api(`/maintenance?status=${status}`);
+  chrome({ title: 'Issues', section: 'issues' });
   const canResolve = state.user.role !== 'cleaner';
 
   app.innerHTML = `
@@ -1391,9 +1390,9 @@ const VERB = {
 };
 
 async function renderHistory() {
-  chrome({ title: 'Activity', section: 'history' });
   const day = viewDay();
   const { activity } = await api(`/activity?day=${day}`);
+  chrome({ title: 'Activity', section: 'history' });
 
   app.innerHTML = `
     <div class="card"><div class="pad">${dayNav(day)}</div></div>
@@ -1422,32 +1421,7 @@ async function renderHistory() {
   };
 }
 
-/* ------------------------------------------- view: availability (self) */
-
-async function renderMyAvailability() {
-  chrome({ title: 'My days', section: 'availability' });
-  const { days } = await api('/availability');
-  app.innerHTML = `
-    <div class="card">
-      <h2>Which days do you normally work?</h2>
-      <div class="pad stack">
-        <p class="small muted" style="margin:0">The office uses this when putting
-          the roster together. It's a general pattern, not specific dates — they
-          can still put you on any day if something comes up.</p>
-        <div class="check-list">${dayToggles(days)}</div>
-        <button class="primary wide" id="save">Save my days</button>
-      </div>
-    </div>`;
-  wireDayToggles(app);
-  $('#save').onclick = async () => {
-    try {
-      await api('/availability', { method: 'POST', body: { days: readDayToggles(app) } });
-      toast('Saved');
-    } catch (e) {
-      toast(e.message, true);
-    }
-  };
-}
+/* ------------------------------------ availability helpers (admin editor) */
 
 const DEFAULT_SLOT = { from: '08:00', to: '16:00' };
 
@@ -1518,8 +1492,8 @@ const readDayToggles = (root) => [...root.querySelectorAll('[data-day-toggle]')]
 /* ------------------------------------------ view: checklist editor (admin) */
 
 async function renderChecklistAdmin() {
-  chrome({ title: 'Checklists', section: 'buildings', wide: true });
   const data = await api('/admin/checklist');
+  chrome({ title: 'Checklists', section: 'buildings', wide: true });
   const areasFor = (id) => data.areas.filter((a) => a.building_id === id);
 
   // Grouped by building.grp, in the order groups first appear - matches the
@@ -1849,8 +1823,8 @@ function editTask(t, onDone) {
 
 
 async function renderAdmin() {
-  chrome({ title: 'People', section: 'admin' });
   const { users } = await api('/users');
+  chrome({ title: 'People', section: 'admin' });
 
   app.innerHTML = `
     <div>
@@ -2134,7 +2108,6 @@ async function render() {
     if (head === 'buildings') return arg
       ? await renderAreaEditor(Number(arg))
       : await renderChecklistAdmin();
-    if (head === 'availability') return await renderMyAvailability();
     return state.user.role === 'cleaner'
       ? await renderCleanerHome()
       : await renderOverview();

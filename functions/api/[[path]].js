@@ -906,23 +906,17 @@ const routes = {
   /* --- availability: which weekdays each person normally works, and when --- */
 
   'POST /availability': async (req, env, { user }) => {
+    // Cleaners' working days are managed by the office/admin, not by cleaners
+    // themselves - so this always requires an elevated role, self or not.
+    require(user, 'office', 'admin');
     const { userId, days } = await req.json();
     const target = userId ? Number(userId) : user.id;
-
-    // Anyone can set their own; only office and admin can set someone else's.
-    if (target !== user.id) require(user, 'office', 'admin');
     const stored = JSON.stringify(validateAvailability(days));
 
     const res = await env.DB.prepare('UPDATE users SET availability = ? WHERE id = ?')
       .bind(stored, target).run();
     if (!res.meta.changes) throw new HttpError(404, 'That person no longer exists.');
     return json({ ok: true, days: parseAvailability(stored) });
-  },
-
-  'GET /availability': async (_req, env, { user }) => {
-    const row = await env.DB.prepare('SELECT availability FROM users WHERE id = ?')
-      .bind(user.id).first();
-    return json({ days: parseAvailability(row?.availability) });
   },
 
   /* --- editing the checklist from inside the app --- */
