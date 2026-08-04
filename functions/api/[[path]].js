@@ -282,7 +282,7 @@ const routes = {
     const day = dayParam(url, env);
 
     const { results: buildings } = await env.DB.prepare(
-      `SELECT b.id, b.name,
+      `SELECT b.id, b.name, b.grp AS grp,
         (SELECT COUNT(*) FROM tasks t JOIN areas a ON a.id = t.area_id
            WHERE a.building_id = b.id AND t.active = 1) AS total,
         (SELECT COUNT(*) FROM task_log l JOIN tasks t ON t.id = l.task_id
@@ -388,7 +388,7 @@ const routes = {
 
     const [buildings, rows, assignees, totals, progress, completions] = await Promise.all([
       env.DB.prepare(
-        'SELECT id, name FROM buildings WHERE active = 1 ORDER BY sort_order, name',
+        'SELECT id, name, grp FROM buildings WHERE active = 1 ORDER BY sort_order, name',
       ).all(),
       env.DB.prepare(
         'SELECT id, building_id, day, priority, note FROM schedule WHERE day BETWEEN ? AND ?',

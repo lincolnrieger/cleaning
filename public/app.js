@@ -618,7 +618,9 @@ function overviewTile(b) {
       <span>${b.done}/${b.total}</span>
     </div>
     <div class="tiny muted" style="margin-top:2px">
-      ${esc(sinceLabel(b.lastCleaned, state.config.today))}${b.note ? ` · ${esc(b.note)}` : ''}</div>
+      ${b.grp && b.grp !== b.name ? `${esc(b.grp)} · ` : ''}${
+        esc(sinceLabel(b.lastCleaned, state.config.today))}${
+        b.note ? ` · ${esc(b.note)}` : ''}</div>
   </button>`;
 }
 
@@ -784,7 +786,8 @@ async function renderSchedule() {
                 .filter((d) => data.cells[`${b.id}:${d}`]?.priority != null).length;
               return `<tr>
                 <th class="rowhead">${esc(b.name)}
-                  <small>${weekCount ? `${weekCount} this week` : 'not scheduled'}</small></th>
+                  <small>${b.grp && b.grp !== b.name ? `${esc(b.grp)} · ` : ''}${weekCount
+                    ? `${weekCount} this week` : 'not scheduled'}</small></th>
                 ${data.days.map((d) => cell(b, d)).join('')}
               </tr>`;
             }).join('')}

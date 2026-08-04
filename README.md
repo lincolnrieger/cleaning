@@ -143,14 +143,31 @@ runs at the edge against SQLite, which doesn't sleep between uses. Photos are
 resized to 1280px in the browser before upload, so reporting a problem works
 on a weak mobile signal.
 
-## Changing the checklist
+## The checklist
 
-Edit **`data/checklist.json`** on GitHub and commit. The site redeploys and
-updates itself — see the end of [SETUP.md](SETUP.md).
+`data/checklist.json` holds all 17 buildings across the park — Basecamp,
+Bell Tents, Bunkhouse, the three Chalets, Lower Rymill, Manor, both Offices,
+Rymill Centre, Seeonee and Stags — about 530 tasks in total.
 
-`sharedAreas` applies to every building; a building can add its own areas on
-top (Brownsea does). Removing something deactivates it rather than deleting
-it, so past records never break.
+It has three parts:
+
+- **`everyVisit`** — added to the bottom of *every* building's checklist
+  (litter, consumables, lost property, damage, leaving it secure).
+- **`templates`** — reusable areas. `Bathrooms` and `Shelter` are shared by the
+  five Basecamp locations; `Accommodation`, `Toilet and shower`, `Outdoor` and
+  `Chalet check clean` by the three chalets. Edit one, and every building using
+  it changes.
+- **`buildings`** — each has a `group` (used as a label in the grid) and a list
+  of areas. An entry that's just a name refers to a template; anything else is
+  written inline for that building alone.
+
+Edit it on GitHub and commit — the site redeploys and updates itself, see the
+end of [SETUP.md](SETUP.md). Removing something deactivates it rather than
+deleting it, so past records never break.
+
+*"Inform the office when cleaning is complete"* is deliberately not a task:
+**Mark building complete** is that step, and having both would mean ticking a
+box and then not pressing the button.
 
 ## Project layout
 
