@@ -63,23 +63,34 @@ blocks sign-in.
 
 ### Availability
 
-Each person has a set of days they normally work — **People → Days** for the
-office and admin, or **My days** in a cleaner's own nav. It's a general
-pattern, not specific dates.
+Each person has the days and hours they normally work — **People → Days** for
+the office and admin, or **My days** in a cleaner's own nav. Tick a day on to
+set a time range for it (a native time picker, so it's fast on a phone). It's
+a general weekly pattern, not specific dates.
 
 When you assign someone in the schedule, anyone who doesn't normally work that
-weekday is listed last with a note saying so — but you can still pick them.
-It's guidance for building the roster, never a block.
+weekday is listed last with a note saying so, and anyone who does shows their
+hours ("available 08:00–14:00") — but **you can still pick anyone regardless**.
+It's guidance for building the roster, never a block, because overriding it is
+the normal case when someone swaps a shift.
 
 ### Editing checklists in the app
 
-**Checklists** (admin only) lists every building with its areas and item
-counts. From there you can add a building, add or rename an area, and add,
-reword or hide individual items.
+**Checklists** (admin only) lists every building, grouped the same way the
+schedule grid groups them, with a search box that matches building names,
+area names and individual items — type "kettle" and every building that has
+one shows up. From there you can add a building, add or rename an area, and
+add, reword or hide individual items.
 
-Nothing is ever deleted — hiding an item takes it off future checklists and
-keeps every record of it having been cleaned. Bringing it back restores that
-history with it.
+**Hiding** is the everyday tool: it takes an item or area off future
+checklists and keeps every record of it having been cleaned. Bringing it back
+restores that history with it.
+
+**Deleting an area is different and permanent.** It's on the area's own page,
+separated out as a danger-zone action, and it requires typing the area's name
+to confirm. Unlike hiding, it throws away every record of that area ever being
+cleaned — there's no undo. Use it only for an area that should never have
+existed; use hiding for everything else.
 
 **The first edit you make here takes over.** After that `data/checklist.json`
 stops being applied on deploy, so a later push can't quietly undo your work.
@@ -177,6 +188,26 @@ files served from Cloudflare's edge (~60 KB total, uncompressed), and the API
 runs at the edge against SQLite, which doesn't sleep between uses. Photos are
 resized to 1280px in the browser before upload, so reporting a problem works
 on a weak mobile signal.
+
+## Installing it as a phone app
+
+It's a Progressive Web App — no App Store, nothing to publish, just the same
+website installed so it behaves like one.
+
+- **Android (Chrome/Edge):** open the site; a banner under the sign-in screen
+  offers **Install**. Tapping it adds a real home-screen icon that opens full
+  screen, no address bar. If the banner doesn't appear, the browser's own menu
+  has **Add to Home screen** / **Install app**.
+- **iPhone / iPad (Safari):** Safari doesn't support one-tap install, so the
+  banner instead says tap **Share → Add to Home Screen**. That's the whole
+  process — same result, one extra tap.
+
+Once installed, opening the icon behaves like a native app: its own launcher
+icon, a coloured status bar, and no browser chrome. A small service worker
+caches the app's shell (the HTML/CSS/JS, not the data) so it still opens if
+the connection drops for a moment — but every checklist, schedule and report
+is always fetched live. Nothing about the cleaning data is ever cached, so
+nobody acts on stale information.
 
 ## The checklist
 

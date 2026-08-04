@@ -107,6 +107,52 @@ function clean(value, max) {
   return String(value ?? '').trim().slice(0, max);
 }
 
+/* ------------------------------------------------------- availability */
+
+const OLD_AVAILABILITY = /^[01]{7}$/;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const ALL_DAY = { from: '00:00', to: '23:59' };
+
+function normaliseSlot(slot) {
+  if (!slot) return null;
+  const from = HHMM.test(slot.from) ? slot.from : ALL_DAY.from;
+  const to = HHMM.test(slot.to) ? slot.to : ALL_DAY.to;
+  return from < to ? { from, to } : ALL_DAY;
+}
+
+/**
+ * Reads whatever is stored into 7 slots (Mon..Sun), each null (not working)
+ * or { from, to }. Understands the original all-day 7-character '0101011'
+ * format from before per-day times existed, so old rows keep working.
+ */
+function parseAvailability(raw) {
+  if (!raw) return Array(7).fill(ALL_DAY);
+  if (OLD_AVAILABILITY.test(raw)) return [...raw].map((c) => (c === '1' ? ALL_DAY : null));
+  try {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.length === 7) return arr.map(normaliseSlot);
+  } catch { /* fall through to the default below */ }
+  return Array(7).fill(ALL_DAY);
+}
+
+function validateAvailability(days) {
+  if (!Array.isArray(days) || days.length !== 7) {
+    throw new HttpError(400, 'Availability needs an entry for all seven days.');
+  }
+  return days.map((slot, i) => {
+    if (!slot) return null;
+    const from = String(slot.from ?? '').trim();
+    const to = String(slot.to ?? '').trim();
+    if (!HHMM.test(from) || !HHMM.test(to)) {
+      throw new HttpError(400, `Give a valid time range for ${WEEKDAY_NAMES[i]}.`);
+    }
+    if (from >= to) throw new HttpError(400, `${WEEKDAY_NAMES[i]}: start time must be before end time.`);
+    return { from, to };
+  });
+}
+
+const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
 /* ----------------------------------------------------------- settings */
 
 async function getSetting(env, key, fallback = null) {
@@ -375,7 +421,9 @@ const routes = {
       `SELECT id, name, role, availability FROM users
        WHERE active = 1 AND role IN ('cleaner', 'admin') ORDER BY name`,
     ).all();
-    return json({ cleaners: results });
+    return json({
+      cleaners: results.map((c) => ({ ...c, availability: parseAvailability(c.availability) })),
+    });
   },
 
   // The day-grid: every building crossed with a range of days.
@@ -779,7 +827,9 @@ const routes = {
       `SELECT id, name, role, active, availability, created_at
        FROM users ORDER BY active DESC, name`,
     ).all();
-    return json({ users: results });
+    return json({
+      users: results.map((u) => ({ ...u, availability: parseAvailability(u.availability) })),
+    });
   },
 
   'POST /users': async (req, env, { user }) => {
@@ -853,7 +903,7 @@ const routes = {
     return json({ ok: true, name: target.name });
   },
 
-  /* --- availability: which weekdays each person normally works --- */
+  /* --- availability: which weekdays each person normally works, and when --- */
 
   'POST /availability': async (req, env, { user }) => {
     const { userId, days } = await req.json();
@@ -861,20 +911,18 @@ const routes = {
 
     // Anyone can set their own; only office and admin can set someone else's.
     if (target !== user.id) require(user, 'office', 'admin');
-    if (!/^[01]{7}$/.test(days || '')) {
-      throw new HttpError(400, 'Availability must be seven days of 0 or 1.');
-    }
+    const stored = JSON.stringify(validateAvailability(days));
 
     const res = await env.DB.prepare('UPDATE users SET availability = ? WHERE id = ?')
-      .bind(days, target).run();
+      .bind(stored, target).run();
     if (!res.meta.changes) throw new HttpError(404, 'That person no longer exists.');
-    return json({ ok: true, days });
+    return json({ ok: true, days: parseAvailability(stored) });
   },
 
   'GET /availability': async (_req, env, { user }) => {
     const row = await env.DB.prepare('SELECT availability FROM users WHERE id = ?')
       .bind(user.id).first();
-    return json({ days: row?.availability ?? '1111111' });
+    return json({ days: parseAvailability(row?.availability) });
   },
 
   /* --- editing the checklist from inside the app --- */
@@ -889,9 +937,20 @@ const routes = {
               (SELECT COUNT(*) FROM tasks t WHERE t.area_id = a.id AND t.active = 1) AS tasks
        FROM areas a ORDER BY a.sort_order, a.name`,
     ).all();
+    // Item names only, grouped by area - lets the search box on this screen
+    // find "Kettle" without a second round trip once someone taps in.
+    const { results: items } = await env.DB.prepare(
+      `SELECT area_id, item FROM tasks WHERE active = 1 ORDER BY sort_order`,
+    ).all();
+    const itemsByArea = new Map();
+    for (const { area_id, item } of items) {
+      if (!itemsByArea.has(area_id)) itemsByArea.set(area_id, []);
+      itemsByArea.get(area_id).push(item);
+    }
+
     return json({
       buildings,
-      areas,
+      areas: areas.map((a) => ({ ...a, items: itemsByArea.get(a.id) ?? [] })),
       source: await getSetting(env, 'checklist_source', 'file'),
     });
   },
@@ -961,6 +1020,36 @@ const routes = {
     }
     await setSetting(env, 'checklist_source', 'app');
     return json({ ok: true });
+  },
+
+  /**
+   * Hard delete: unlike hiding, this throws away every record of everything
+   * in the area - including every day it was ever ticked. "Hide" is the
+   * usual tool; this is only for an area that should never have existed.
+   */
+  'POST /admin/area/delete': async (req, env, { user }) => {
+    require(user, 'admin');
+    const { id, confirm } = await req.json();
+    const area = await env.DB.prepare(
+      `SELECT a.id, a.name, b.name AS building FROM areas a
+       JOIN buildings b ON b.id = a.building_id WHERE a.id = ?`,
+    ).bind(Number(id)).first();
+    if (!area) throw new HttpError(404, 'Area not found.');
+    if (clean(confirm, 80) !== area.name) {
+      throw new HttpError(400, 'Type the area name exactly to confirm.');
+    }
+
+    // D1 does not enforce ON DELETE CASCADE, so each table is cleared by hand.
+    await env.DB.batch([
+      env.DB.prepare(
+        `DELETE FROM task_log WHERE task_id IN (SELECT id FROM tasks WHERE area_id = ?)`,
+      ).bind(area.id),
+      env.DB.prepare('UPDATE maintenance SET area_id = NULL WHERE area_id = ?').bind(area.id),
+      env.DB.prepare('DELETE FROM tasks WHERE area_id = ?').bind(area.id),
+      env.DB.prepare('DELETE FROM areas WHERE id = ?').bind(area.id),
+    ]);
+    await setSetting(env, 'checklist_source', 'app');
+    return json({ ok: true, name: area.name, building: area.building });
   },
 
   'POST /admin/task': async (req, env, { user }) => {

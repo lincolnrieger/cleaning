@@ -20,6 +20,11 @@ const state = {
   cleaners: null,  // cached list for the assignment picker
 };
 
+// Chrome/Edge/Android hold this event back until asked for it. Capturing it
+// is what lets the login screen offer its own "Install" button instead of
+// installation being buried in the browser's menu, where almost nobody finds it.
+let deferredInstall = null;
+
 /* ------------------------------------------------------------------ utils */
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -45,11 +50,14 @@ const auDate = (day) => (day ? day.split('-').reverse().join('-') : '');
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-/** Monday = 0, to match DAY_NAMES and the stored availability string. */
+/** Monday = 0, to match DAY_NAMES and the stored availability array. */
 const weekdayIndex = (day) => (asDate(day).getUTCDay() + 6) % 7;
 
+// The API always sends availability pre-parsed: 7 entries, each null (not
+// working) or { from, to }. Missing data defaults open rather than closed -
+// nobody should read as unavailable just because their record predates this.
 const worksOn = (person, day) =>
-  (person.availability ?? '1111111')[weekdayIndex(day)] === '1';
+  !Array.isArray(person.availability) || Boolean(person.availability[weekdayIndex(day)]);
 
 function dayLabel(day) {
   if (!day) return '';
@@ -337,7 +345,9 @@ function ask({
 }
 
 /** In-app replacement for window.prompt. Resolves null on cancel. */
-function askText({ title, body = '', label, value = '', confirmText = 'Save', numeric = false }) {
+function askText({
+  title, body = '', label, value = '', confirmText = 'Save', numeric = false, danger = false,
+}) {
   return new Promise((resolve) => {
     const bg = openSheet(`
       <div class="sheet-head"><strong>${esc(title)}</strong></div>
@@ -346,7 +356,7 @@ function askText({ title, body = '', label, value = '', confirmText = 'Save', nu
         <label class="field"><span>${esc(label)}</span>
           <input id="askv" value="${esc(value)}" autocomplete="off"
             ${numeric ? 'inputmode="numeric" pattern="\\d*"' : ''}></label>
-        <button class="primary wide" data-ok>${esc(confirmText)}</button>
+        <button class="${danger ? 'destroy' : 'primary'} wide" data-ok>${esc(confirmText)}</button>
         <button class="wide" data-cancel>Cancel</button>
       </div>`);
 
@@ -369,6 +379,39 @@ function askText({ title, body = '', label, value = '', confirmText = 'Save', nu
 }
 
 /* ------------------------------------------------------------ view: login */
+
+/**
+ * "Add to phone" hint shown under the login card. Empty once installed,
+ * once dismissed, or on a browser that gives no way to detect either -
+ * an unwanted prompt is worse than a missed one.
+ */
+function installHintHTML() {
+  if (localStorage.getItem('bc.installDismissed') === '1') return '';
+  if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) return '';
+
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  return `<div class="installhint" id="installhint">
+    <span class="grow small">${isIOS
+      ? 'Add this to your Home Screen: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.'
+      : 'Install this on your phone for one-tap access, full screen, no address bar.'}</span>
+    ${isIOS ? '' : '<button class="ghost" id="installbtn" hidden>Install</button>'}
+    <button class="ghost" id="installclose" aria-label="Dismiss" title="Dismiss">✕</button>
+  </div>`;
+}
+
+function wireInstallHint() {
+  const hint = $('#installhint');
+  if (!hint) return;
+  const btn = hint.querySelector('#installbtn');
+  if (btn) {
+    btn.hidden = !deferredInstall;
+    btn.onclick = promptInstall;
+  }
+  hint.querySelector('#installclose').onclick = () => {
+    localStorage.setItem('bc.installDismissed', '1');
+    hint.remove();
+  };
+}
 
 async function renderLogin() {
   bar.hidden = true;
@@ -401,7 +444,8 @@ async function renderPeoplePicker() {
     </button>`).join('') || '<p class="empty">Nobody has been added yet.</p>'}
     <div class="pad"><button class="wide ghost" id="usepin">Use a PIN instead</button></div>
   </div>
-  <p class="err center" id="err"></p>`;
+  <p class="err center" id="err"></p>
+  ${installHintHTML()}`;
 
   app.querySelectorAll('[data-uid]').forEach((b) => {
     b.onclick = async () => {
@@ -415,6 +459,7 @@ async function renderPeoplePicker() {
     };
   });
   $('#usepin').onclick = renderPinPad;
+  wireInstallHint();
 }
 
 async function signIn(body) {
@@ -443,9 +488,11 @@ function renderPinPad() {
         ? '<button class="wide ghost" id="uselist">← Pick from the list instead</button>'
         : ''}
     </div>
-  </div>`;
+  </div>
+  ${installHintHTML()}`;
 
   $('#uselist')?.addEventListener('click', renderPeoplePicker);
+  wireInstallHint();
 
   let pin = '';
   const dots = $('#dots');
@@ -895,13 +942,15 @@ async function openScheduleEditor(data, buildingId, day) {
           ${[...state.cleaners]
             .sort((x, y) => (worksOn(y, day) ? 1 : 0) - (worksOn(x, day) ? 1 : 0))
             .map((c) => {
-              const free = worksOn(c, day);
+              const slot = Array.isArray(c.availability) ? c.availability[weekdayIndex(day)] : null;
+              const note = slot
+                ? `<span class="tiny muted" style="display:block">available ${slot.from}–${slot.to}</span>`
+                : `<span class="tiny" style="display:block;color:var(--warn)">
+                    doesn't usually work ${esc(DAY_NAMES[weekdayIndex(day)])}</span>`;
               return `<label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
                 <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
                 ${avatar(c.name)}
-                <span class="grow">${esc(c.name)}
-                  ${free ? '' : `<span class="tiny" style="display:block;color:var(--warn)">
-                    doesn't usually work ${esc(DAY_NAMES[weekdayIndex(day)])}</span>`}</span>
+                <span class="grow">${esc(c.name)} ${note}</span>
                 <span class="tiny muted">${esc(c.role)}</span>
               </label>`;
             }).join('')
@@ -1400,32 +1449,71 @@ async function renderMyAvailability() {
   };
 }
 
+const DEFAULT_SLOT = { from: '08:00', to: '16:00' };
+
+/** `days`: 7 entries, each null (not working) or { from, to }. */
 function dayToggles(days) {
-  return DAY_NAMES.map((name, i) => `
-    <label class="check-row ${days[i] === '1' ? 'on' : ''}" data-day-toggle="${i}">
-      <input type="checkbox" ${days[i] === '1' ? 'checked' : ''}>
-      <span class="grow">${name}</span>
-    </label>`).join('');
+  return DAY_NAMES.map((name, i) => {
+    const slot = days[i];
+    const on = Boolean(slot);
+    const from = slot?.from ?? DEFAULT_SLOT.from;
+    const to = slot?.to ?? DEFAULT_SLOT.to;
+    return `<div class="check-row daytoggle ${on ? 'on' : ''}" data-day-toggle="${i}">
+      <label class="row">
+        <input type="checkbox" ${on ? 'checked' : ''}>
+        <span class="grow">${name}</span>
+      </label>
+      <span class="daytimes" ${on ? '' : 'hidden'}>
+        <input type="time" class="dayfrom" value="${from}" step="900">
+        <span class="muted">–</span>
+        <input type="time" class="dayto" value="${to}" step="900">
+      </span>
+    </div>`;
+  }).join('');
 }
 
 function wireDayToggles(root) {
   root.querySelectorAll('[data-day-toggle]').forEach((row) => {
-    const box = row.querySelector('input');
-    box.onchange = () => row.classList.toggle('on', box.checked);
+    const box = row.querySelector('input[type="checkbox"]');
+    const times = row.querySelector('.daytimes');
+    box.onchange = () => {
+      row.classList.toggle('on', box.checked);
+      times.hidden = !box.checked;
+    };
   });
 }
 
-/** "Mon-Fri" style summary of a 7-day availability string. */
-function daysSummary(days = '1111111') {
-  const on = DAY_NAMES.filter((_, i) => days[i] === '1');
-  if (on.length === 7) return 'any day';
+/** "Mon-Fri, 8am-4pm" style summary. Groups identical time ranges together. */
+function daysSummary(days) {
+  if (!Array.isArray(days)) return 'any time';
+  const on = days.map((s, i) => (s ? { day: DAY_NAMES[i], ...s } : null)).filter(Boolean);
   if (!on.length) return 'no days set';
-  if (on.length > 4) return `${on.join(', ')}`;
-  return on.join(', ');
+
+  const hhmm = (t) => t.replace(/^0/, '').replace(':00', '') + (t < '12:00' ? 'am' : 'pm');
+  const groups = new Map();
+  for (const s of on) {
+    const key = `${s.from}-${s.to}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s.day);
+  }
+  return [...groups.entries()]
+    .map(([key, ds]) => {
+      const [from, to] = key.split('-');
+      return `${ds.join(', ')} ${hhmm(from)}–${hhmm(to)}`;
+    })
+    .join(' · ');
 }
 
+/** Reads the sheet back into the 7-slot shape the API expects. */
 const readDayToggles = (root) => [...root.querySelectorAll('[data-day-toggle]')]
-  .map((r) => (r.querySelector('input').checked ? '1' : '0')).join('');
+  .map((row) => {
+    const box = row.querySelector('input[type="checkbox"]');
+    if (!box.checked) return null;
+    return {
+      from: row.querySelector('.dayfrom').value || DEFAULT_SLOT.from,
+      to: row.querySelector('.dayto').value || DEFAULT_SLOT.to,
+    };
+  });
 
 /* ------------------------------------------ view: checklist editor (admin) */
 
@@ -1433,6 +1521,38 @@ async function renderChecklistAdmin() {
   chrome({ title: 'Checklists', section: 'buildings', wide: true });
   const data = await api('/admin/checklist');
   const areasFor = (id) => data.areas.filter((a) => a.building_id === id);
+
+  // Grouped by building.grp, in the order groups first appear - matches the
+  // schedule grid's ordering so the two screens read the same way. With 20+
+  // buildings a flat list was a wall of text; headings make it scannable.
+  const groups = [];
+  for (const b of data.buildings) {
+    const key = b.grp || b.name;
+    let g = groups.find((x) => x.key === key);
+    if (!g) { g = { key, label: b.grp || '', buildings: [] }; groups.push(g); }
+    g.buildings.push(b);
+  }
+
+  const buildingRow = (b) => {
+    const areas = areasFor(b.id).filter((a) => a.active);
+    const tasks = areas.reduce((n, a) => n + a.tasks, 0);
+    const search = [b.name, b.grp, ...areas.flatMap((a) => [a.name, ...(a.items ?? [])])]
+      .join(' ').toLowerCase();
+    return `<div class="list-item" data-search="${esc(search)}" style="${b.active ? '' : 'opacity:.5'}">
+      <div class="spread wrap">
+        <strong class="grow">${esc(b.name)}
+          ${b.active ? '' : '<span class="pill idle">hidden</span>'}</strong>
+        <button class="ghost" data-editb="${b.id}">Edit</button>
+      </div>
+      <div class="small muted" style="margin:4px 0 8px">
+        ${areas.length} area${areas.length === 1 ? '' : 's'} · ${tasks} tasks</div>
+      <div class="tabs" style="margin:0">
+        ${areas.map((a) => `<button class="ghost" data-area="${a.id}">
+          ${esc(a.name)} <span class="muted">${a.tasks}</span></button>`).join('')}
+        <button class="ghost" data-addarea="${b.id}">+ Area</button>
+      </div>
+    </div>`;
+  };
 
   app.innerHTML = `
     <div class="card">
@@ -1447,26 +1567,15 @@ async function renderChecklistAdmin() {
     </div>
 
     <div class="card">
-      <h2>Buildings — ${data.buildings.filter((b) => b.active).length} active</h2>
-      ${data.buildings.map((b) => {
-        const areas = areasFor(b.id).filter((a) => a.active);
-        const tasks = areas.reduce((n, a) => n + a.tasks, 0);
-        return `<div class="list-item" style="${b.active ? '' : 'opacity:.5'}">
-          <div class="spread wrap">
-            <strong class="grow">${esc(b.name)}
-              ${b.grp && b.grp !== b.name ? `<span class="tiny muted">· ${esc(b.grp)}</span>` : ''}
-              ${b.active ? '' : '<span class="pill idle">hidden</span>'}</strong>
-            <button class="ghost" data-editb="${b.id}">Edit</button>
-          </div>
-          <div class="small muted" style="margin:4px 0 8px">
-            ${areas.length} area${areas.length === 1 ? '' : 's'} · ${tasks} tasks</div>
-          <div class="tabs" style="margin:0">
-            ${areas.map((a) => `<button class="ghost" data-area="${a.id}">
-              ${esc(a.name)} <span class="muted">${a.tasks}</span></button>`).join('')}
-            <button class="ghost" data-addarea="${b.id}">+ Area</button>
-          </div>
-        </div>`;
-      }).join('')}
+      <div class="pad" style="padding-bottom:0">
+        <input id="search" placeholder="Search buildings, areas or items…" autocomplete="off">
+      </div>
+      <h2 style="border:none;padding-bottom:0">
+        Buildings — ${data.buildings.filter((b) => b.active).length} active</h2>
+      ${groups.map((g) => `
+        ${g.label ? `<div class="grouphead">${esc(g.label)}</div>` : ''}
+        ${g.buildings.map(buildingRow).join('')}
+      `).join('')}
       <div class="pad"><button class="primary wide" id="addb">Add a building</button></div>
     </div>
 
@@ -1490,6 +1599,26 @@ async function renderChecklistAdmin() {
     b.onclick = () => editArea({ building_id: Number(b.dataset.addarea) });
   });
   $('#addb').onclick = () => editBuilding(null);
+
+  $('#search').oninput = (ev) => {
+    const q = ev.currentTarget.value.trim().toLowerCase();
+    app.querySelectorAll('[data-search]').forEach((el) => {
+      el.hidden = !(!q || el.dataset.search.includes(q));
+    });
+    // Hide any group heading whose buildings are now all filtered out. Stops
+    // at the first element that isn't a building row - the last group's
+    // heading sits right before the "Add a building" button, which must
+    // never count as a visible row or that group's heading never hides.
+    app.querySelectorAll('.grouphead').forEach((head) => {
+      let sib = head.nextElementSibling;
+      let anyVisible = false;
+      while (sib && sib.matches('[data-search]')) {
+        if (!sib.hidden) anyVisible = true;
+        sib = sib.nextElementSibling;
+      }
+      head.hidden = !anyVisible;
+    });
+  };
 
   $('#restore').onclick = async () => {
     const typed = await askText({
@@ -1626,7 +1755,19 @@ async function renderAreaEditor(areaId) {
     </div>
 
     <p class="tiny muted center">Hiding an item takes it off future checklists and keeps
-      every record of it having been cleaned.</p>`;
+      every record of it having been cleaned.</p>
+
+    <div class="card danger">
+      <h2>Delete this area</h2>
+      <div class="pad">
+        <p class="small muted" style="margin:0 0 10px">Removes <strong>${esc(data.area.name)}</strong>
+          and every item in it completely — unlike hiding, this also deletes
+          <strong>every record of it ever being cleaned</strong>. Only use this for an area
+          that should never have existed. To take it off checklists but keep the history,
+          use <strong>Rename or hide</strong> above instead.</p>
+        <button class="wide danger" id="deletearea">Delete area permanently</button>
+      </div>
+    </div>`;
 
   $('#editarea').onclick = () => editArea(
     { ...data.area, building_id: data.area.building_id },
@@ -1639,6 +1780,25 @@ async function renderAreaEditor(areaId) {
       () => renderAreaEditor(areaId),
     );
   });
+
+  $('#deletearea').onclick = async () => {
+    const typed = await askText({
+      title: `Delete "${data.area.name}"?`,
+      body: `This deletes the area, every item in it, and every day it was ever ticked.
+             <strong>This cannot be undone.</strong>`,
+      label: `Type the area name to confirm`,
+      confirmText: 'Delete permanently',
+      danger: true,
+    });
+    if (typed === null) return;
+    try {
+      await api('/admin/area/delete', { method: 'POST', body: { id: areaId, confirm: typed } });
+      toast(`${data.area.name} deleted`);
+      location.hash = '#/buildings';
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
 }
 
 function editTask(t, onDone) {
@@ -1847,7 +2007,7 @@ async function renderAdmin() {
         <div class="pad stack">
           <p class="dialog-body">Which days do they normally work? Used when building the
             roster — you can still assign them to any day.</p>
-          <div class="check-list">${dayToggles(person.availability ?? '1111111')}</div>
+          <div class="check-list">${dayToggles(person.availability ?? Array(7).fill(null))}</div>
           <p class="err" id="err"></p>
           <button class="primary wide" id="save">Save</button>
           <button class="wide" id="cancel">Cancel</button>
@@ -1990,3 +2150,27 @@ addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && state.user) render();
 });
 render();
+
+/* ------------------------------------------------------------ install as app */
+
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
+addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstall = e;
+  const btn = $('#installbtn');
+  if (btn) btn.hidden = false;
+});
+addEventListener('appinstalled', () => {
+  deferredInstall = null;
+  $('#installhint')?.remove();
+});
+
+async function promptInstall() {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  await deferredInstall.userChoice;
+  deferredInstall = null;
+}
