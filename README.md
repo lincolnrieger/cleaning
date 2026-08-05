@@ -180,6 +180,22 @@ layout respects the notch and home indicator via safe-area insets.
 - **Maintenance and lost property** are reported from inside the building,
   optionally with a photo, and stay open until the office resolves them.
 
+### Maintenance alerts on your phone
+
+**People → Maintenance alerts** turns on a free push notification the moment
+a cleaner reports a maintenance issue or lost property — no need to keep the
+office overview open to catch it.
+
+It uses [ntfy.sh](https://ntfy.sh), a free, no-signup notification service.
+Click **Generate a private topic**, **Save**, then install the free **ntfy**
+app (App Store or Google Play) and subscribe to that exact topic name. The
+topic name is the only thing keeping your alerts private, so don't post it
+anywhere public — treat it like a password. **Send a test notification**
+confirms it's wired up correctly before you rely on it.
+
+If ntfy.sh is slow or unreachable, the report still saves normally — sending
+the alert never blocks or fails a cleaner's report.
+
 ## Speed
 
 There is no build step and no framework. The whole front end is three static

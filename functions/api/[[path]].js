@@ -156,6 +156,41 @@ async function setSetting(env, key, value) {
  */
 const quickSigninOn = async (env) => (await getSetting(env, 'quick_signin', '1')) === '1';
 
+/* -------------------------------------------------------- push notifications */
+
+const NTFY_SERVER = 'https://ntfy.sh';
+const NTFY_TOPIC_RE = /^[-_A-Za-z0-9]{1,64}$/;
+
+/** Raw publish call. Throws on any failure - callers decide what to do with that. */
+async function publishNtfy(topic, payload) {
+  const res = await fetch(NTFY_SERVER, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ topic, ...payload }),
+  });
+  if (!res.ok) throw new Error(`ntfy.sh returned HTTP ${res.status}`);
+}
+
+/**
+ * Sends a push notification via ntfy.sh - free, no account, works because
+ * the topic name is unguessable rather than because of a login. Reads the
+ * topic from the settings table (not an env var) so an admin can turn this
+ * on from the People screen with no redeploy, matching every other toggle
+ * in this app.
+ *
+ * Deliberately swallows every error: a maintenance report must still save
+ * even if ntfy.sh is unreachable, mis-set, or the topic was never configured.
+ */
+async function sendNtfy(env, payload) {
+  try {
+    const topic = await getSetting(env, 'ntfy_topic', '');
+    if (!topic) return;
+    await publishNtfy(topic, payload);
+  } catch (err) {
+    console.error('ntfy', err);
+  }
+}
+
 /* ------------------------------------------------------------------- auth */
 
 async function currentUser(request, env) {
@@ -719,7 +754,7 @@ const routes = {
     return json({ items: results });
   },
 
-  'POST /maintenance': async (req, env, { user }) => {
+  'POST /maintenance': async (req, env, { user, url, waitUntil }) => {
     require(user, 'cleaner', 'office', 'admin');
     const { buildingId, areaId, detail, kind, photoKey } = await req.json();
     const text = clean(detail, 1000);
@@ -733,6 +768,10 @@ const routes = {
       'SELECT name FROM buildings WHERE id = ? AND active = 1',
     ).bind(id).first();
     if (!building) throw new HttpError(404, 'Building not found.');
+
+    const area = areaId
+      ? await env.DB.prepare('SELECT name FROM areas WHERE id = ?').bind(Number(areaId)).first()
+      : null;
 
     const res = await env.DB.prepare(
       `INSERT INTO maintenance
@@ -748,6 +787,18 @@ const routes = {
       kind: type === 'lost_property' ? 'lost_property' : 'issue',
       detail: text, userName: user.name,
     });
+
+    // Fires after the response is already on its way back, so a slow or dead
+    // ntfy.sh never makes a cleaner wait to submit a report.
+    const isLost = type === 'lost_property';
+    waitUntil(sendNtfy(env, {
+      title: `${isLost ? '🧳 Lost property' : '🔧 Maintenance'} — ${building.name}${
+        area ? ` (${area.name})` : ''}`,
+      message: `${text}\n\nReported by ${user.name}`,
+      priority: isLost ? 3 : 4,
+      tags: [isLost ? 'package' : 'wrench'],
+      click: `${url.origin}/#/issues`,
+    }));
 
     return json({ ok: true, id: res.meta.last_row_id });
   },
@@ -1081,6 +1132,44 @@ const routes = {
     return json({ ok: true, quickSignin: await quickSigninOn(env) });
   },
 
+  /* --- maintenance push notifications (ntfy.sh) --- */
+
+  'GET /admin/notifications': async (_req, env, { user }) => {
+    require(user, 'admin');
+    const topic = await getSetting(env, 'ntfy_topic', '');
+    return json({ topic, server: NTFY_SERVER });
+  },
+
+  'POST /admin/notifications': async (req, env, { user }) => {
+    require(user, 'admin');
+    const topic = clean((await req.json()).topic, 64);
+    if (topic && !NTFY_TOPIC_RE.test(topic)) {
+      throw new HttpError(400, 'Topic can only contain letters, numbers, - and _.');
+    }
+    await setSetting(env, 'ntfy_topic', topic);
+    return json({ ok: true, topic });
+  },
+
+  /** Lets an admin confirm the setup actually works, with a real error if not. */
+  'POST /admin/notifications/test': async (_req, env, { user }) => {
+    require(user, 'admin');
+    const topic = await getSetting(env, 'ntfy_topic', '');
+    if (!topic) throw new HttpError(400, 'Set a topic first.');
+
+    try {
+      await publishNtfy(topic, {
+        title: '✅ Test notification',
+        message: `Sent by ${user.name} from Basecamp Cleaning. If this arrived, maintenance `
+          + 'alerts are working.',
+        priority: 3,
+        tags: ['white_check_mark'],
+      });
+    } catch (err) {
+      throw new HttpError(502, `Could not reach ntfy.sh: ${err.message}`);
+    }
+    return json({ ok: true });
+  },
+
   /**
    * Wipes operational data so the camp can start clean after testing.
    * Deliberately never drops a table and never touches the checklist itself -
@@ -1152,7 +1241,7 @@ const routes = {
 /* ---------------------------------------------------------------- routing */
 
 export async function onRequest(context) {
-  const { request, env } = context;
+  const { request, env, waitUntil } = context;
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, '').replace(/\/$/, '') || '/';
   const key = `${request.method} ${path}`;
@@ -1175,7 +1264,7 @@ export async function onRequest(context) {
       .includes(key);
     const user = open ? null : await currentUser(request, env);
     if (!open && !user) return fail(401, 'Please sign in.');
-    return await handler(request, env, { user, url });
+    return await handler(request, env, { user, url, waitUntil });
   } catch (err) {
     if (err instanceof HttpError) return fail(err.status, err.message);
     if (err instanceof SyntaxError) return fail(400, 'Malformed request.');

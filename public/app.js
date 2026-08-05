@@ -1863,8 +1863,11 @@ function editTask(t, onDone) {
 
 
 async function renderAdmin() {
-  const { users } = await api('/users');
   chrome({ title: 'People', section: 'admin' });
+  const [{ users }, notif] = await Promise.all([
+    api('/users'),
+    api('/admin/notifications'),
+  ]);
 
   app.innerHTML = `
     <div>
@@ -1924,6 +1927,32 @@ async function renderAdmin() {
       </label>
     </div>
 
+    <div class="card">
+      <h2>Maintenance alerts</h2>
+      <div class="pad stack narrow">
+        <p class="small muted" style="margin:0">Push a free phone notification the moment a
+          cleaner reports a maintenance issue or lost property. Uses
+          <strong>ntfy.sh</strong> — no account, no cost, but the topic name below is the
+          <em>only</em> thing keeping your alerts private, so don't share it anywhere public.</p>
+        <label class="field"><span>Topic</span>
+          <input id="ntfyTopic" value="${esc(notif.topic)}" autocomplete="off"
+            placeholder="not set — alerts are off" spellcheck="false"></label>
+        <div class="row" style="gap:8px">
+          <button class="ghost" id="ntfyGen">Generate a private topic</button>
+          <button class="primary" id="ntfySave">Save</button>
+        </div>
+        <p class="err" id="ntfyErr"></p>
+        ${notif.topic ? `<button class="ghost wide" id="ntfyTest">Send a test notification</button>`
+          : ''}
+        <div class="banner info" style="margin:4px 0 0">
+          <strong>To receive alerts:</strong> install the free <strong>ntfy</strong> app
+          (search "ntfy" on the App Store or Google Play), tap <strong>+</strong>, and
+          subscribe to <code>${esc(notif.topic || 'your-topic-here')}</code> — exactly as
+          shown above, on ${esc(new URL(notif.server).host)}.
+        </div>
+      </div>
+    </div>
+
     <div class="card danger">
       <h2>Danger zone</h2>
       <div class="pad stack">
@@ -1972,6 +2001,43 @@ async function renderAdmin() {
       toast(e.message, true);
     }
   };
+
+  // A short random string is plenty - it only needs to be unguessable, not
+  // cryptographically strong, since worst case someone sees a maintenance alert.
+  $('#ntfyGen').onclick = () => {
+    const random = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+    $('#ntfyTopic').value = `basecamp-${random}`;
+  };
+
+  $('#ntfySave').onclick = async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      await api('/admin/notifications', {
+        method: 'POST', body: { topic: $('#ntfyTopic').value.trim() },
+      });
+      toast('Saved');
+      renderAdmin();
+    } catch (e) {
+      $('#ntfyErr').textContent = e.message;
+      btn.disabled = false;
+    }
+  };
+
+  $('#ntfyTest')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      await api('/admin/notifications/test', { method: 'POST' });
+      toast('Sent — check your phone');
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Send a test notification';
+    }
+  });
 
   // The button only wakes up once the phrase is typed exactly.
   const confirmBox = $('#confirm');
