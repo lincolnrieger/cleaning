@@ -302,8 +302,51 @@ main.wide { max-width: 1280px; }
 .center { text-align: center; }
 .stack > * + * { margin-top: 12px; }
 
-.cols { display: grid; gap: 14px; }
-@media (min-width: 900px) { .cols { grid-template-columns: 1fr 1fr; align-items: start; } }
+/* Run sheet: full width rather than squeezed into half the screen next to
+   a much longer "not scheduled" list - on a wide screen a handful of
+   scheduled buildings wrap into a row or two instead of one stretched
+   column. Collapses to a single column by itself once nothing fits
+   alongside it (minmax below the card's phone width). */
+.tilegrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1px;
+  background: var(--line-2);
+}
+.tilegrid .tile { border-top: none; background: var(--card); }
+
+/* Not scheduled: this is the list that used to run to a long single-column
+   scroll of tall tiles on a laptop. A building with nothing going on today
+   doesn't need a name-sized tile, so this is a dense grid of one-line rows
+   instead - many more fit on screen, and a wide monitor actually gets used. */
+.crow-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 1px;
+  background: var(--line-2);
+}
+
+.crow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 0;
+  background: var(--card);
+  text-align: left;
+  min-height: 0;
+  font-weight: 400;
+}
+
+.crow:hover { background: var(--line-2); }
+.crow[disabled] { opacity: 1; cursor: default; }
+.crow[disabled]:hover { background: var(--card); }
+
+.crow-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.crow-name { font-weight: 620; font-size: 13.5px; letter-spacing: -0.01em; }
+.crow-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
 
 /* Prev | date | Next. The two side columns are equal-width tracks, which is
    what actually centres the date over the card rather than over the leftover

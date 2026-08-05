@@ -654,22 +654,21 @@ async function renderOverview() {
         Open <strong>Schedule</strong> to put a cleaner on ${unassigned.length > 1 ? 'them' : 'it'}.
       </div></div>` : ''}
 
-    <div class="cols">
-      <div class="card">
-        <h2>Run sheet — ${runSheet.length ? `${outstanding} of ${runSheet.length} left`
-          : 'nothing scheduled'}</h2>
-        ${runSheet.length
-          ? runSheet.map(overviewTile).join('')
-          : `<div class="empty"><b>Nothing scheduled</b>
-             Open <strong>Schedule</strong> to plan the week.</div>`}
-      </div>
+    <div class="card">
+      <h2>Run sheet — ${runSheet.length ? `${outstanding} of ${runSheet.length} left`
+        : 'nothing scheduled'}</h2>
+      ${runSheet.length
+        ? `<div class="tilegrid">${runSheet.map(overviewTile).join('')}</div>`
+        : `<div class="empty"><b>Nothing scheduled</b>
+           Open <strong>Schedule</strong> to plan the week.</div>`}
+    </div>
 
-      <div class="card">
-        <h2>Not scheduled ${dayLabel(day).toLowerCase() === 'today' ? 'today' : 'this day'}</h2>
-        ${rest.length
-          ? rest.map(overviewTile).join('')
-          : '<div class="empty">Every building is on the run sheet.</div>'}
-      </div>
+    <div class="card">
+      <h2>Not scheduled ${dayLabel(day).toLowerCase() === 'today' ? 'today' : 'this day'}
+        <span class="muted" style="font-weight:500">· ${rest.length}</span></h2>
+      ${rest.length
+        ? `<div class="crow-list">${rest.map(compactRow).join('')}</div>`
+        : '<div class="empty">Every building is on the run sheet.</div>'}
     </div>
 
     ${stale.length ? `<div class="card"><div class="pad small muted">
@@ -725,7 +724,7 @@ function overviewTile(b) {
       </span>
       ${status}
     </div>
-    <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
+    ${b.done ? `<div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>` : ''}
     <div class="spread small muted" style="margin-top:6px">
       <span class="grow">${meta || 'not scheduled'}</span>
       <span>${b.done}/${b.total}</span>
@@ -734,6 +733,24 @@ function overviewTile(b) {
       ${b.grp && b.grp !== b.name ? `${esc(b.grp)} · ` : ''}${
         esc(sinceLabel(b.lastCleaned, state.config.today))}${
         b.note ? ` · ${esc(b.note)}` : ''}</div>
+  </button>`;
+}
+
+/**
+ * A single line per building for the "not scheduled" list, which routinely
+ * runs to 15-20 rows in a full park. Progress and priority don't apply to a
+ * building nobody's touching today, so this drops both and shows only what's
+ * actually worth a glance: name, staleness, and whether it has an open issue.
+ */
+function compactRow(b) {
+  return `<button class="crow" ${canDrillIn() ? `data-b="${b.id}"` : 'disabled'}>
+    <div class="crow-top">
+      <span class="crow-name">${esc(b.name)}</span>
+      ${b.open_issues ? `<span class="crow-dot" title="${b.open_issues} open issue${
+        b.open_issues > 1 ? 's' : ''}"></span>` : ''}
+    </div>
+    <div class="tiny muted">${esc(sinceLabel(b.lastCleaned, state.config.today))}${
+      b.done ? ` · ${b.done}/${b.total} done` : ''}</div>
   </button>`;
 }
 
