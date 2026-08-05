@@ -230,6 +230,9 @@ nav.nav::-webkit-scrollbar { display: none; }
 
 nav.nav button {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   min-height: 34px;
   padding: 0 14px;
   font-size: 14px;
@@ -240,6 +243,10 @@ nav.nav button {
   border-radius: 999px;
   transition: background .14s, color .14s;
 }
+
+/* Icons are a mobile bottom-bar affordance; the desktop pill nav stays
+   text-only, which is where it already reads cleanly. */
+nav.nav .navicon { display: none; }
 
 nav.nav button:hover { background: var(--line-2); color: var(--ink-2); }
 
@@ -273,12 +280,11 @@ main.wide { max-width: 1280px; }
 
 .card > h2 {
   margin: 0;
-  padding: 13px 16px;
-  font-size: 13px;
+  padding: 14px 16px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--muted);
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
   border-bottom: 1px solid var(--line-2);
 }
 
@@ -364,7 +370,15 @@ button.destroy {
   font-weight: 640;
 }
 
-button.ghost { min-height: 36px; padding: 0 12px; font-size: 13.5px; }
+button.ghost {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  border-color: transparent;
+  background: none;
+}
+button.ghost:hover { background: var(--line-2); }
+button.ghost[disabled]:hover { background: none; }
 button.wide { width: 100%; }
 button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
 
@@ -389,14 +403,49 @@ input:focus, select:focus, textarea:focus {
 }
 
 textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
-label.field { display: block; }
-label.field > span {
+.field { display: block; }
+.field > span {
   display: block;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--muted);
   margin-bottom: 5px;
 }
+
+/* Segmented control - a row of pill buttons standing in for a <select> when
+   there are only a few options. Easier to tap accurately on a phone than a
+   native dropdown, and every choice is visible at once. */
+.seg {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.seg-btn {
+  flex: 1;
+  min-height: 42px;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  border-radius: calc(var(--r-sm) - 2px);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.seg-btn:hover { background: var(--line-2); }
+.seg-btn[aria-pressed="true"] {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.seg-btn[aria-pressed="true"]:hover { background: var(--card); }
+
+@media (max-width: 400px) { .seg-btn { font-size: 11.5px; padding: 0 3px; } }
 
 .check-list { display: grid; gap: 7px; }
 
@@ -564,6 +613,7 @@ label.field > span {
 .pill.open { background: var(--accent-soft); color: var(--accent); }
 .pill.idle { background: var(--line); color: var(--muted); }
 .pill.late { background: var(--warn-bg); color: var(--warn); }
+.pill.note { background: var(--line-2); color: var(--ink-2); }
 
 .prio {
   flex: none;
@@ -802,19 +852,20 @@ td.weekend { background: color-mix(in srgb, var(--bg) 55%, transparent); }
 .tabs button { min-height: 38px; font-size: 13.5px; padding: 0 14px; border-radius: 999px; }
 .tabs button[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
-table.grid { width: 100%; border-collapse: collapse; font-size: 14px; }
-table.grid th, table.grid td { text-align: left; padding: 10px 16px; border-top: 1px solid var(--line-2); }
-table.grid th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-table.grid tr:first-child th { border-top: none; }
-table.grid td:first-child { white-space: nowrap; }
-
-/* The add-someone form is short; side by side with a wide table it just
+/* The add-someone form is short; side by side with a wide list it just
    stretched its inputs, so it sits above at a readable width instead. */
 .card .pad.narrow { max-width: 460px; }
 
-/* Row actions stay on one line instead of stacking into a tall column. */
-table.grid td.actions { text-align: right; white-space: nowrap; width: 1%; padding-left: 0; }
-table.grid td.actions button { margin-left: 6px; }
+/* Each person on the People screen: identity and actions stack on a phone
+   (where side-by-side would force a table into horizontal scroll) and sit
+   on one row once there's room for both. */
+.people-row .ghost { min-height: 34px; font-size: 12.5px; padding: 0 10px; }
+
+@media (min-width: 640px) {
+  .people-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .people-row > .row:first-child { flex: 1; min-width: 0; }
+  .people-row > .row.wrap { margin-top: 0 !important; flex: none; }
+}
 
 .switch-row { align-items: flex-start; }
 .switch-row input { margin-top: 2px; }
@@ -874,3 +925,50 @@ code.phrase {
 
 .dialog-body { font-size: 14px; line-height: 1.5; color: var(--ink-2); margin: 0; }
 .dialog-body strong { color: var(--ink); }
+
+/* ------------------------------------------------------- mobile bottom nav */
+
+/* Below 768px the section nav moves from a horizontal pill row under the
+   header to a fixed tab bar at the bottom of the screen - thumb reach on a
+   phone matters more than saving a strip of vertical space, and it stops
+   the header/testbar/nav stack from eating half the screen before any
+   content shows. Placed last in the file so it wins the cascade over the
+   earlier same-specificity `nav.nav` and `main` rules. */
+@media (max-width: 767px) {
+  nav.nav {
+    position: fixed;
+    inset: auto 0 0 0;
+    top: auto;
+    z-index: 25;
+    justify-content: space-around;
+    gap: 0;
+    padding: 4px max(6px, env(safe-area-inset-left)) calc(4px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--card) 94%, transparent);
+    backdrop-filter: saturate(1.6) blur(14px);
+    border-bottom: none;
+    border-top: 1px solid var(--line);
+    overflow-x: visible;
+  }
+
+  nav.nav button {
+    flex: 1 1 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    min-height: 54px;
+    padding: 5px 2px 4px;
+    border-radius: 12px;
+    font-size: 10.5px;
+    font-weight: 620;
+  }
+
+  nav.nav button:hover { background: none; }
+  nav.nav button[aria-current="true"] { background: none; color: var(--accent); }
+
+  nav.nav .navicon { display: block; }
+  nav.nav .navicon svg { width: 22px; height: 22px; display: block; }
+  nav.nav .navlabel { white-space: nowrap; }
+
+  main { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+  .toast { bottom: calc(78px + env(safe-area-inset-bottom)); }
+}

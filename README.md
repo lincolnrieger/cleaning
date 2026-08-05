@@ -1,4 +1,4 @@
-# Basecamp Cleaning Tracker
+# Woodhouse Cleaning Tracker
 
 A small, fast web app for tracking basecamp cleaning: cleaners tick off their
 checklist on their phone, the office watches the whole camp on one screen.
@@ -14,7 +14,7 @@ browser, no software to install and no commands to run.
 |---|---|---|---|
 | Tick items off a checklist | ✅ | — | ✅ |
 | Sign a building off as complete | ✅ | — | ✅ |
-| Report maintenance / lost property | ✅ | ✅ | ✅ |
+| Report maintenance, lost property or a general note | ✅ | ✅ | ✅ |
 | Camp-wide progress overview | ✅ | ✅ | ✅ |
 | See the week's roster | read-only | ✅ | ✅ |
 | Schedule buildings, assign cleaners, set priority | — | ✅ | ✅ |
@@ -177,14 +177,17 @@ layout respects the notch and home indicator via safe-area insets.
   saying how many items are still unticked, then hands them back to their job
   list so they can pick up the next building. That replaces the "phone the
   office when finished" step on the paper checklist.
-- **Maintenance and lost property** are reported from inside the building,
-  optionally with a photo, and stay open until the office resolves them.
+- **Maintenance, lost property and general notes** are reported from inside
+  the building, optionally with a photo, and — for maintenance and lost
+  property — stay open until the office resolves them. A general note is for
+  anything worth flagging that isn't a fault (it doesn't count toward the
+  "open issues" badge on the overview).
 
 ### Maintenance alerts on your phone
 
 **People → Maintenance alerts** turns on a free push notification the moment
-a cleaner reports a maintenance issue or lost property — no need to keep the
-office overview open to catch it.
+a cleaner reports a maintenance issue, lost property, or a general note — no
+need to keep the office overview open to catch it.
 
 It uses [ntfy.sh](https://ntfy.sh), a free, no-signup notification service.
 Click **Generate a private topic**, **Save**, then install the free **ntfy**

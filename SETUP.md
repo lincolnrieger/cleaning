@@ -79,7 +79,7 @@ does that itself the first time it runs.
 If you're offered a choice between **Production** and **Preview**, add it to
 **Production**. Adding it to both is fine and means test deploys work too.
 
-## Step 4 — Photos on maintenance reports (optional)
+## Step 4 — Photos on reports (optional)
 
 Skip this if you don't want cleaners attaching photos. The app hides the photo
 field automatically when it's not set up — nothing breaks.

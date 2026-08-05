@@ -1,4 +1,4 @@
-/* Basecamp Cleaning Tracker - front end.
+/* Woodhouse Cleaning Tracker - front end.
    No framework, no build step. Hash routing, optimistic ticks, light polling. */
 
 'use strict';
@@ -50,6 +50,23 @@ const asDate = (day) => new Date(`${day}T00:00:00Z`);
 const auDate = (day) => (day ? day.split('-').reverse().join('-') : '');
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** Mirrors the server's REPORT_KINDS - what a cleaner can report from a
+    building, and how each shows up in the report form and the issues list. */
+const REPORT_KINDS = {
+  maintenance: {
+    label: 'Maintenance', emoji: '🔧', pill: 'open',
+    placeholder: 'Broken cistern in the left cubicle…',
+  },
+  lost_property: {
+    label: 'Lost property', emoji: '🧳', pill: 'idle',
+    placeholder: 'Grey jumper, size L, left on the veranda…',
+  },
+  note: {
+    label: 'Note', emoji: '📝', pill: 'note',
+    placeholder: "Anything worth flagging that isn't a fault…",
+  },
+};
 
 /** Monday = 0, to match DAY_NAMES and the stored availability array. */
 const weekdayIndex = (day) => (asDate(day).getUTCDay() + 6) % 7;
@@ -172,25 +189,44 @@ function signOut() {
 
 /* --------------------------------------------------------------- chrome */
 
+// Hand-drawn, self-contained (no icon font/CDN) - just enough detail to read
+// at 22px in the bottom tab bar. Unused on desktop, where the nav stays
+// text-only pills.
+const ICONS = {
+  home: '<path d="M3 11 12 4l9 7"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/>'
+    + '<path d="M8 3v4M16 3v4"/>',
+  clipboard: '<rect x="5.5" y="4.5" width="13" height="16" rx="2"/>'
+    + '<path d="M9 4.5V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v.5"/><path d="M8.5 11h7M8.5 15h7"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.2 2"/>',
+  list: '<path d="M9 6h10M9 12h10M9 18h10"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+  people: '<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/>'
+    + '<circle cx="17" cy="9" r="2.3"/><path d="M15.7 14.2c2.4.2 4.3 2 4.3 4.8"/>',
+};
+
+const icon = (key) => `<span class="navicon" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+    stroke-linecap="round" stroke-linejoin="round">${ICONS[key]}</svg></span>`;
+
 const NAV = {
   cleaner: [
-    ['', 'My jobs'],
-    ['schedule', 'Roster'],
-    ['issues', 'Issues'],
+    ['', 'My jobs', 'home'],
+    ['schedule', 'Roster', 'calendar'],
+    ['issues', 'Reports', 'clipboard'],
   ],
   office: [
-    ['', 'Overview'],
-    ['schedule', 'Schedule'],
-    ['issues', 'Issues'],
-    ['history', 'Activity'],
+    ['', 'Overview', 'home'],
+    ['schedule', 'Schedule', 'calendar'],
+    ['issues', 'Reports', 'clipboard'],
+    ['history', 'Activity', 'clock'],
   ],
   admin: [
-    ['', 'Overview'],
-    ['schedule', 'Schedule'],
-    ['issues', 'Issues'],
-    ['history', 'Activity'],
-    ['buildings', 'Checklists'],
-    ['admin', 'People'],
+    ['', 'Overview', 'home'],
+    ['schedule', 'Schedule', 'calendar'],
+    ['issues', 'Reports', 'clipboard'],
+    ['history', 'Activity', 'clock'],
+    ['buildings', 'Checklists', 'list'],
+    ['admin', 'People', 'people'],
   ],
 };
 
@@ -224,8 +260,9 @@ function chrome({ title, back = false, section = '', wide = false }) {
 
   const items = state.user ? NAV[state.user.role] ?? [] : [];
   nav.hidden = !items.length;
-  nav.innerHTML = items.map(([route, label]) =>
-    `<button data-route="${route}" aria-current="${route === section}">${esc(label)}</button>`,
+  nav.innerHTML = items.map(([route, label, iconKey]) =>
+    `<button data-route="${route}" aria-current="${route === section}">${icon(iconKey)}
+      <span class="navlabel">${esc(label)}</span></button>`,
   ).join('');
   nav.querySelectorAll('[data-route]').forEach((b) => {
     b.onclick = () => { location.hash = `#/${b.dataset.route}`; };
@@ -473,7 +510,7 @@ async function signIn(body) {
 
 function renderPinPad() {
   app.innerHTML = `<div class="login card">
-    <h2>Basecamp Cleaning</h2>
+    <h2>Woodhouse Cleaning</h2>
     <div class="pad stack center">
       <p class="muted small">Enter your PIN</p>
       <div class="pindots" id="dots"></div>
@@ -1139,7 +1176,7 @@ async function renderBuilding(id) {
 
     ${locked ? '<p class="small muted center">Read-only — only cleaners can tick items.</p>' : `
       <div class="stack">
-        <button class="wide" id="report">Report maintenance or lost property</button>
+        <button class="wide" id="report">Report a problem or leave a note</button>
         <button class="wide primary" id="complete"></button>
       </div>`}`;
 
@@ -1242,7 +1279,7 @@ function paintBuilding(data, locked) {
   const issues = $('#issues');
   issues.hidden = !data.issues.length;
   $('#issuelist').innerHTML = data.issues.map((i) => `<div class="list-item small">
-      <strong>${i.kind === 'lost_property' ? 'Lost property' : 'Maintenance'}</strong> —
+      <strong>${esc((REPORT_KINDS[i.kind] ?? REPORT_KINDS.maintenance).label)}</strong> —
       ${esc(i.detail)}
       <div class="tiny muted">${esc(i.reported_by)} · ${esc(time(i.reported_at))}</div>
     </div>`).join('');
@@ -1309,30 +1346,41 @@ async function toggleTask(el, buildingId, day) {
 function renderReport(data) {
   stopPolling();
   chrome({ title: 'Report', back: true });
+  let kind = 'maintenance';
 
   app.innerHTML = `<div class="card">
     <h2>${esc(data.building.name)}</h2>
     <div class="pad stack">
-      <label class="field"><span>Type</span>
-        <select id="kind">
-          <option value="maintenance">Maintenance or damage</option>
-          <option value="lost_property">Lost property</option>
-        </select></label>
+      <div class="field"><span>What's this about?</span>
+        <div class="seg" id="kindSeg" role="tablist">
+          ${Object.entries(REPORT_KINDS).map(([k, m]) => `<button type="button" class="seg-btn"
+              data-kind="${k}" aria-pressed="${k === kind}">${m.emoji} ${esc(m.label)}</button>`)
+            .join('')}
+        </div></div>
       <label class="field"><span>Where (optional)</span>
         <select id="area">
           <option value="">Not specific</option>
           ${data.areas.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
         </select></label>
-      <label class="field"><span>What's wrong / what did you find?</span>
-        <textarea id="detail" placeholder="Broken cistern in the left cubicle…"></textarea></label>
+      <label class="field"><span>Details</span>
+        <textarea id="detail" placeholder="${esc(REPORT_KINDS[kind].placeholder)}"></textarea></label>
       ${state.config.photos ? `<label class="field"><span>Photo (optional)</span>
         <input type="file" id="photo" accept="image/*" capture="environment"></label>
         <img class="thumb" id="preview" hidden alt="">` : ''}
       <p class="err" id="err"></p>
-      <button class="primary wide" id="send">Send report</button>
+      <button class="primary wide" id="send">Send</button>
       <button class="wide" id="cancel">Cancel</button>
     </div>
   </div>`;
+
+  $('#kindSeg').querySelectorAll('[data-kind]').forEach((b) => {
+    b.onclick = () => {
+      kind = b.dataset.kind;
+      $('#kindSeg').querySelectorAll('[data-kind]').forEach((x) =>
+        x.setAttribute('aria-pressed', String(x === b)));
+      $('#detail').placeholder = REPORT_KINDS[kind].placeholder;
+    };
+  });
 
   let photoBlob = null;
   const photoInput = $('#photo');
@@ -1365,12 +1413,12 @@ function renderReport(data) {
         body: {
           buildingId: data.building.id,
           areaId: $('#area').value || null,
-          kind: $('#kind').value,
+          kind,
           detail: $('#detail').value,
           photoKey,
         },
       });
-      toast('Report sent to the office');
+      toast('Sent to the office');
       renderBuilding(data.building.id);
     } catch (e) {
       $('#err').textContent = e.message;
@@ -1396,7 +1444,7 @@ async function shrinkImage(file, max = 1280, quality = 0.75) {
 
 async function renderIssues(status = 'open') {
   const { items } = await api(`/maintenance?status=${status}`);
-  chrome({ title: 'Issues', section: 'issues' });
+  chrome({ title: 'Reports', section: 'issues' });
   const canResolve = state.user.role !== 'cleaner';
 
   app.innerHTML = `
@@ -1405,12 +1453,13 @@ async function renderIssues(status = 'open') {
       <button data-s="resolved" aria-current="${status === 'resolved'}">Resolved</button>
     </div>
     <div class="card">
-      ${items.length ? items.map((i) => `
+      ${items.length ? items.map((i) => {
+        const meta = REPORT_KINDS[i.kind] ?? REPORT_KINDS.maintenance;
+        return `
         <div class="list-item">
           <div class="spread wrap">
             <strong>${esc(i.building)}${i.area ? ` — ${esc(i.area)}` : ''}</strong>
-            <span class="pill ${i.kind === 'lost_property' ? 'idle' : 'open'}">
-              ${i.kind === 'lost_property' ? 'Lost property' : 'Maintenance'}</span>
+            <span class="pill ${meta.pill}">${meta.emoji} ${esc(meta.label)}</span>
           </div>
           <div style="margin:4px 0">${esc(i.detail)}</div>
           ${i.photo_key ? `<img class="thumb" hidden alt="Reported problem"
@@ -1420,9 +1469,10 @@ async function renderIssues(status = 'open') {
           ${canResolve ? `<div style="margin-top:8px">
             <button class="ghost" data-r="${i.id}" data-reopen="${status === 'resolved'}">
               ${status === 'resolved' ? 'Reopen' : 'Mark resolved'}</button></div>` : ''}
-        </div>`).join('')
+        </div>`;
+      }).join('')
         : `<div class="empty"><b>Nothing ${status === 'open' ? 'outstanding' : 'here yet'}</b>
-           ${status === 'open' ? 'Every reported problem has been dealt with.' : ''}</div>`}
+           ${status === 'open' ? "Everything reported so far has been dealt with." : ''}</div>`}
     </div>`;
 
   app.querySelectorAll('[data-photo]').forEach((img) => loadPhoto(img, img.dataset.photo));
@@ -1446,7 +1496,7 @@ async function renderIssues(status = 'open') {
 const VERB = {
   done: 'ticked', undone: 'un-ticked', completed: 'signed off',
   reopened: 'reopened', issue: 'reported', lost_property: 'logged lost property',
-  scheduled: 'scheduled',
+  note: 'left a note', scheduled: 'scheduled',
 };
 
 async function renderHistory() {
@@ -1890,25 +1940,27 @@ async function renderAdmin() {
 
       <div class="card">
         <h2>Everyone — ${users.filter((u) => u.active).length} active</h2>
-        <table class="grid">
-          <tr><th>Name</th><th>Role</th><th></th></tr>
-          ${users.map((u) => `<tr style="${u.active ? '' : 'opacity:.45'}"
-              data-id="${u.id}" data-name="${esc(u.name)}" data-role="${esc(u.role)}"
-              data-active="${u.active}">
-            <td><span class="row" style="gap:9px">${avatar(u.name)}
-              <span>${esc(u.name)}</span></span></td>
-            <td class="muted">${esc(u.role)}${u.active ? '' : ' · disabled'}
-              <span class="tiny" style="display:block">${daysSummary(u.availability)}</span></td>
-            <td class="actions">
-              <button class="ghost" data-days>Days</button>
-              <button class="ghost" data-pin>New PIN</button>
-              <button class="ghost" data-tog>${u.active ? 'Disable' : 'Enable'}</button>
-              <button class="ghost danger" data-del
-                ${u.id === state.user.id ? 'disabled title="You cannot delete yourself"' : ''}
-                >Delete</button>
-            </td></tr>`).join('')}
-        </table>
-        <p class="tiny muted pad" style="padding-top:0">
+        ${users.map((u) => `<div class="list-item people-row" style="${u.active ? '' : 'opacity:.5'}"
+            data-id="${u.id}" data-name="${esc(u.name)}" data-role="${esc(u.role)}"
+            data-active="${u.active}">
+          <div class="row" style="gap:10px">
+            ${avatar(u.name)}
+            <span class="grow">
+              <strong style="display:block">${esc(u.name)}</strong>
+              <span class="tiny muted">${esc(u.role)}${u.active ? '' : ' · disabled'}
+                · ${esc(daysSummary(u.availability))}</span>
+            </span>
+          </div>
+          <div class="row wrap" style="gap:6px;margin-top:10px">
+            <button class="ghost" data-days>Days</button>
+            <button class="ghost" data-pin>New PIN</button>
+            <button class="ghost" data-tog>${u.active ? 'Disable' : 'Enable'}</button>
+            <button class="ghost danger" data-del
+              ${u.id === state.user.id ? 'disabled title="You cannot delete yourself"' : ''}
+              >Delete</button>
+          </div>
+        </div>`).join('')}
+        <p class="tiny muted pad">
           PINs are stored hashed — they can be replaced, never read back.</p>
       </div>
     </div>
@@ -2076,7 +2128,7 @@ async function renderAdmin() {
     }
   };
 
-  const rowOf = (btn) => btn.closest('tr').dataset;
+  const rowOf = (btn) => btn.closest('.people-row').dataset;
 
   app.querySelectorAll('[data-days]').forEach((b) => {
     b.onclick = () => {

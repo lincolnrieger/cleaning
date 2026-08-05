@@ -90,7 +90,7 @@ const TABLES = [
      building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
      area_id     INTEGER REFERENCES areas(id) ON DELETE SET NULL,
      kind        TEXT    NOT NULL DEFAULT 'maintenance'
-                 CHECK (kind IN ('maintenance', 'lost_property')),
+                 CHECK (kind IN ('maintenance', 'lost_property', 'note')),
      detail      TEXT    NOT NULL,
      photo_key   TEXT,
      status      TEXT    NOT NULL DEFAULT 'open'
@@ -185,6 +185,43 @@ async function ensureColumn(db, table, column, definition) {
   const { results } = await db.prepare(`PRAGMA table_info(${table})`).all();
   if (results.some((c) => c.name === column)) return;
   await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+}
+
+/**
+ * The `maintenance` table's CHECK constraint originally only allowed
+ * 'maintenance' and 'lost_property'. SQLite can't widen a CHECK constraint
+ * in place, so adding the 'note' kind means rebuilding the table - the
+ * standard SQLite move: create the new shape, copy the rows across, swap
+ * names. Skipped once the constraint already mentions 'note'.
+ */
+async function ensureNoteKind(db) {
+  const row = await db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'maintenance'`,
+  ).first();
+  if (!row || row.sql.includes("'note'")) return;
+
+  await db.prepare(`CREATE TABLE maintenance_new (
+     id          INTEGER PRIMARY KEY,
+     building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+     area_id     INTEGER REFERENCES areas(id) ON DELETE SET NULL,
+     kind        TEXT    NOT NULL DEFAULT 'maintenance'
+                 CHECK (kind IN ('maintenance', 'lost_property', 'note')),
+     detail      TEXT    NOT NULL,
+     photo_key   TEXT,
+     status      TEXT    NOT NULL DEFAULT 'open'
+                 CHECK (status IN ('open', 'resolved')),
+     day         TEXT    NOT NULL,
+     reported_by TEXT    NOT NULL,
+     reported_at TEXT    NOT NULL,
+     resolved_by TEXT,
+     resolved_at TEXT
+   )`).run();
+  await db.prepare('INSERT INTO maintenance_new SELECT * FROM maintenance').run();
+  await db.prepare('DROP TABLE maintenance').run();
+  await db.prepare('ALTER TABLE maintenance_new RENAME TO maintenance').run();
+  await db.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance (status, id DESC)',
+  ).run();
 }
 
 /**
@@ -301,6 +338,7 @@ async function migrate(env) {
   await ensureColumn(db, 'buildings', 'grp', "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(db, 'areas', 'active', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(db, 'users', 'availability', "TEXT NOT NULL DEFAULT '1111111'");
+  await ensureNoteKind(db);
 
   // Once an admin edits the checklist inside the app, the app owns it and the
   // file stops being applied - otherwise the next deploy would quietly undo

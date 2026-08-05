@@ -1,4 +1,4 @@
-// Basecamp Cleaning Tracker - API
+// Woodhouse Cleaning Tracker - API
 // Single Cloudflare Pages Function handling every /api/* route.
 
 import { ensureReady, contacts } from './_setup.js';
@@ -262,6 +262,18 @@ async function buildingIdForTask(env, taskId) {
   return row;
 }
 
+/**
+ * The three things a cleaner can report from a building. `activity` is the
+ * verb key logActivity/the front end's VERB map use; `tag`/`priority` feed
+ * the ntfy.sh push. A general note isn't a problem, so it gets a lower push
+ * priority than maintenance, same as lost property.
+ */
+const REPORT_KINDS = {
+  maintenance: { label: 'Maintenance', emoji: '🔧', tag: 'wrench', priority: 4, activity: 'issue' },
+  lost_property: { label: 'Lost property', emoji: '🧳', tag: 'package', priority: 3, activity: 'lost_property' },
+  note: { label: 'Note', emoji: '📝', tag: 'memo', priority: 3, activity: 'note' },
+};
+
 const routes = {
   /* --- session --- */
 
@@ -355,7 +367,7 @@ const routes = {
            JOIN areas a ON a.id = t.area_id
            WHERE a.building_id = b.id AND l.day = ?1) AS last_at,
         (SELECT COUNT(*) FROM maintenance m
-           WHERE m.building_id = b.id AND m.status = 'open') AS open_issues,
+           WHERE m.building_id = b.id AND m.status = 'open' AND m.kind != 'note') AS open_issues,
         (SELECT bs.completed_at FROM building_status bs
            WHERE bs.building_id = b.id AND bs.day = ?1) AS completed_at,
         (SELECT bs.completed_by FROM building_status bs
@@ -667,7 +679,8 @@ const routes = {
 
     const { results: issues } = await env.DB.prepare(
       `SELECT id, kind, detail, photo_key, status, reported_by, reported_at
-       FROM maintenance WHERE building_id = ? AND status = 'open' ORDER BY id DESC`,
+       FROM maintenance WHERE building_id = ? AND status = 'open' AND kind != 'note'
+       ORDER BY id DESC`,
     ).bind(id).all();
 
     return json({
@@ -758,9 +771,10 @@ const routes = {
     require(user, 'cleaner', 'office', 'admin');
     const { buildingId, areaId, detail, kind, photoKey } = await req.json();
     const text = clean(detail, 1000);
-    if (!text) throw new HttpError(400, 'Please describe the problem.');
+    if (!text) throw new HttpError(400, 'Please add some detail.');
 
-    const type = kind === 'lost_property' ? 'lost_property' : 'maintenance';
+    const type = REPORT_KINDS[kind] ? kind : 'maintenance';
+    const info = REPORT_KINDS[type];
     const day = localDay(env);
     const id = Number(buildingId);
 
@@ -783,20 +797,16 @@ const routes = {
     ).run();
 
     await logActivity(env, {
-      day, buildingId: id,
-      kind: type === 'lost_property' ? 'lost_property' : 'issue',
-      detail: text, userName: user.name,
+      day, buildingId: id, kind: info.activity, detail: text, userName: user.name,
     });
 
     // Fires after the response is already on its way back, so a slow or dead
     // ntfy.sh never makes a cleaner wait to submit a report.
-    const isLost = type === 'lost_property';
     waitUntil(sendNtfy(env, {
-      title: `${isLost ? '🧳 Lost property' : '🔧 Maintenance'} — ${building.name}${
-        area ? ` (${area.name})` : ''}`,
+      title: `${info.emoji} ${info.label} — ${building.name}${area ? ` (${area.name})` : ''}`,
       message: `${text}\n\nReported by ${user.name}`,
-      priority: isLost ? 3 : 4,
-      tags: [isLost ? 'package' : 'wrench'],
+      priority: info.priority,
+      tags: [info.tag],
       click: `${url.origin}/#/issues`,
     }));
 
@@ -1159,7 +1169,7 @@ const routes = {
     try {
       await publishNtfy(topic, {
         title: '✅ Test notification',
-        message: `Sent by ${user.name} from Basecamp Cleaning. If this arrived, maintenance `
+        message: `Sent by ${user.name} from Woodhouse Cleaning. If this arrived, maintenance `
           + 'alerts are working.',
         priority: 3,
         tags: ['white_check_mark'],
