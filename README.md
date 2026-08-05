@@ -14,7 +14,7 @@ browser, no software to install and no commands to run.
 |---|---|---|---|
 | Tick items off a checklist | ✅ | — | ✅ |
 | Sign a building off as complete | ✅ | — | ✅ |
-| Report maintenance, lost property or a general note | ✅ | ✅ | ✅ |
+| Report maintenance or a general note (incl. lost property) | ✅ | ✅ | ✅ |
 | Camp-wide progress overview | ✅ | ✅ | ✅ |
 | See the week's roster | read-only | ✅ | ✅ |
 | Schedule buildings, assign cleaners, set priority | — | ✅ | ✅ |
@@ -177,17 +177,29 @@ layout respects the notch and home indicator via safe-area insets.
   saying how many items are still unticked, then hands them back to their job
   list so they can pick up the next building. That replaces the "phone the
   office when finished" step on the paper checklist.
-- **Maintenance, lost property and general notes** are reported from inside
-  the building, optionally with a photo, and — for maintenance and lost
-  property — stay open until the office resolves them. A general note is for
-  anything worth flagging that isn't a fault (it doesn't count toward the
-  "open issues" badge on the overview).
+- **Maintenance and general notes** are reported from inside the building,
+  optionally with a photo. Maintenance reports stay open until the office
+  resolves them; a general note — lost property, or anything else worth
+  flagging that isn't a fault — doesn't count toward the "open issues" badge
+  on the overview.
+- **Quick report** (the blue **+** button, on every list screen) skips
+  opening a building first — pick one from a short list, then the same
+  report form. Handy mid-walkthrough, or for anything not tied to actively
+  cleaning somewhere.
+
+### Keeping the overview short
+
+Both **Overview** and a cleaner's own home screen only show what's actually
+relevant by default: what's scheduled today, or your own jobs. Everything
+else — every other building in the park — collapses behind a single
+**"Not scheduled today · 21"** row rather than a long list of tiles nobody
+needs to scan past. Tap it to expand; it folds back down on the next visit.
 
 ### Maintenance alerts on your phone
 
 **People → Maintenance alerts** turns on a free push notification the moment
-a cleaner reports a maintenance issue, lost property, or a general note — no
-need to keep the office overview open to catch it.
+a cleaner reports a maintenance issue or a general note — no need to keep
+the office overview open to catch it.
 
 It uses [ntfy.sh](https://ntfy.sh), a free, no-signup notification service.
 Click **Generate a private topic**, **Save**, then install the free **ntfy**

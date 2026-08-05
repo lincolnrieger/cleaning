@@ -291,6 +291,30 @@ main.wide { max-width: 1280px; }
 .card.danger { border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
 .card.danger > h2 { color: var(--danger); }
 
+/* A clickable card header for a section that starts collapsed - same look
+   as .card > h2, but interactive, with a chevron standing in for the
+   border-bottom's usual job of separating header from body. */
+.card-toggle {
+  display: flex;
+  width: 100%;
+  margin: 0;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-toggle:hover { background: var(--line-2); }
+.card-toggle[aria-expanded="true"] { border-bottom: 1px solid var(--line-2); }
+.card-toggle .chev { font-size: 13px; font-weight: 400; color: var(--muted); flex: none; }
+
 .pad { padding: 16px; }
 .row { display: flex; align-items: center; gap: 10px; }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -868,6 +892,30 @@ td.weekend { background: color-mix(in srgb, var(--bg) 55%, transparent); }
 
 /* ----------------------------------------------------------------- misc */
 
+/* Floating shortcut to report something without opening a building first.
+   Sits above the (mobile) bottom nav, bottom-right on desktop where there's
+   no bottom nav to clear. */
+.fab {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 22;
+  width: 56px;
+  height: 56px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  place-items: center;
+}
+
+.fab:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
+.fab svg { width: 24px; height: 24px; }
+
 .toast {
   position: fixed;
   left: 50%;
@@ -1014,4 +1062,5 @@ code.phrase {
 
   main { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
   .toast { bottom: calc(78px + env(safe-area-inset-bottom)); }
+  .fab { bottom: calc(78px + env(safe-area-inset-bottom)); right: 14px; width: 52px; height: 52px; }
 }

@@ -19,6 +19,7 @@ const state = {
   building: null,  // data for the checklist currently on screen
   cleaners: null,  // cached list for the assignment picker
   collapsedGroups: new Set(), // building groups folded shut on Schedule/Checklists
+  openSections: new Set(),    // secondary lists (e.g. "not scheduled") expanded open
 };
 
 // Chrome/Edge/Android hold this event back until asked for it. Capturing it
@@ -52,19 +53,16 @@ const auDate = (day) => (day ? day.split('-').reverse().join('-') : '');
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /** Mirrors the server's REPORT_KINDS - what a cleaner can report from a
-    building, and how each shows up in the report form and the issues list. */
+    building, and how each shows up in the report form and the issues list.
+    Lost property used to be its own kind; it's folded into Note now. */
 const REPORT_KINDS = {
   maintenance: {
     label: 'Maintenance', emoji: '🔧', pill: 'open',
     placeholder: 'Broken cistern in the left cubicle…',
   },
-  lost_property: {
-    label: 'Lost property', emoji: '🧳', pill: 'idle',
-    placeholder: 'Grey jumper, size L, left on the veranda…',
-  },
   note: {
     label: 'Note', emoji: '📝', pill: 'note',
-    placeholder: "Anything worth flagging that isn't a fault…",
+    placeholder: 'Lost property, or anything else worth flagging…',
   },
 };
 
@@ -267,6 +265,14 @@ function chrome({ title, back = false, section = '', wide = false }) {
   nav.querySelectorAll('[data-route]').forEach((b) => {
     b.onclick = () => { location.hash = `#/${b.dataset.route}`; };
   });
+
+  // Hidden on detail screens (back === true) - a floating shortcut to report
+  // something makes sense on a list/home screen, not on top of the report
+  // form itself or a building's own checklist, which already has its own
+  // report button in context.
+  const fab = $('#quickfab');
+  fab.hidden = !state.user || back;
+  fab.onclick = openQuickReport;
 }
 
 $('#back').onclick = () => { location.hash = '#/'; };
@@ -663,13 +669,13 @@ async function renderOverview() {
            Open <strong>Schedule</strong> to plan the week.</div>`}
     </div>
 
-    <div class="card">
-      <h2>Not scheduled ${dayLabel(day).toLowerCase() === 'today' ? 'today' : 'this day'}
-        <span class="muted" style="font-weight:500">· ${rest.length}</span></h2>
-      ${rest.length
-        ? `<div class="crow-list">${rest.map(compactRow).join('')}</div>`
-        : '<div class="empty">Every building is on the run sheet.</div>'}
-    </div>
+    ${rest.length ? `<div class="card">
+      ${sectionToggle('overview-rest',
+        dayLabel(day).toLowerCase() === 'today' ? 'Not scheduled today' : 'Not scheduled this day',
+        rest.length)}
+      ${state.openSections.has('overview-rest')
+        ? `<div class="crow-list">${rest.map(compactRow).join('')}</div>` : ''}
+    </div>` : ''}
 
     ${stale.length ? `<div class="card"><div class="pad small muted">
       Not cleaned in a week or more:
@@ -678,6 +684,7 @@ async function renderOverview() {
 
   wireTiles();
   wireDayNav(app, renderOverview);
+  wireSectionToggles(app, renderOverview);
   poll(renderOverview, 30000);
 }
 
@@ -806,6 +813,32 @@ function wireGroupToggle(el, key, onToggle) {
   };
 }
 
+/**
+ * A card section that starts collapsed - for a secondary list (buildings not
+ * scheduled, buildings not assigned to you) that would otherwise dominate
+ * the screen with mostly-irrelevant rows. Unlike wireGroupToggle's fold
+ * (which defaults open), this defaults shut: `key` only appears in
+ * `state.openSections` once someone's actually asked to see it.
+ */
+function sectionToggle(key, label, count) {
+  const open = state.openSections.has(key);
+  return `<button class="card-toggle spread" data-opensec="${esc(key)}" aria-expanded="${open}">
+    <span class="grow">${esc(label)} <span class="muted" style="font-weight:500">· ${count}</span></span>
+    <span class="chev">${open ? '▾' : '▸'}</span>
+  </button>`;
+}
+
+function wireSectionToggles(root, rerender) {
+  root.querySelectorAll('[data-opensec]').forEach((btn) => {
+    btn.onclick = () => {
+      const key = btn.dataset.opensec;
+      if (state.openSections.has(key)) state.openSections.delete(key);
+      else state.openSections.add(key);
+      rerender();
+    };
+  });
+}
+
 /* ------------------------------------------------------ view: cleaner home */
 
 async function renderCleanerHome() {
@@ -835,8 +868,9 @@ async function renderCleanerHome() {
     </div>` : ''}
 
     ${rest.length ? `<div class="card">
-      <h2>Other buildings</h2>
-      ${rest.map(jobTile).join('')}
+      ${sectionToggle('home-rest', 'Other buildings', rest.length)}
+      ${state.openSections.has('home-rest')
+        ? `<div class="crow-list">${rest.map(compactRow).join('')}</div>` : ''}
     </div>` : ''}
 
     <p class="tiny muted center">
@@ -844,6 +878,7 @@ async function renderCleanerHome() {
     </p>`;
 
   wireTiles();
+  wireSectionToggles(app, renderCleanerHome);
   poll(renderCleanerHome, 60000);
 }
 
@@ -1360,7 +1395,12 @@ async function toggleTask(el, buildingId, day) {
 
 /* ------------------------------------------------------- view: reporting */
 
-function renderReport(data) {
+/** `back` is where Cancel and a successful send return to - the building's
+    checklist by default, or the caller's own choice (Quick report sends
+    people back to where they started, not into a building they may never
+    have opened). */
+function renderReport(data, { back } = {}) {
+  const goBack = back || (() => renderBuilding(data.building.id));
   stopPolling();
   chrome({ title: 'Report', back: true });
   let kind = 'maintenance';
@@ -1412,7 +1452,7 @@ function renderReport(data) {
     };
   }
 
-  $('#cancel').onclick = () => renderBuilding(data.building.id);
+  $('#cancel').onclick = goBack;
 
   $('#send').onclick = async (ev) => {
     const btn = ev.currentTarget;
@@ -1436,10 +1476,58 @@ function renderReport(data) {
         },
       });
       toast('Sent to the office');
-      renderBuilding(data.building.id);
+      goBack();
     } catch (e) {
       $('#err').textContent = e.message;
       btn.disabled = false;
+    }
+  };
+}
+
+/**
+ * Entry point for the Quick report shortcut (the floating + button): asks
+ * which building first, then hands off to the same renderReport() every
+ * other report goes through. Exists so reporting something doesn't require
+ * opening that building's checklist first - useful mid-walkthrough, or for
+ * a note that isn't tied to actively cleaning anywhere.
+ */
+async function openQuickReport() {
+  let buildings;
+  try {
+    buildings = (await api(`/overview?day=${state.config.today}`)).buildings;
+  } catch (e) {
+    return toast(e.message, true);
+  }
+
+  const sheet = openSheet(`
+    <div class="sheet-head"><strong>Quick report</strong></div>
+    <div class="pad stack">
+      <p class="small muted" style="margin:0">Which building is this about?</p>
+      <label class="field"><span>Building</span>
+        <select id="qbid">
+          <option value="">Choose…</option>
+          ${groupBuildings(buildings).map((g) => g.buildings
+            .map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join('')).join('')}
+        </select></label>
+      <p class="err" id="qerr"></p>
+      <button class="primary wide" id="qgo" disabled>Continue</button>
+      <button class="wide" id="qcancel">Cancel</button>
+    </div>`);
+
+  const select = sheet.querySelector('#qbid');
+  const go = sheet.querySelector('#qgo');
+  select.onchange = () => { go.disabled = !select.value; };
+  sheet.querySelector('#qcancel').onclick = closeSheet;
+
+  go.onclick = async () => {
+    go.disabled = true;
+    try {
+      const data = await api(`/building?id=${select.value}&day=${state.config.today}`);
+      closeSheet();
+      renderReport(data, { back: () => { location.hash = '#/'; } });
+    } catch (e) {
+      sheet.querySelector('#qerr').textContent = e.message;
+      go.disabled = false;
     }
   };
 }
@@ -1465,9 +1553,12 @@ async function renderIssues(status = 'open') {
   const canResolve = state.user.role !== 'cleaner';
 
   app.innerHTML = `
-    <div class="tabs">
-      <button data-s="open" aria-current="${status === 'open'}">Open</button>
-      <button data-s="resolved" aria-current="${status === 'resolved'}">Resolved</button>
+    <div class="spread wrap" style="margin-bottom:14px">
+      <div class="tabs" style="margin:0">
+        <button data-s="open" aria-current="${status === 'open'}">Open</button>
+        <button data-s="resolved" aria-current="${status === 'resolved'}">Resolved</button>
+      </div>
+      <button class="ghost" id="newreport">+ New report</button>
     </div>
     <div class="card">
       ${items.length ? items.map((i) => {
@@ -1494,6 +1585,8 @@ async function renderIssues(status = 'open') {
 
   app.querySelectorAll('[data-photo]').forEach((img) => loadPhoto(img, img.dataset.photo));
 
+  $('#newreport').onclick = openQuickReport;
+
   app.querySelectorAll('[data-s]').forEach((b) => {
     b.onclick = () => renderIssues(b.dataset.s);
   });
@@ -1512,8 +1605,7 @@ async function renderIssues(status = 'open') {
 
 const VERB = {
   done: 'ticked', undone: 'un-ticked', completed: 'signed off',
-  reopened: 'reopened', issue: 'reported', lost_property: 'logged lost property',
-  note: 'left a note', scheduled: 'scheduled',
+  reopened: 'reopened', issue: 'reported', note: 'left a note', scheduled: 'scheduled',
 };
 
 async function renderHistory() {

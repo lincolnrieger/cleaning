@@ -225,6 +225,22 @@ async function ensureNoteKind(db) {
 }
 
 /**
+ * Lost property was folded into the general 'note' kind rather than deleted -
+ * existing reports stay visible, just relabelled. Gated by a settings flag
+ * (rather than re-running the UPDATEs, which are unindexed table scans, on
+ * every single request forever) so it only does the work once.
+ */
+async function ensureLostPropertyFolded(db) {
+  if (await readSetting(db, 'lost_property_folded') === '1') return;
+  await db.prepare(`UPDATE maintenance SET kind = 'note' WHERE kind = 'lost_property'`).run();
+  await db.prepare(`UPDATE activity SET kind = 'note' WHERE kind = 'lost_property'`).run();
+  await db.prepare(
+    `INSERT INTO settings (key, value) VALUES ('lost_property_folded', '1')
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run();
+}
+
+/**
  * Composite map key. The separator is an explicit NUL escape because building
  * and area names can contain any printable character, including spaces and
  * punctuation, so nothing printable is safe to delimit on.
@@ -339,6 +355,7 @@ async function migrate(env) {
   await ensureColumn(db, 'areas', 'active', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(db, 'users', 'availability', "TEXT NOT NULL DEFAULT '1111111'");
   await ensureNoteKind(db);
+  await ensureLostPropertyFolded(db);
 
   // Once an admin edits the checklist inside the app, the app owns it and the
   // file stops being applied - otherwise the next deploy would quietly undo

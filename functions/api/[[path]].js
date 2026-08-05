@@ -263,14 +263,15 @@ async function buildingIdForTask(env, taskId) {
 }
 
 /**
- * The three things a cleaner can report from a building. `activity` is the
+ * The two things a cleaner can report from a building. `activity` is the
  * verb key logActivity/the front end's VERB map use; `tag`/`priority` feed
  * the ntfy.sh push. A general note isn't a problem, so it gets a lower push
- * priority than maintenance, same as lost property.
+ * priority than maintenance. Lost property used to be its own kind; it's
+ * now just a note (see ensureLostPropertyFolded in _setup.js for the
+ * one-time migration of existing reports).
  */
 const REPORT_KINDS = {
   maintenance: { label: 'Maintenance', emoji: '🔧', tag: 'wrench', priority: 4, activity: 'issue' },
-  lost_property: { label: 'Lost property', emoji: '🧳', tag: 'package', priority: 3, activity: 'lost_property' },
   note: { label: 'Note', emoji: '📝', tag: 'memo', priority: 3, activity: 'note' },
 };
 
