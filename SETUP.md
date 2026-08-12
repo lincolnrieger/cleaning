@@ -79,20 +79,59 @@ does that itself the first time it runs.
 If you're offered a choice between **Production** and **Preview**, add it to
 **Production**. Adding it to both is fine and means test deploys work too.
 
-## Step 4 — Photos on reports (optional)
+## Step 4 — Photos (needed for photos on checklist items)
 
-Skip this if you don't want cleaners attaching photos. The app hides the photo
-field automatically when it's not set up — nothing breaks.
+This is what turns on **both** kinds of photo:
+
+- a photo attached to a maintenance report, and
+- **photos against individual checklist items** — the "📷 Photo required"
+  feature, e.g. *Check that the fire extinguisher is present*.
+
+Skip it and the app hides every camera button automatically — nothing breaks,
+you just can't ask for photos.
 
 1. Sidebar → **R2 Object Storage** → **Create bucket**, name it
-   `basecamp-cleaning-photos`. Leave it **private** (the default).
+   `basecamp-cleaning-photos`. Leave it **private** (the default). Do **not**
+   enable public access: the app serves photos through its own API so they
+   need a sign-in, and a public bucket would undo that.
 2. Back in your Pages project → **Settings** → **Bindings** → **Add** →
    **R2 bucket**:
-   - Variable name: **`PHOTOS`**
+   - Variable name: **`PHOTOS`** (exactly this, capital letters)
    - Bucket: **basecamp-cleaning-photos**
+3. Redeploy (step 5) — bindings only apply to deployments made after them.
 
 R2 asks you to "add a payment method" to activate the service even on the free
-plan. If you'd rather not, skip this step — everything else works without it.
+plan. There is no charge on the free tier (10 GB of storage), but if you'd
+rather not, skip this step — everything else works without it.
+
+**Nothing else to configure.** No table to create, no size limits to set, no
+folder structure to make. The app resizes photos to 1280px in the browser
+before uploading, refuses anything over 3 MB, and allows up to six photos per
+checklist item per day.
+
+### Then, in the app
+
+Go to **Checklists**, pick the **Full Clean** or **Check** tab, open a
+building, unfold an area and either add an item or tap **Edit** on one. The
+**Photo** setting has three options:
+
+| Setting | What the cleaner sees |
+|---|---|
+| No photo | An ordinary tick box |
+| Photo allowed | An **Add photo** button they can ignore |
+| Photo required | A **📷 Photo required** badge, and sign-off warns if it's missing |
+
+**Photo required is a warning, not a lock.** A cleaner can still sign off a
+building with a photo missing — a flat phone battery shouldn't strand a
+finished building — but it takes a second, deliberate confirmation and the
+activity log records that it was signed off short.
+
+### Housekeeping
+
+Photos are deleted from storage automatically when the item photo is removed,
+when a scheduled job's progress is wiped, when the checklist item, area or
+building is deleted, and when you clear the database from **People → Danger
+zone**. There is no orphan cleanup job because nothing is left orphaned.
 
 ## Step 5 — Redeploy so the settings take effect
 
@@ -118,15 +157,60 @@ otherwise would.
 
 ---
 
+## Step 7 — Set the two checklists up for real
+
+Every building starts with a **Full Clean** (what was already there) and a
+**Check**. Buildings that already had a "check clean" section — the bell tents,
+the chalets, Seeonee — keep theirs. Everything else gets a generic starter
+**Check clean** list, which is deliberately bland and wants tailoring:
+
+1. **Checklists** → the **Check** tab. A banner names any building whose Check
+   list is still empty.
+2. Open a building. Either build the list by hand, or tap **Copy from the Full
+   Clean** and delete what a check doesn't need — usually much quicker.
+3. Anything that should be on *both* lists (the *Every visit* block already is)
+   can be set to **Both** when you add or edit the area, so you only maintain
+   it once.
+
+Then **Planning → Buildings**: tap a square, pick **Full Clean** or **Check**,
+and the cleaner gets exactly that list when they open the job.
+
+## Step 8 — Availability and the roster
+
+1. **Planning → Availability** — tap each name and set the days they work and
+   the hours. **Mon–Fri 8–4** is one tap.
+2. **Planning → Staff roster** — tap a square to add a shift. The times default
+   to that person's availability, so a normal shift is two taps.
+3. **Print / save as PDF** when the week is set. Choose *Save as PDF* as the
+   printer for a PDF; it's the same layout either way, A4 landscape.
+
+Rostering somebody outside their availability warns you first and stays
+flagged afterwards, so a clash can't quietly survive to Monday morning.
+
+---
+
 ## Changing the checklist later — also in the browser
+
+Two ways, and only one is in charge at a time:
+
+**In the app** (**Checklists**) — day-to-day edits. **The first edit you make
+here takes over**, and `data/checklist.json` stops being applied on deploy, so
+a later push can't undo your work. This is the normal way to work.
+
+**In the file** — good for bulk changes before you've started editing in the
+app:
 
 1. On GitHub open **`data/checklist.json`**.
 2. Click the **pencil icon** to edit it.
-3. Make your change. Every task is a pair: `["Item", "What to do"]`.
+3. Make your change. Every task is `["Item", "What to do"]`, with an optional
+   third value: `"photo"` or `"photo required"`. Each building has a `full`
+   list and a `check` list.
 4. Click **Commit changes**.
 
-Cloudflare redeploys within a minute and the app updates itself. You can add
-tasks, reword them, add or remove buildings — all from that one file.
+Cloudflare redeploys within a minute and the app updates itself.
+
+To go back to the file after editing in the app, use **Restore from file** at
+the bottom of the Checklists screen — it asks you to type "restore".
 
 **Removing a task doesn't delete history.** It stops appearing on checklists,
 but the record of every time it was cleaned stays in the activity log and CSV
@@ -148,7 +232,10 @@ project → **Custom domains**, if you own a domain.
 |---|---|---|
 | "No database is connected" | The `DB` binding is missing or was added after the last deploy | Check step 3, then redeploy (step 5) |
 | Site loads but the checklist is empty | Deploy ran before the database was connected | Retry the deployment (step 5) |
-| Photo field never appears | No R2 bucket bound | That's step 4, and it's optional |
+| Photo buttons never appear | No R2 bucket bound, or bound after the last deploy | That's step 4 — then redeploy (step 5) |
+| "Photo uploads are not set up on this site" | Same — the `PHOTOS` binding is missing | Step 4, then step 5 |
+| A building's Check list is empty | It hasn't been set up yet | Step 7 — **Copy from the Full Clean** is the quick way |
+| A cleaner got the wrong checklist | The job wasn't scheduled, so they chose | Schedule it with the right type; then it's automatic |
 | Everyone's PIN suddenly fails | An `AUTH_SECRET` variable was added or changed in Settings | Remove it, redeploy, and PINs work again — or reset each PIN from the People screen |
 | "Too many wrong PINs" | Someone mistyped 8+ times | Wait up to 5 minutes; it clears itself, and clears instantly on a correct PIN |
 

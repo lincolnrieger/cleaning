@@ -1,7 +1,8 @@
 # Woodhouse Cleaning Tracker
 
 A small, fast web app for tracking basecamp cleaning: cleaners tick off their
-checklist on their phone, the office watches the whole camp on one screen.
+checklist on their phone, the office watches the whole camp on one screen and
+builds the week's roster.
 
 **To get it running, follow [SETUP.md](SETUP.md)** — it's all done in the
 browser, no software to install and no commands to run.
@@ -13,16 +14,18 @@ browser, no software to install and no commands to run.
 | | Cleaner | Office | Admin |
 |---|---|---|---|
 | Tick items off a checklist | ✅ | — | ✅ |
+| Attach photos to checklist items | ✅ | — | ✅ |
 | Sign a building off as complete | ✅ | — | ✅ |
 | Report maintenance or a general note (incl. lost property) | ✅ | ✅ | ✅ |
 | Camp-wide progress overview | ✅ | ✅ | ✅ |
-| See the week's roster | read-only | ✅ | ✅ |
-| Schedule buildings, assign cleaners, set priority | — | ✅ | ✅ |
+| See the week's building plan and staff roster | read-only | ✅ | ✅ |
+| Schedule buildings, pick Full Clean or Check, assign cleaners | — | ✅ | ✅ |
+| Build and print the staff roster | — | ✅ | ✅ |
+| See everyone's availability on one screen | — | ✅ | ✅ |
+| Set anyone's availability (days **and** times) | — | ✅ | ✅ |
 | Open an individual building's detail | ✅ | read-only | ✅ |
 | Mark a maintenance issue resolved | — | ✅ | ✅ |
 | Activity log + CSV export | — | ✅ | ✅ |
-| Set your own working days | ✅ | ✅ | ✅ |
-| Set anyone's working days | — | ✅ | ✅ |
 | Add people, set PINs, delete accounts | — | — | ✅ |
 | Edit buildings, areas and checklist items | — | — | ✅ |
 
@@ -43,64 +46,281 @@ including an admin. While it's on, an orange banner sits across the top of
 every screen so it can't be forgotten. **Turn it off before the cleaners start
 using it for real** — one switch, and PINs are required again immediately.
 
-### Clearing test data
+---
 
-**People → Danger zone** wipes every cleaning record, schedule, sign-off and
-maintenance report, so you can start clean after trialling it. You have to
-type `clear database` to arm the button, and there's a second confirmation
-after that. Optionally it also removes everyone except you.
+## The two checklists: Full Clean and Check
 
-It never drops a table, and it never touches your buildings, areas or tasks —
-those come from `data/checklist.json`. Photos attached to cleared maintenance
-reports are deleted from storage too.
+Every building has **two** checklists, and each is edited separately:
 
-Individual people can also be **deleted** outright from the People table, not
-just disabled. Deleting removes them from the list and from any buildings
-they're assigned to, but **what they already cleaned stays in the records**
-under their name. You can't delete yourself, and you can't delete the last
-admin. Disabling remains the softer option: it keeps the account and just
-blocks sign-in.
+- **Full Clean** — the whole thing, top to bottom.
+- **Check** — the shorter walk-through: is it still clean, is it stocked, is
+  anything broken.
 
-### Availability
+Anything that applies to both — the *Every visit* block — is stored once and
+marked **on both checklists**, so it never has to be kept in step in two
+places.
 
-Each person has the days they normally work, set from **People → Days** —
-office and admin only; cleaners can't set their own. Tick the days on. It's
-a general weekly pattern, not specific dates, and carries no times.
+### How a cleaner picks one — usually they don't
 
-When you assign someone in the schedule, anyone who doesn't normally work that
-weekday is listed last with a note saying so — but **you can still pick
-anyone regardless**. It's guidance for building the roster, never a block,
-because overriding it is the normal case when someone swaps a shift.
+The point is that the choice is normally already made:
 
-### Editing checklists in the app
+1. The office schedules **Hooper Bunkhouse → Check** for Tuesday.
+2. Tuesday, the cleaner opens the app; the job tile says **Check**.
+3. They tap it once and get the Check checklist. No menu, no decision.
 
-**Checklists** (admin only) lists every building, grouped the same way the
-schedule grid groups them — tap a group's heading to fold or unfold it, handy
-once there are more than a few buildings in one — with a search box that
-matches building names, area names and individual items — type "kettle" and
-every building that has one shows up. From there you can add a building, add
-or rename an area, and add, reword or hide individual items.
+For a building nobody has scheduled, tapping it asks **Full Clean or Check**
+with two large buttons, and then goes straight in. Either way it's one or two
+taps from the home screen to the correct list.
+
+There's a segmented control at the top of every checklist to switch between
+the two. If the office scheduled a Check and somebody is looking at the Full
+Clean, an orange banner says so — switching is allowed, doing it by accident
+isn't quiet.
+
+Sign-offs are per checklist, so a building can be **checked** in the morning
+and **fully cleaned** that afternoon, and the office sees both.
+
+> One building can be scheduled once per day, for one of the two checklists.
+> If a building genuinely needs both on the same day, schedule the Full Clean
+> and let the cleaner switch — both sign-offs still record separately.
+
+### Editing them
+
+**Checklists** (admin only) opens on a **Full Clean / Check** tab pair. Under
+it, every building, grouped the way the schedule grid groups them, with a
+search box that matches building names, area names and individual items — type
+"kettle" and every building that has one shows up.
+
+Tap a building and everything about its checklist is on one page:
+
+- **Areas** in order, each folding open to show its items.
+- **Add, edit, delete and reorder items** — ▲▼ on each item for a one-tap
+  nudge, or **Reorder** for a drag-free list you rearrange and save once.
+- **Photo setting per item**: no photo, photo allowed, or photo required.
+- **Add, rename, hide, reorder and delete areas**, and set whether an area is
+  on the Full Clean, the Check, or both.
+- **Copy from the other checklist** — builds a Check out of the Full Clean in
+  one tap so you can trim it down, instead of retyping forty items. It skips
+  anything already there rather than doubling it up.
+- **Delete the building**, behind a type-the-name confirmation.
+
+A banner warns you about any building whose Check list is still empty.
+
+### Hiding versus deleting
 
 **Hiding** is the everyday tool: it takes an item or area off future
 checklists and keeps every record of it having been cleaned. Bringing it back
 restores that history with it.
 
-**Deleting an area is different and permanent.** It's on the area's own page,
-separated out as a danger-zone action, and it requires typing the area's name
-to confirm. Unlike hiding, it throws away every record of that area ever being
-cleaned — there's no undo. Use it only for an area that should never have
-existed; use hiding for everything else.
+**Deleting is permanent.** Deleting an item that has any history behind it
+tells you exactly how many records go with it and makes you confirm; an item
+nobody has ever ticked deletes without ceremony. Deleting an area or a
+building requires typing its name.
 
-**The first edit you make here takes over.** After that `data/checklist.json`
-stops being applied on deploy, so a later push can't quietly undo your work.
-The banner at the top of the page tells you which is in charge. **Restore from
-file** hands it back — anything you added that isn't in the file becomes
-hidden, and cleaning history is untouched either way.
+### Reordering is safe against a second admin
+
+When you save a new order, the app sends the whole list of ids and the server
+checks it still matches what's there. If somebody else added or removed an
+item while your screen was open, the reorder is refused with "this list
+changed — reload and try again" rather than silently writing a stale order
+over their work.
+
+### The file versus the screen
+
+**The first edit you make in the app takes over.** After that
+`data/checklist.json` stops being applied on deploy, so a later push can't
+quietly undo your work. The banner at the top of the page tells you which is
+in charge. **Restore from file** hands it back — anything you added that isn't
+in the file becomes hidden, and cleaning history is untouched either way.
 
 So: use the file for bulk changes, use the screen for day-to-day tweaks, and
 don't expect both at once.
 
-### A note on "only the cleaners can see"
+---
+
+## Photos on checklist items
+
+Any item can be set to **allow** a photo or **require** one. An item that
+requires one shows a **📷 Photo required** badge on the cleaner's phone.
+
+- Tap **Add photo** and the phone offers camera or library.
+- Several photos per item (up to six), each with a thumbnail.
+- Tap the ✕ on a thumbnail to remove it — it's deleted from storage too.
+- Photos are resized to 1280px in the browser before uploading, so it works on
+  a weak mobile signal. The server refuses anything over 3 MB.
+- Photos are private: they're served through the API and need a valid session.
+  A direct link to the storage bucket won't work.
+
+**Signing off checks the required ones.** If any item that requires a photo
+hasn't got one, the sign-off stops and lists exactly which items. A cleaner
+can still sign off anyway — a dead phone camera shouldn't strand a finished
+building — but it's a deliberate second confirmation, and the activity log
+records that it was signed off with photos missing.
+
+Photos on **maintenance reports** work as before and are separate from this.
+
+**This needs an R2 bucket bound as `PHOTOS`** — that's step 4 in
+[SETUP.md](SETUP.md), and it takes about two minutes. Without it the app hides
+the camera buttons automatically and nothing breaks; an item marked "photo
+required" just says photo storage isn't set up.
+
+---
+
+## Reporting a problem
+
+**Report a problem or leave a note**, from inside a building or from the blue
+**+** button on any list screen.
+
+- **Where** is a plain text box, not a dropdown — "Kitchen near main
+  entrance", "Room 3, upstairs", whatever actually describes it. Optional.
+- **Maintenance** reports stay open until the office resolves them. A
+  **general note** — lost property, or anything else worth flagging that isn't
+  a fault — doesn't count toward the "open issues" badge.
+- One photo can be attached.
+
+---
+
+## Staff availability
+
+**Planning → Availability** is every person's whole week on one screen — you
+never have to open people one at a time.
+
+| Staff | Mon | Tue | Wed | Thu | Fri |
+|---|---|---|---|---|---|
+| Casey | 8am–4pm | 8am–4pm | Unavailable | 9am–5pm | 8am–2pm |
+| Dana | 10am–6pm | Unavailable | 8am–4pm | 8am–4pm | 10am–4pm |
+
+Each cell also shows how many shifts that person already has that day, so you
+can see who's carrying the week while you're reading who's free.
+
+Filters across the top: **staff member**, **day**, **available/unavailable**,
+and **free between** two times — set 13:00 to 17:00 and it dims everyone who
+can't cover that window.
+
+Tap a name to set their availability: a switch per day plus a start and finish
+time. Leave the times blank for a day they work with no set hours. Presets for
+**Mon–Fri 8–4**, **copy the first day down** and **clear all** cover most of
+it in one tap. Times use the phone's native time picker.
+
+Nobody's availability is ever assumed closed: a person whose record predates
+this reads as available, not unavailable, so nobody silently drops off the
+roster.
+
+---
+
+## The staff roster
+
+**Planning → Staff roster** is the week: staff down the side, days across the
+top. Tap any square to add a shift with a start time, finish time, duties and
+a note, and to mark it **confirmed**.
+
+- The start and finish default to that person's availability for that day, so
+  a normal shift is two taps.
+- A person can have **more than one shift a day** — tapping a square that
+  already has shifts lists them, with edit and delete on each.
+- **Copy last week into this one** brings the whole previous week across. They
+  arrive **unconfirmed** on purpose: last week's agreement isn't this week's.
+  It only works into an empty week, so it can't quietly duplicate anything.
+
+### Availability conflicts are warned, never silent
+
+Saving a shift that clashes stops and says exactly what's wrong:
+
+- the person is marked **unavailable** that day
+- the shift falls **outside** the hours they gave
+- it **overlaps** another shift they already have
+
+You can still roster it — swapping shifts is the normal case — but you say so
+deliberately. Anything forced through **stays flagged**: the shift is marked
+with ⚠ on the grid and a banner at the top counts them, so a clash created
+three weeks ago is still visible now. Availability changing *after* the roster
+was built re-flags it automatically.
+
+### Printing it
+
+**Print / save as PDF** on the roster prints just the roster — not the app.
+It's a clean A4 landscape sheet:
+
+**STAFF ROSTER — WEEK COMMENCING 10-08-2026**
+
+| Staff | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
+|---|---|---|---|---|---|---|---|
+| Casey | 8am–4pm | 8am–4pm | OFF | 10am–6pm | 8am–4pm | OFF | OFF |
+| Dana | 10am–6pm | OFF | 8am–4pm | 8am–4pm | 10am–4pm | 9am–1pm | OFF |
+
+Navigation, buttons, filters and the app header are all removed, days someone
+isn't available read **OFF**, confirmed shifts carry a ✓ and clashes a ⚠, and
+a staff member's row never splits across pages.
+
+**For a PDF**, use the same button and choose *Save as PDF* as the printer —
+every browser and phone has it, and it produces the same layout. There's also
+**Download CSV** if you'd rather have it in a spreadsheet.
+
+---
+
+## Scheduling buildings
+
+**Planning → Buildings** is a week grid: buildings down the side, days across
+the top. Tap any square to put that building on the plan for that day, **pick
+Full Clean or Check** (the sheet shows how many items each is), choose who
+cleans it, give it a priority number, and add a note ("group arriving 2pm —
+finish by 1pm").
+
+Each square shows its priority, an **F** or **C** badge for which clean,
+who's assigned, and how it's going — green with a tick once it's signed off.
+Today's column is highlighted and weekends are shaded back.
+
+What that feeds:
+
+- **Cleaners** open the app to **Your buildings today**, in priority order,
+  each tile naming its checklist and the office's note. Anything scheduled for
+  someone else, then everything unscheduled, appears below — a cleaner is
+  never blocked from a building they weren't formally assigned. If they're
+  rostered on, their shift times sit at the top of the screen.
+- **The office overview** becomes a run sheet: scheduled buildings first in
+  priority order with "4 of 4 left" at the top, unscheduled buildings in a
+  second column, and a banner naming any scheduled building with nobody on it.
+  The percentage and task counts cover **only what is scheduled for the day
+  being viewed**, counted against the checklist that was actually planned.
+
+More than one cleaner can be assigned to the same building — that's the case
+the whole app is built around, so they're listed together and each still gets
+their own attribution on the tasks they tick.
+
+**Removing a job from the schedule** asks first, and if any work was already
+recorded that day it offers to wipe those ticks, photos and the sign-off too —
+**only for the checklist that was scheduled**, so clearing a Check can't erase
+a Full Clean. Taking something off the plan and erasing what somebody actually
+did are different intentions, so it never assumes.
+
+When you assign someone, anyone unavailable that day is listed last with a
+note saying so — but **you can still pick anyone**. It's guidance, never a
+block.
+
+Dates are shown Australian day-first throughout — `04-08-2026`, including in
+the CSV exports.
+
+---
+
+## Clearing test data
+
+**People → Danger zone** wipes every cleaning record, schedule, roster,
+sign-off, photo and maintenance report, so you can start clean after
+trialling it. You have to type `clear database` to arm the button, and there's
+a second confirmation after that. Optionally it also removes everyone except
+you.
+
+It never drops a table, and it never touches your buildings, areas or tasks.
+Photos are deleted from storage too.
+
+Individual people can also be **deleted** outright from the People table, not
+just disabled. Deleting removes them from the list, from any buildings they're
+assigned to, and **from the roster** — but **what they already cleaned stays
+in the records** under their name. You can't delete yourself, and you can't
+delete the last admin. Disabling remains the softer option: it keeps the
+account and just blocks sign-in.
+
+## A note on "only the cleaners can see"
 
 By default the office **can** open a building and see per-task detail, but
 read-only — they can't tick anything. That is deliberate: you asked to see
@@ -113,53 +333,21 @@ Variables and Secrets) and redeploy. Building tiles stop being clickable for
 office accounts, and the API refuses the request too — it's a real
 restriction, not just a hidden button.
 
-## Scheduling and assignment
-
-**Schedule** is a week grid: buildings down the side, days across the top. Tap
-any square to put that building on the roster for that day, choose who cleans
-it, give it a priority number, and add a note ("group arriving 2pm — finish by
-1pm"). Tap a scheduled square again to change or remove it.
-
-Each square shows its priority, who's assigned, and how the clean is going —
-green with a tick once it's signed off. Today's column is highlighted and
-weekends are shaded back.
-
-What that feeds:
-
-- **Cleaners** open the app to **Your buildings today**, in priority order,
-  with the office's note attached. Anything scheduled for someone else, and
-  then everything unscheduled, appears below — a cleaner is never blocked from
-  a building they weren't formally assigned.
-- **The office overview** becomes a run sheet: scheduled buildings first in
-  priority order with "4 of 4 left" at the top, unscheduled buildings in a
-  second column, and a banner naming any scheduled building with nobody on it.
-  The percentage and task counts across the top cover **only what is scheduled
-  for the day being viewed** — totalling every task in the park would read
-  "0 of 586" and say nothing useful about how the day is going.
-
-More than one cleaner can be assigned to the same building — that's the case
-the whole app is built around, so they're listed together and each still gets
-their own attribution on the tasks they tick.
-
-**Removing a job from the schedule** asks first, and if any work was already
-recorded that day it offers to wipe those ticks and the sign-off too. Taking
-something off the plan and erasing what somebody actually did are different
-intentions, so it never assumes.
-
-Dates are shown Australian day-first throughout — `04-08-2026`, including in
-the CSV export.
-
 ## Screens and devices
 
 One layout, built for both. On a phone it's a single column with 48px tap
-targets; on a desktop the overview splits into two columns and the week grid
-shows all seven days at once. The grid scrolls sideways on a narrow screen
-with the building names pinned in place.
+targets; on a desktop the overview splits into two columns and the week grids
+show all seven days at once. Grids scroll sideways on a narrow screen with the
+names pinned in place.
 
 Text inputs are set to 16px, which is the threshold below which iOS Safari
 zooms the page when you tap a field — so it never does that. Buttons use
 `touch-action: manipulation` to drop the double-tap-to-zoom delay, and the
 layout respects the notch and home indicator via safe-area insets.
+
+The bottom tab bar stays at six tabs at most, which is why the building
+schedule, the staff roster and availability share one **Planning** tab and sit
+behind a tab strip — they're three views of the same week.
 
 ## How the tracking works
 
@@ -168,32 +356,24 @@ layout respects the notch and home indicator via safe-area insets.
   timezone, not UTC, so a late-evening clean doesn't land on tomorrow. (Set a
   `TIMEZONE` variable to change it from `Australia/Sydney`.)
 - **Every tick records who and when**, shown under the item and in the office's
-  activity log.
+  activity log. So does every photo added or removed.
 - **Two cleaners can work the same room.** Each item is tracked independently,
   and each open checklist refreshes every 20 seconds, so they see each other's
   ticks appear with the other person's name against them.
-- **Sign-off is separate from ticking.** *Done — mark this building complete*
-  is the cleaner telling the office they've finished. It confirms first,
-  saying how many items are still unticked, then hands them back to their job
-  list so they can pick up the next building. That replaces the "phone the
-  office when finished" step on the paper checklist.
-- **Maintenance and general notes** are reported from inside the building,
-  optionally with a photo. Maintenance reports stay open until the office
-  resolves them; a general note — lost property, or anything else worth
-  flagging that isn't a fault — doesn't count toward the "open issues" badge
-  on the overview.
-- **Quick report** (the blue **+** button, on every list screen) skips
-  opening a building first — pick one from a short list, then the same
-  report form. Handy mid-walkthrough, or for anything not tied to actively
-  cleaning somewhere.
+- **Items on both checklists are shared.** Ticking *Litter* during a Check
+  also shows it ticked on that day's Full Clean — it was, after all, actually
+  done. Items that belong to only one checklist never cross over.
+- **Sign-off is separate from ticking.** *Done — mark this complete* is the
+  cleaner telling the office they've finished, per checklist. It confirms
+  first, saying how many items are still unticked and whether any required
+  photos are missing, then hands them back to their job list.
 
 ### Keeping the overview short
 
 Both **Overview** and a cleaner's own home screen only show what's actually
 relevant by default: what's scheduled today, or your own jobs. Everything
-else — every other building in the park — collapses behind a single
-**"Not scheduled today · 21"** row rather than a long list of tiles nobody
-needs to scan past. Tap it to expand; it folds back down on the next visit.
+else collapses behind a single **"Not scheduled today · 21"** row rather than
+a long list of tiles nobody needs to scan past.
 
 ### Maintenance alerts on your phone
 
@@ -214,10 +394,10 @@ the alert never blocks or fails a cleaner's report.
 ## Speed
 
 There is no build step and no framework. The whole front end is three static
-files served from Cloudflare's edge (~60 KB total, uncompressed), and the API
-runs at the edge against SQLite, which doesn't sleep between uses. Photos are
-resized to 1280px in the browser before upload, so reporting a problem works
-on a weak mobile signal.
+files served from Cloudflare's edge, and the API runs at the edge against
+SQLite, which doesn't sleep between uses. Photos are resized in the browser
+before upload. Nothing about the cleaning data is ever cached, so nobody acts
+on stale information.
 
 ## Installing it as a phone app
 
@@ -235,36 +415,53 @@ website installed so it behaves like one.
 Once installed, opening the icon behaves like a native app: its own launcher
 icon, a coloured status bar, and no browser chrome. A small service worker
 caches the app's shell (the HTML/CSS/JS, not the data) so it still opens if
-the connection drops for a moment — but every checklist, schedule and report
-is always fetched live. Nothing about the cleaning data is ever cached, so
-nobody acts on stale information.
+the connection drops for a moment.
 
-## The checklist
+## The checklist file
 
-`data/checklist.json` holds all 21 buildings across the park — the five
-Basecamp locations, five Bell Tents, Bunkhouse, three Chalets, Lower Rymill,
-Manor, both Offices, Rymill Centre, Seeonee and Stags — just under 600 tasks
-in total.
+`data/checklist.json` holds all 21 buildings across the park, and both
+checklists for each of them.
 
-It has three parts:
+It has four parts:
 
-- **`everyVisit`** — added to the bottom of *every* building's checklist
-  (litter, consumables, lost property, damage, leaving it secure).
+- **`everyVisit`** — added to the bottom of *every* building's checklist, on
+  **both** the Full Clean and the Check.
 - **`templates`** — reusable areas. `Bathrooms` and `Shelter` are shared by the
-  five Basecamp locations; `Accommodation`, `Toilet and shower`, `Outdoor` and
-  `Chalet check clean` by the three chalets. Edit one, and every building using
-  it changes.
-- **`buildings`** — each has a `group` (used as a label in the grid) and a list
-  of areas. An entry that's just a name refers to a template; anything else is
-  written inline for that building alone.
+  five Basecamp locations; `Accommodation`, `Toilet and shower` and `Outdoor`
+  by the three chalets; `Check clean` is a generic short list used as the
+  starting Check for every building that didn't already have one. Edit one, and
+  every building using it changes.
+- **`buildings`** — each has a `group` (used as a label in the grid) and two
+  lists, **`full`** and **`check`**. An entry that's just a name refers to a
+  template; anything else is written inline for that building alone. An area
+  named in *both* lists is stored once and appears on both.
+- **`contacts`** — the office and maintenance phone numbers on the cleaner's
+  home screen.
+
+Every task is `["Item", "What to do"]`, with an optional third value:
+`"photo"` to allow a photo against it, or `"photo required"` to insist on one.
+
+```json
+{
+  "name": "Hooper Bunkhouse",
+  "group": "Bunkhouse",
+  "full": ["Bathrooms", { "name": "Dorms", "tasks": [["Beds", "Strip and remake"]] }],
+  "check": ["Check clean"]
+}
+```
 
 Edit it on GitHub and commit — the site redeploys and updates itself, see the
 end of [SETUP.md](SETUP.md). Removing something deactivates it rather than
 deleting it, so past records never break.
 
+**The generic `Check clean` template is a starting point, not a
+recommendation.** It was written to be sensible for any building; go through
+**Checklists → Check** and tailor it per building — or use **Copy from the
+Full Clean** and cut it down.
+
 *"Inform the office when cleaning is complete"* is deliberately not a task:
-**Mark building complete** is that step, and having both would mean ticking a
-box and then not pressing the button.
+**Mark complete** is that step, and having both would mean ticking a box and
+then not pressing the button.
 
 ## Project layout
 
@@ -281,18 +478,23 @@ repo silently override what you set there.
 
 ### How the database sets itself up
 
-The first request after each deploy creates any missing tables and compares a
-hash of `checklist.json` against the last one it stored. If they differ, it
-syncs buildings, areas and tasks — adding new ones, updating wording, and
-deactivating anything removed. If they match it does nothing. That's why there
-is no migration step to run and no SQL to paste.
+The first request after each deploy creates any missing tables, applies any
+schema changes, and compares a hash of `checklist.json` against the last one it
+stored. If they differ, it syncs buildings, areas and tasks — adding new ones,
+updating wording, and deactivating anything removed. If they match it does
+nothing. That's why there is no migration step to run and no SQL to paste.
+
+**Upgrading an existing camp is safe.** Areas that existed before cleaning
+types were added become "on both checklists", so every cleaner sees exactly the
+list they saw yesterday until an admin splits them up. Existing sign-offs
+become Full Clean sign-offs. Nothing is deleted and no history is orphaned.
 
 ## Security, honestly
 
 This is sized for a small team, not a bank.
 
 - PINs are hashed before storage, so a database dump doesn't hand over working
-  PINs.
+  PINs. Two people can't share a PIN — the app says so rather than failing.
 - Sessions are signed tokens that expire after 14 hours — long enough for a
   shift, short enough that a shared phone doesn't stay signed in for a week.
 - Deactivating someone in **People** cuts their access on their next request,
@@ -300,11 +502,11 @@ This is sized for a small team, not a bank.
 - The last active admin can't disable or demote themselves, so you can't lock
   yourself out of the People screen.
 - Wrong-PIN attempts are throttled per IP: 8 free tries, then a lockout that
-  tops out at 5 minutes. It's deliberately forgiving because the whole camp
-  shares one internet connection — a strict lockout would take everyone down
-  when one person fumbles. **Use 6-digit PINs** to make up the difference.
-- Photos are served through the API and require a valid session. Keep the R2
-  bucket private (it is by default).
+  tops out at 5 minutes and clears on the next correct PIN. It's deliberately
+  forgiving because the whole camp shares one internet connection.
+  **Use 6-digit PINs** to make up the difference.
+- Photos — both on items and on reports — are served through the API and
+  require a valid session. Keep the R2 bucket private (it is by default).
 - Test mode (tap-to-sign-in) bypasses all of the above by design. It ships
   switched **on** so there's nothing to configure on day one; switch it off in
   **People** the moment real rosters go in.
@@ -323,5 +525,6 @@ audit trail on people changes, no encryption at rest beyond Cloudflare's own.
 ## Cost
 
 Free, comfortably. Cloudflare's free tier covers 100k requests/day, 5 GB of
-database storage and 10 GB of file storage. A five-building camp with a handful
-of cleaners uses a rounding error of that.
+database storage and 10 GB of file storage. A resized checklist photo is
+roughly 150–250 KB, so 10 GB is on the order of fifty thousand of them — a
+camp taking twenty photos a day would take years to get near it.

@@ -1,22 +1,29 @@
 {
-  "_comment": "THIS FILE IS THE CHECKLIST. Edit it on GitHub and commit - the site redeploys and picks up the changes by itself. Every task is [\"Item\", \"What to do\"].",
-
+  "_comment": "THIS FILE IS THE STARTING CHECKLIST. Edit it on GitHub and commit - the site redeploys and picks up the changes by itself, until the first edit is made inside the app (Checklists screen), after which the app owns them. Every task is [\"Item\", \"What to do\"] and can take an optional third value: \"photo\" to allow a photo, or \"photo required\" to insist on one.",
   "contacts": {
     "office": "0402 930 714",
     "maintenance": "0437 316 386"
   },
-
-  "_everyVisit_note": "Added to the bottom of EVERY building's checklist.",
+  "_everyVisit_note": "Added to the bottom of EVERY building's checklist, on both a Full Clean and a Check.",
   "everyVisit": [
     ["Litter", "Pick up any litter, inside and out"],
     ["Consumables", "Replace anything that has run out"],
     ["Lost property", "Deliver to Reception with a note of where it was found and the date"],
-    ["Damage", "Report maintenance, damage, graffiti or missing items - include photos"],
+    ["Damage", "Report maintenance, damage, graffiti or missing items - include photos", "photo"],
     ["Secure", "Leave tidy and secure: lights off, rooms locked where applicable"]
   ],
-
-  "_templates_note": "Reusable areas. A building lists a template by name in its \"areas\".",
+  "_cleaningTypes_note": "Every building has two checklists. \"full\" is the Full Clean, \"check\" is the quicker Check. Each lists area names from \"templates\" below, or an area written out in full just for that building. An area named in both lists appears on both.",
+  "_templates_note": "Reusable areas. A building lists a template by name in its \"full\" or \"check\" list.",
   "templates": {
+    "Check clean": [
+      ["Toilets and showers", "Check clean and flush - deal with anything obvious"],
+      ["Consumables", "Toilet paper, paper towel, soap and bin liners all stocked"],
+      ["Bins", "Empty any that need emptying"],
+      ["Surfaces", "Wipe anything visibly dirty"],
+      ["Floors", "Check and spot clean"],
+      ["Litter and tidy", "Inside and out"],
+      ["Secure", "Lights off, doors locked where applicable"]
+    ],
     "Bathrooms": [
       ["Toilet", "Clean including behind the cistern - no bugs or ants"],
       ["Toilet brush", "Clean the brush and its holder"],
@@ -32,7 +39,6 @@
       ["Toilet / shower area", "Clear any cobwebs"],
       ["Floors", "Mop all, including cubicles, and check drains"]
     ],
-
     "Shelter": [
       ["Microwave", "Check empty and clean"],
       ["Kettle", "Wipe over and clean"],
@@ -42,7 +48,6 @@
       ["Bins", "Empty, wipe over and replace liners"],
       ["BBQ", "Check it is clean - report to Maintenance if not"]
     ],
-
     "Accommodation": [
       ["Double bed", "Replace mattress protector and sheet"],
       ["Bunk mattresses", "Clean and inspect for stains"],
@@ -66,7 +71,6 @@
       ["Lighter", "Check it works"],
       ["Bedside tables and lights", "Wipe down"]
     ],
-
     "Toilet and shower": [
       ["Toilet", "Clean including behind the cistern"],
       ["Toilet brush", "Clean the brush and its holder"],
@@ -78,19 +82,16 @@
       ["Shower surfaces", "Clean"],
       ["Floors", "Mop"]
     ],
-
     "Outdoor": [
       ["Front door", "Clean"],
       ["Key lock box", "Check it is working and closed"],
       ["Outdoor table and chairs", "Clean"]
     ],
-
     "Bell tent full clean": [
       ["Mattresses", "Wipe over and inspect for stains"],
       ["Tables and chairs", "Wipe down and place inside the tent"],
       ["Floors", "Sweep, vacuum and mop"]
     ],
-
     "Bell tent check clean": [
       ["Floors", "Check for dead bugs"],
       ["Linen", "Check what is needed with Reception"],
@@ -98,7 +99,6 @@
       ["Air freshener", "Spray through"],
       ["Poles", "Check for bugs and water around the poles"]
     ],
-
     "Chalet check clean": [
       ["Bugs and cobwebs", "Check throughout"],
       ["Windows", "Open during summer"],
@@ -108,15 +108,24 @@
       ["BBQ", "Check"]
     ]
   },
-
   "_buildings_note": "Each building gets the areas listed here, plus \"Every visit\" at the end. An entry that is just a name refers to a template above.",
   "buildings": [
-    { "name": "St George", "group": "Basecamp", "areas": ["Bathrooms", "Shelter"] },
-    { "name": "Gilwell", "group": "Basecamp", "areas": ["Bathrooms", "Shelter"] },
+    {
+      "name": "St George",
+      "group": "Basecamp",
+      "full": ["Bathrooms", "Shelter"],
+      "check": ["Check clean"]
+    },
+    {
+      "name": "Gilwell",
+      "group": "Basecamp",
+      "full": ["Bathrooms", "Shelter"],
+      "check": ["Check clean"]
+    },
     {
       "name": "Brownsea",
       "group": "Basecamp",
-      "areas": [
+      "full": [
         "Bathrooms",
         "Shelter",
         {
@@ -127,50 +136,63 @@
             ["BBQ", "Check if it needs cleaning and report to the office"]
           ]
         }
-      ]
+      ],
+      "check": ["Check clean"]
     },
-    { "name": "Lone's Hut", "group": "Basecamp", "areas": ["Bathrooms", "Shelter"] },
-    { "name": "Bert's Bog", "group": "Basecamp", "areas": ["Bathrooms", "Shelter"] },
-
+    {
+      "name": "Lone's Hut",
+      "group": "Basecamp",
+      "full": ["Bathrooms", "Shelter"],
+      "check": ["Check clean"]
+    },
+    {
+      "name": "Bert's Bog",
+      "group": "Basecamp",
+      "full": ["Bathrooms", "Shelter"],
+      "check": ["Check clean"]
+    },
     {
       "name": "Bell Tent - St George 1",
       "group": "Bell Tents",
-      "areas": ["Bell tent full clean", "Bell tent check clean"]
+      "full": ["Bell tent full clean"],
+      "check": ["Bell tent check clean"]
     },
     {
       "name": "Bell Tent - St George 2",
       "group": "Bell Tents",
-      "areas": ["Bell tent full clean", "Bell tent check clean"]
+      "full": ["Bell tent full clean"],
+      "check": ["Bell tent check clean"]
     },
     {
       "name": "Bell Tent - St George 3",
       "group": "Bell Tents",
-      "areas": ["Bell tent full clean", "Bell tent check clean"]
+      "full": ["Bell tent full clean"],
+      "check": ["Bell tent check clean"]
     },
     {
       "name": "Bell Tent - St George 4",
       "group": "Bell Tents",
-      "areas": ["Bell tent full clean", "Bell tent check clean"]
+      "full": ["Bell tent full clean"],
+      "check": ["Bell tent check clean"]
     },
     {
       "name": "Bell Tent - Tube Slide",
       "group": "Bell Tents",
-      "areas": [
+      "full": [
         "Bell tent full clean",
-        "Bell tent check clean",
         {
           "name": "Tube Slide specific",
           "tasks": [
             ["Linen", "Replace the mattress protector and sheet"]
           ]
         }
-      ]
+      ],
+      "check": ["Bell tent check clean"]
     },
-
     {
       "name": "Bunkhouse",
       "group": "Bunkhouse",
-      "areas": [
+      "full": [
         {
           "name": "Dorm rooms",
           "tasks": [
@@ -197,7 +219,12 @@
             ["Floors", "Mop and check drains"]
           ]
         },
-        { "name": "Corridors", "tasks": [["Floors", "Vacuum and mop"]] },
+        {
+          "name": "Corridors",
+          "tasks": [
+            ["Floors", "Vacuum and mop"]
+          ]
+        },
         {
           "name": "Kitchen",
           "tasks": [
@@ -230,7 +257,10 @@
         },
         {
           "name": "Tank room",
-          "tasks": [["Floors", "Vacuum"], ["Rubbish", "Remove"]]
+          "tasks": [
+            ["Floors", "Vacuum"],
+            ["Rubbish", "Remove"]
+          ]
         },
         {
           "name": "Wetland viewing room toilets",
@@ -243,29 +273,31 @@
             ["Floors", "Sweep and mop"]
           ]
         }
-      ]
+      ],
+      "check": ["Check clean"]
     },
-
     {
       "name": "Chambers Chalet",
       "group": "Chalets",
-      "areas": ["Accommodation", "Toilet and shower", "Outdoor", "Chalet check clean"]
+      "full": ["Accommodation", "Toilet and shower", "Outdoor"],
+      "check": ["Chalet check clean"]
     },
     {
       "name": "Stephens Chalet",
       "group": "Chalets",
-      "areas": ["Accommodation", "Toilet and shower", "Outdoor", "Chalet check clean"]
+      "full": ["Accommodation", "Toilet and shower", "Outdoor"],
+      "check": ["Chalet check clean"]
     },
     {
       "name": "Hansons Chalet",
       "group": "Chalets",
-      "areas": ["Accommodation", "Toilet and shower", "Outdoor", "Chalet check clean"]
+      "full": ["Accommodation", "Toilet and shower", "Outdoor"],
+      "check": ["Chalet check clean"]
     },
-
     {
       "name": "Lower Rymill",
       "group": "Lower Rymill",
-      "areas": [
+      "full": [
         {
           "name": "Toilets",
           "tasks": [
@@ -306,13 +338,13 @@
             ["Lights and locks", "Turn off lights and lock"]
           ]
         }
-      ]
+      ],
+      "check": ["Check clean"]
     },
-
     {
       "name": "Manor",
       "group": "Manor",
-      "areas": [
+      "full": [
         {
           "name": "Stairwell and second floor",
           "tasks": [
@@ -389,13 +421,13 @@
             ["Floors", "Mop and check drains"]
           ]
         }
-      ]
+      ],
+      "check": ["Check clean"]
     },
-
     {
       "name": "Office Upstairs",
       "group": "Offices",
-      "areas": [
+      "full": [
         {
           "name": "Office",
           "tasks": [
@@ -404,15 +436,25 @@
             ["Floors", "Vacuum"]
           ]
         },
-        { "name": "Kitchen", "tasks": [["Sink and surfaces", "Clean"]] }
-      ]
+        {
+          "name": "Kitchen",
+          "tasks": [
+            ["Sink and surfaces", "Clean"]
+          ]
+        }
+      ],
+      "check": ["Check clean"]
     },
-
     {
       "name": "Office / Reception Downstairs",
       "group": "Offices",
-      "areas": [
-        { "name": "Kitchen", "tasks": [["Sink and surfaces", "Clean"]] },
+      "full": [
+        {
+          "name": "Kitchen",
+          "tasks": [
+            ["Sink and surfaces", "Clean"]
+          ]
+        },
         {
           "name": "Workspaces",
           "tasks": [
@@ -433,13 +475,13 @@
             ["Floors", "Vacuum or mop"]
           ]
         }
-      ]
+      ],
+      "check": ["Check clean"]
     },
-
     {
       "name": "Rymill Centre",
       "group": "Rymill Centre",
-      "areas": [
+      "full": [
         {
           "name": "Dorms and ensuites",
           "tasks": [
@@ -509,13 +551,13 @@
             ["Floors", "Mop"]
           ]
         }
-      ]
+      ],
+      "check": ["Check clean"]
     },
-
     {
       "name": "Seeonee",
       "group": "Seeonee",
-      "areas": [
+      "full": [
         {
           "name": "Acacia Room / Banksia Room",
           "tasks": [
@@ -558,7 +600,9 @@
             ["Bins", "Empty and replace liners"],
             ["Floors", "Sweep and mop, including toilet and shower"]
           ]
-        },
+        }
+      ],
+      "check": [
         {
           "name": "Seeonee check clean",
           "tasks": [
@@ -570,11 +614,10 @@
         }
       ]
     },
-
     {
       "name": "Stags",
       "group": "Stags",
-      "areas": [
+      "full": [
         {
           "name": "Bathrooms",
           "tasks": [
@@ -598,7 +641,8 @@
             ["Bins", "Empty and replace liners"]
           ]
         }
-      ]
+      ],
+      "check": ["Check clean"]
     }
   ]
 }

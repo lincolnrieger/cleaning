@@ -14,12 +14,15 @@ const state = {
   config: null,
   configAt: 0,
   day: null,       // day being viewed; null means "today"
-  weekFrom: null,  // first column of the schedule grid
+  weekFrom: null,  // first column of the schedule/roster/availability weeks
   poll: null,
   building: null,  // data for the checklist currently on screen
   cleaners: null,  // cached list for the assignment picker
+  editType: 'full', // which checklist the admin editor is showing
   collapsedGroups: new Set(), // building groups folded shut on Schedule/Checklists
   openSections: new Set(),    // secondary lists (e.g. "not scheduled") expanded open
+  openAreas: new Set(),       // area cards unfolded in the checklist editor
+  availFilter: { q: '', day: 'all', status: 'all', from: '', to: '' },
 };
 
 // Chrome/Edge/Android hold this event back until asked for it. Capturing it
@@ -51,6 +54,20 @@ const asDate = (day) => new Date(`${day}T00:00:00Z`);
 const auDate = (day) => (day ? day.split('-').reverse().join('-') : '');
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAY_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+/* ------------------------------------------------------------ clean types */
+
+/** The two checklists. Labels come from the API so they only exist in one place. */
+const CLEAN_TYPES = () => state.config?.cleanTypes
+  ?? [{ id: 'full', label: 'Full Clean' }, { id: 'check', label: 'Check' }];
+
+const typeLabel = (id) => CLEAN_TYPES().find((t) => t.id === id)?.label ?? id;
+const isCleanType = (id) => CLEAN_TYPES().some((t) => t.id === id);
+const otherType = (id) => (id === 'full' ? 'check' : 'full');
+
+/** One letter, for the schedule grid where a whole word won't fit. */
+const typeTag = (id) => (id === 'check' ? 'C' : 'F');
 
 /** Mirrors the server's REPORT_KINDS - what a cleaner can report from a
     building, and how each shows up in the report form and the issues list.
@@ -69,11 +86,34 @@ const REPORT_KINDS = {
 /** Monday = 0, to match DAY_NAMES and the stored availability array. */
 const weekdayIndex = (day) => (asDate(day).getUTCDay() + 6) % 7;
 
-// The API always sends availability pre-parsed: 7 entries, each null (not
-// working) or { from, to }. Missing data defaults open rather than closed -
-// nobody should read as unavailable just because their record predates this.
-const worksOn = (person, day) =>
-  !Array.isArray(person.availability) || Boolean(person.availability[weekdayIndex(day)]);
+/**
+ * The API sends availability pre-parsed: 7 entries, each null (not working)
+ * or { from, to }, where blank times mean "works, no particular hours".
+ * Missing data reads as available rather than not - nobody should drop off
+ * the roster because their record predates this.
+ */
+const availabilityOn = (person, day) => (Array.isArray(person.availability)
+  ? person.availability[weekdayIndex(day)]
+  : { from: '', to: '' });
+
+const worksOn = (person, day) => Boolean(availabilityOn(person, day));
+
+/** 08:00 -> 8am, 16:30 -> 4:30pm. Short enough for a roster cell. */
+function shortTime(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  const suffix = h < 12 ? 'am' : 'pm';
+  const hour = h % 12 || 12;
+  return m ? `${hour}:${String(m).padStart(2, '0')}${suffix}` : `${hour}${suffix}`;
+}
+
+const timeRange = (from, to) => (from && to ? `${shortTime(from)}–${shortTime(to)}` : '');
+
+/** What one day of someone's availability reads as. */
+function availabilityText(entry) {
+  if (!entry) return 'Unavailable';
+  return timeRange(entry.from, entry.to) || 'Available';
+}
 
 function dayLabel(day) {
   if (!day) return '';
@@ -137,6 +177,19 @@ function toast(message, bad = false) {
 
 /* -------------------------------------------------------------- api client */
 
+/**
+ * Thrown instead of a plain Error so callers can read the structured extras
+ * the API sends with a 409 - which items still need a photo, which roster
+ * conflicts were hit - rather than only the sentence.
+ */
+class ApiError extends Error {
+  constructor(message, status, data) {
+    super(message);
+    this.status = status;
+    this.data = data ?? {};
+  }
+}
+
 async function request(path, { method = 'GET', body, raw, contentType } = {}) {
   const headers = {};
   if (state.token) headers.authorization = `Bearer ${state.token}`;
@@ -155,7 +208,7 @@ async function request(path, { method = 'GET', body, raw, contentType } = {}) {
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Request failed (${res.status})`);
+    throw new ApiError(data.error || `Request failed (${res.status})`, res.status, data);
   }
   return res;
 }
@@ -171,7 +224,8 @@ async function loadPhoto(img, key) {
     img.src = URL.createObjectURL(await res.blob());
     img.hidden = false;
   } catch {
-    img.remove();
+    const shot = img.closest('.shot');
+    if (shot) shot.remove(); else img.remove();
   }
 }
 
@@ -206,21 +260,24 @@ const icon = (key) => `<span class="navicon" aria-hidden="true">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
     stroke-linecap="round" stroke-linejoin="round">${ICONS[key]}</svg></span>`;
 
+// Building schedule, staff roster and availability are three views of the same
+// week, so they share one nav entry and sit behind tabs. Six bottom-bar tabs
+// is already the most a phone can carry legibly; eight would be unreadable.
 const NAV = {
   cleaner: [
     ['', 'My jobs', 'home'],
-    ['schedule', 'Roster', 'calendar'],
+    ['roster', 'Roster', 'calendar'],
     ['issues', 'Reports', 'clipboard'],
   ],
   office: [
     ['', 'Overview', 'home'],
-    ['schedule', 'Schedule', 'calendar'],
+    ['schedule', 'Planning', 'calendar'],
     ['issues', 'Reports', 'clipboard'],
     ['history', 'Activity', 'clock'],
   ],
   admin: [
     ['', 'Overview', 'home'],
-    ['schedule', 'Schedule', 'calendar'],
+    ['schedule', 'Planning', 'calendar'],
     ['issues', 'Reports', 'clipboard'],
     ['history', 'Activity', 'clock'],
     ['buildings', 'Checklists', 'list'],
@@ -275,7 +332,33 @@ function chrome({ title, back = false, section = '', wide = false }) {
   fab.onclick = openQuickReport;
 }
 
-$('#back').onclick = () => { location.hash = '#/'; };
+/**
+ * Which of the weekly screens the nav highlights. A cleaner's tab is the
+ * staff roster - the building grid is the office's tool, and landing a
+ * cleaner on it when they tapped "Roster" reads as the wrong screen.
+ */
+const planningSection = () => (state.user.role === 'cleaner' ? 'roster' : 'schedule');
+
+/** The three weekly-planning screens, as one tab strip. */
+function planningTabs(current) {
+  const tabs = [['schedule', 'Buildings'], ['roster', 'Staff roster']];
+  if (state.user.role !== 'cleaner') tabs.push(['availability', 'Availability']);
+  return `<div class="tabs noprint">${tabs.map(([route, label]) =>
+    `<button data-goto="${route}" aria-current="${route === current}">${esc(label)}</button>`,
+  ).join('')}</div>`;
+}
+
+function wirePlanningTabs(root) {
+  root.querySelectorAll('[data-goto]').forEach((b) => {
+    b.onclick = () => { location.hash = `#/${b.dataset.goto}`; };
+  });
+}
+
+$('#back').onclick = () => {
+  // Going back is right for a detail page reached from a list; landing
+  // straight on a deep link there is no history to go back to, so fall home.
+  if (history.length > 1) history.back(); else location.hash = '#/';
+};
 $('#signout').onclick = async () => {
   if (await ask({
     title: 'Sign out?',
@@ -298,6 +381,24 @@ function poll(fn, ms) {
 }
 
 const viewDay = () => state.day || state.config.today;
+
+/**
+ * Guards against a slow screen painting over a newer one.
+ *
+ * Every view fetches before it draws, so on a weak signal a tap can start a
+ * second screen while the first is still waiting. Without this the older
+ * response wins whenever it happens to land last, and the app appears to jump
+ * back to the page you just left. Each view claims a number on the way in and
+ * checks it still holds the newest before writing any markup.
+ */
+let renderSeq = 0;
+function screen(route = '') {
+  const seq = ++renderSeq;
+  // The route check covers the other direction: a background action - a copy,
+  // a save - finishing after the user has already moved on, and redrawing the
+  // screen they just left over the top of the one they asked for.
+  return () => seq === renderSeq && (!route || location.hash.startsWith(route));
+}
 
 /* Day-picker strip, used by the office views. */
 function dayNav(day) {
@@ -324,6 +425,36 @@ function wireDayNav(root, rerender) {
     };
   });
 }
+
+/** Week-picker strip, shared by the schedule, roster and availability grids. */
+function weekNav(from) {
+  return `<div class="periodnav noprint">
+    <span class="pn-side pn-left">
+      <button class="ghost" data-week="${esc(addDays(from, -7))}">‹ Prev</button>
+    </span>
+    <strong class="period-title">
+      ${esc(dayOfMonth(from))} – ${esc(dayOfMonth(addDays(from, 6)))}</strong>
+    <span class="pn-side pn-right">
+      <button class="ghost" data-week="${esc(startOfWeek(state.config.today))}">This week</button>
+      <button class="ghost" data-week="${esc(addDays(from, 7))}">Next ›</button>
+    </span>
+  </div>`;
+}
+
+function wireWeekNav(root, rerender) {
+  root.querySelectorAll('[data-week]').forEach((b) => {
+    b.onclick = () => { state.weekFrom = b.dataset.week; rerender(); };
+  });
+}
+
+/** Monday of the week containing `day`. */
+function startOfWeek(day) {
+  const d = asDate(day);
+  const dow = (d.getUTCDay() + 6) % 7; // 0 = Monday
+  return addDays(day, -dow);
+}
+
+const weekFrom = () => (state.weekFrom ||= startOfWeek(state.config.today));
 
 /** Bottom sheet used for scheduling. Returns a node you fill and wire up. */
 function openSheet(html) {
@@ -372,9 +503,13 @@ function ask({
     if (box) box.onchange = () => box.closest('.check-row').classList.toggle('on', box.checked);
 
     let settled = false;
+    const observer = new MutationObserver(() => {
+      if (!document.body.contains(bg)) done(false);
+    });
     const done = (value) => {
       if (settled) return;
       settled = true;
+      observer.disconnect();
       closeSheet();
       resolve(value);
     };
@@ -382,8 +517,7 @@ function ask({
     bg.querySelector('[data-ok]').onclick = () => done(checkbox ? { checked: box.checked } : true);
     bg.querySelector('[data-cancel]').onclick = () => done(false);
     bg.onclick = (e) => { if (e.target === bg) done(false); };
-    new MutationObserver(() => { if (!document.body.contains(bg)) done(false); })
-      .observe(document.body, { childList: true });
+    observer.observe(document.body, { childList: true });
   });
 }
 
@@ -459,6 +593,7 @@ function wireInstallHint() {
 async function renderLogin() {
   bar.hidden = true;
   nav.hidden = true;
+  $('#quickfab').hidden = true;
   $('#testbar').hidden = !state.config.quickSignin;
   $('#testbar').textContent = 'Test mode — tap any name to sign in, no PIN needed.';
   if (state.config.needsBootstrap) return renderBootstrap();
@@ -604,8 +739,10 @@ function renderBootstrap() {
 /* ------------------------------------------------- view: office overview */
 
 async function renderOverview() {
+  const live = screen();
   const day = viewDay();
   const { buildings } = await api(`/overview?day=${day}`);
+  if (!live()) return;
   chrome({ title: 'Overview', section: '', wide: true });
 
   // The API returns scheduled buildings first, already in priority order.
@@ -628,6 +765,7 @@ async function renderOverview() {
   const outstanding = runSheet.filter((b) => !b.completed_at).length;
   const unassigned = runSheet.filter((b) => !b.assignees.length);
   const stale = rest.filter((b) => staleDays(b, day) >= 7);
+  const fullCount = runSheet.filter((b) => b.cleanType === 'full').length;
 
   app.innerHTML = `
     <div class="card"><div class="pad">${dayNav(day)}</div></div>
@@ -648,7 +786,9 @@ async function renderOverview() {
           ${runSheet.length
             ? `${totals.done} of ${totals.total} tasks across
                ${runSheet.length} building${runSheet.length === 1 ? '' : 's'} scheduled
-               ${dayLabel(day) === 'Today' ? 'today' : 'that day'}`
+               ${dayLabel(day) === 'Today' ? 'today' : 'that day'}
+               — ${fullCount} full clean${fullCount === 1 ? '' : 's'},
+               ${runSheet.length - fullCount} check${runSheet.length - fullCount === 1 ? '' : 's'}`
             : `Nothing scheduled — ${buildings.length} buildings in the park`}</div>
       </div>
     </div>
@@ -657,7 +797,7 @@ async function renderOverview() {
       <div class="pad small" style="background:var(--warn-bg);color:var(--warn)">
         <strong>Nobody assigned to
         ${unassigned.map((b) => esc(b.name)).join(', ')}.</strong>
-        Open <strong>Schedule</strong> to put a cleaner on ${unassigned.length > 1 ? 'them' : 'it'}.
+        Open <strong>Planning</strong> to put a cleaner on ${unassigned.length > 1 ? 'them' : 'it'}.
       </div></div>` : ''}
 
     <div class="card">
@@ -666,7 +806,7 @@ async function renderOverview() {
       ${runSheet.length
         ? `<div class="tilegrid">${runSheet.map(overviewTile).join('')}</div>`
         : `<div class="empty"><b>Nothing scheduled</b>
-           Open <strong>Schedule</strong> to plan the week.</div>`}
+           Open <strong>Planning</strong> to plan the week.</div>`}
     </div>
 
     ${rest.length ? `<div class="card">
@@ -698,6 +838,10 @@ function staleDays(b, day) {
   return Math.round((asDate(day) - asDate(b.lastCleaned)) / 86400000);
 }
 
+/** The badge that says which of the two checklists a job is. */
+const typePill = (id, extra = '') =>
+  `<span class="pill type-${esc(id)}">${esc(typeLabel(id))}${extra}</span>`;
+
 function overviewTile(b) {
   const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
   const status = b.completed_at
@@ -708,6 +852,10 @@ function overviewTile(b) {
         ? '<span class="pill late">Not started</span>'
         : '<span class="pill idle">Not started</span>';
 
+  // A building can be checked in the morning and fully cleaned later; name the
+  // other sign-off rather than letting it vanish behind whichever is scheduled.
+  const alsoDone = b.signedOff.filter((s) => s.cleanType !== b.cleanType);
+
   const meta = [
     b.assignees.length
       ? `for ${b.assignees.map((a) => esc(firstName(a.name))).join(', ')}`
@@ -715,6 +863,9 @@ function overviewTile(b) {
     b.crew.length ? `worked by ${b.crew.map((c) => esc(firstName(c))).join(', ')}` : null,
     b.last_at ? `last ${esc(time(b.last_at))}` : null,
     b.open_issues ? `${b.open_issues} open issue${b.open_issues > 1 ? 's' : ''}` : null,
+    alsoDone.length
+      ? alsoDone.map((s) => `${esc(typeLabel(s.cleanType))} done ${esc(time(s.at))}`).join(', ')
+      : null,
   ].filter(Boolean).join(' · ');
 
   // Only the green 'done' edge earns its place - the status pill already
@@ -722,7 +873,7 @@ function overviewTile(b) {
   const edge = b.completed_at ? ' finished' : '';
 
   return `<button class="tile${edge}"
-      ${canDrillIn() ? `data-b="${b.id}"` : 'disabled'}>
+      ${canDrillIn() ? `data-b="${b.id}" data-type="${esc(b.cleanType)}"` : 'disabled'}>
     <div class="spread">
       <span class="row" style="gap:8px;min-width:0">
         ${b.scheduled ? `<span class="prio">${b.priority}</span>` : ''}
@@ -731,7 +882,9 @@ function overviewTile(b) {
       </span>
       ${status}
     </div>
-    ${b.done ? `<div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>` : ''}
+    <div class="row" style="gap:6px;margin:6px 0 0">${typePill(b.cleanType)}</div>
+    ${b.done ? `<div class="meter ${pct === 100 ? 'full' : ''}" style="margin-top:6px">
+      <i style="width:${pct}%"></i></div>` : ''}
     <div class="spread small muted" style="margin-top:6px">
       <span class="grow">${meta || 'not scheduled'}</span>
       <span>${b.done}/${b.total}</span>
@@ -766,11 +919,42 @@ const canDrillIn = () => state.user.role !== 'office' || !state.config.rollupOnl
 
 function wireTiles() {
   app.querySelectorAll('[data-b]').forEach((el) => {
-    el.onclick = () => { location.hash = `#/b/${el.dataset.b}`; };
+    el.onclick = () => {
+      const id = Number(el.dataset.b);
+      // Scheduled work goes straight to the checklist the office asked for.
+      // Anything else asks which of the two, because guessing is exactly how
+      // somebody ends up doing a full clean when a check was wanted.
+      if (el.dataset.type) location.hash = `#/b/${id}/${el.dataset.type}`;
+      else openTypeChooser(id, el.querySelector('.crow-name, .name')?.textContent ?? 'this building');
+    };
   });
   app.querySelectorAll('[data-go]').forEach((el) => {
     el.onclick = () => { location.hash = el.dataset.go; };
   });
+}
+
+/** Two big buttons: which clean is this? */
+function openTypeChooser(buildingId, name) {
+  const sheet = openSheet(`
+    <div class="sheet-head"><strong>${esc(name)}</strong></div>
+    <div class="pad stack">
+      <p class="dialog-body">Which clean are you doing?</p>
+      ${CLEAN_TYPES().map((t) => `<button class="bigchoice" data-pick="${esc(t.id)}">
+        <strong>${esc(t.label)}</strong>
+        <span class="small muted">${t.id === 'full'
+          ? 'The full checklist for this building'
+          : 'The shorter walk-through checklist'}</span>
+      </button>`).join('')}
+      <button class="wide" id="cancel">Cancel</button>
+    </div>`);
+
+  sheet.querySelectorAll('[data-pick]').forEach((b) => {
+    b.onclick = () => {
+      closeSheet();
+      location.hash = `#/b/${buildingId}/${b.dataset.pick}`;
+    };
+  });
+  sheet.querySelector('#cancel').onclick = closeSheet;
 }
 
 /* -------------------------------------------------- building group folding */
@@ -842,8 +1026,13 @@ function wireSectionToggles(root, rerender) {
 /* ------------------------------------------------------ view: cleaner home */
 
 async function renderCleanerHome() {
+  const live = screen();
   const today = state.config.today;
-  const { buildings } = await api(`/overview?day=${today}`);
+  const [{ buildings }, roster] = await Promise.all([
+    api(`/overview?day=${today}`),
+    api(`/roster?from=${today}&days=1`).catch(() => ({ shifts: [] })),
+  ]);
+  if (!live()) return;
   chrome({ title: `Hi ${firstName(state.user.name)}`, section: '' });
 
   const mine = buildings.filter((b) =>
@@ -852,8 +1041,18 @@ async function renderCleanerHome() {
   const rest = buildings.filter((b) => !b.scheduled);
 
   const doneCount = mine.filter((b) => b.completed_at).length;
+  const myShifts = (roster.shifts ?? []).filter((s) => s.user_id === state.user.id);
 
   app.innerHTML = `
+    ${myShifts.length ? `<div class="card"><div class="pad small">
+      <strong>You're on today</strong> ${myShifts.map((s) =>
+        `${esc(timeRange(s.start_time, s.end_time))}${s.duty ? ` · ${esc(s.duty)}` : ''}`)
+        .join(' and ')}
+      ${myShifts.some((s) => s.note)
+        ? `<div class="tiny muted" style="margin-top:3px">${
+          myShifts.filter((s) => s.note).map((s) => esc(s.note)).join(' · ')}</div>` : ''}
+    </div></div>` : ''}
+
     ${mine.length ? `<div class="card">
       <h2>Your buildings today — ${doneCount}/${mine.length} done</h2>
       ${mine.map((b) => jobTile(b, true)).join('')}
@@ -864,7 +1063,7 @@ async function renderCleanerHome() {
 
     ${otherScheduled.length ? `<div class="card">
       <h2>Also scheduled today</h2>
-      ${otherScheduled.map(jobTile).join('')}
+      ${otherScheduled.map((b) => jobTile(b)).join('')}
     </div>` : ''}
 
     ${rest.length ? `<div class="card">
@@ -897,7 +1096,8 @@ function jobTile(b, isMine = false) {
     ? `${isMine ? 'with' : 'for'} ${others.map((a) => esc(firstName(a.name))).join(', ')}`
     : '';
 
-  return `<button class="tile${b.completed_at ? ' finished' : ''}" data-b="${b.id}">
+  return `<button class="tile${b.completed_at ? ' finished' : ''}"
+      data-b="${b.id}" data-type="${esc(b.cleanType)}">
     <div class="spread">
       <span class="row" style="gap:8px;min-width:0">
         ${b.scheduled ? `<span class="prio">${b.priority}</span>` : ''}
@@ -906,6 +1106,8 @@ function jobTile(b, isMine = false) {
       </span>
       ${status}
     </div>
+    <div class="row" style="gap:6px;margin:6px 0">${typePill(b.cleanType)}
+      <span class="tiny muted">${b.total} item${b.total === 1 ? '' : 's'}</span></div>
     <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
     <div class="spread small muted" style="margin-top:6px">
       <span class="grow">${who}${b.note ? `${who ? ' · ' : ''}${esc(b.note)}` : ''}</span>
@@ -917,11 +1119,14 @@ function jobTile(b, isMine = false) {
 /* --------------------------------------------------- view: schedule grid */
 
 async function renderSchedule() {
-  const from = state.weekFrom || startOfWeek(state.config.today);
-  state.weekFrom = from;
-
+  const live = screen('#/schedule');
+  const from = weekFrom();
   const data = await api(`/schedule?from=${from}&days=7`);
-  chrome({ title: 'Schedule', section: 'schedule', wide: true });
+  if (!live()) return;
+  chrome({
+    title: state.user.role === 'cleaner' ? 'This week' : 'Planning',
+    section: planningSection(), wide: true,
+  });
   const canEdit = data.canEdit;
 
   const isWeekend = (d) => [0, 6].includes(asDate(d).getUTCDay());
@@ -929,10 +1134,13 @@ async function renderSchedule() {
   const cell = (b, day) => {
     const c = data.cells[`${b.id}:${day}`] ?? {};
     const scheduled = c.priority != null;
-    const pct = b.total && c.done ? Math.round((c.done / b.total) * 100) : 0;
+    const type = c.cleanType ?? c.completedType ?? 'full';
+    const size = b.sizes?.[type] ?? 0;
+    const pct = size && c.done ? Math.round((c.done / size) * 100) : 0;
     const classes = [
       'cell',
       scheduled ? 'on' : '',
+      scheduled ? `t-${type}` : '',
       c.completedAt ? 'complete' : '',
       scheduled && !c.assignees?.length && !c.completedAt ? 'unassigned' : '',
     ].filter(Boolean).join(' ');
@@ -941,6 +1149,8 @@ async function renderSchedule() {
     if (scheduled || c.done || c.completedAt) {
       inner = `<div class="cell-top">
           ${scheduled ? `<span class="prio">${c.priority}</span>` : ''}
+          ${scheduled ? `<span class="typetag t-${type}"
+            title="${esc(typeLabel(type))}">${typeTag(type)}</span>` : ''}
           ${c.assignees?.length ? avatarStack(c.assignees) : ''}
           ${c.completedAt ? '<span class="tickmark">✓</span>' : ''}
         </div>
@@ -956,24 +1166,13 @@ async function renderSchedule() {
       .filter(Boolean).join(' ');
     return `<td class="${tdCls}">
       <button class="${classes}" data-cell="${b.id}|${day}"
-        title="${esc(b.name)} — ${esc(dayLabel(day))}"
+        title="${esc(b.name)} — ${esc(dayLabel(day))}${scheduled ? ` — ${esc(typeLabel(type))}` : ''}"
         ${canEdit ? '' : 'disabled'}>${inner}</button></td>`;
   };
 
   app.innerHTML = `
-    <div class="card"><div class="pad">
-      <div class="periodnav">
-        <span class="pn-side pn-left">
-          <button class="ghost" data-week="${esc(addDays(from, -7))}">‹ Prev</button>
-        </span>
-        <strong class="period-title">
-          ${esc(dayOfMonth(from))} – ${esc(dayOfMonth(addDays(from, 6)))}</strong>
-        <span class="pn-side pn-right">
-          <button class="ghost" data-week="${esc(startOfWeek(state.config.today))}">This week</button>
-          <button class="ghost" data-week="${esc(addDays(from, 7))}">Next ›</button>
-        </span>
-      </div>
-    </div></div>
+    ${planningTabs('schedule')}
+    <div class="card"><div class="pad">${weekNav(from)}</div></div>
 
     <div class="card">
       <div class="grid-wrap">
@@ -1012,7 +1211,8 @@ async function renderSchedule() {
         </table>
       </div>
       <div class="legend">
-        <span><i style="background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)"></i>Scheduled</span>
+        <span><i class="sw t-full"></i>Full Clean</span>
+        <span><i class="sw t-check"></i>Check</span>
         <span><i style="background:var(--done-bg);box-shadow:inset 0 0 0 1px var(--done)"></i>Signed off</span>
         <span><i style="background:var(--warn)"></i>Nobody assigned</span>
       </div>
@@ -1020,13 +1220,12 @@ async function renderSchedule() {
 
     <p class="tiny muted center">
       ${canEdit
-        ? 'Tap any square to schedule that building, choose who cleans it, and set its order.'
-        : 'This is the roster. The office sets it — tap a building on your home screen to start cleaning.'}
+        ? 'Tap any square to schedule that building, pick Full Clean or Check, choose who cleans it, and set its order.'
+        : 'This is the plan. The office sets it — tap a building on your home screen to start cleaning.'}
     </p>`;
 
-  app.querySelectorAll('[data-week]').forEach((b) => {
-    b.onclick = () => { state.weekFrom = b.dataset.week; renderSchedule(); };
-  });
+  wirePlanningTabs(app);
+  wireWeekNav(app, renderSchedule);
 
   app.querySelectorAll('[data-grouptoggle]').forEach((head) => {
     const key = head.dataset.grouptoggle;
@@ -1049,17 +1248,11 @@ async function renderSchedule() {
   poll(renderSchedule, 45000);
 }
 
-/** Monday of the week containing `day`. */
-function startOfWeek(day) {
-  const d = asDate(day);
-  const dow = (d.getUTCDay() + 6) % 7; // 0 = Monday
-  return addDays(day, -dow);
-}
-
 async function openScheduleEditor(data, buildingId, day) {
   const building = data.buildings.find((b) => b.id === buildingId);
   const cell = data.cells[`${buildingId}:${day}`] ?? {};
   const scheduled = cell.priority != null;
+  let cleanType = cell.cleanType ?? 'full';
 
   if (!state.cleaners) {
     try {
@@ -1080,6 +1273,14 @@ async function openScheduleEditor(data, buildingId, day) {
       ${scheduled ? '<span class="pill open">Scheduled</span>' : ''}
     </div>
     <div class="pad stack">
+      <div class="field"><span>Which clean?</span>
+        <div class="seg" id="typeSeg">
+          ${CLEAN_TYPES().map((t) => `<button type="button" class="seg-btn"
+            data-type="${esc(t.id)}" aria-pressed="${t.id === cleanType}">${esc(t.label)}
+            <span class="tiny muted" style="display:block">${
+              building.sizes?.[t.id] ?? 0} items</span></button>`).join('')}
+        </div></div>
+
       <label class="field"><span>Order of priority — 1 gets done first</span>
         <input id="prio" type="number" min="1" max="99" inputmode="numeric"
           value="${scheduled ? cell.priority : nextPriority(data, day)}"></label>
@@ -1091,10 +1292,13 @@ async function openScheduleEditor(data, buildingId, day) {
           ${[...state.cleaners]
             .sort((x, y) => (worksOn(y, day) ? 1 : 0) - (worksOn(x, day) ? 1 : 0))
             .map((c) => {
-              const note = worksOn(c, day)
-                ? ''
+              const window = availabilityOn(c, day);
+              const note = window
+                ? (timeRange(window.from, window.to)
+                  ? `<span class="tiny muted" style="display:block">available ${
+                    esc(timeRange(window.from, window.to))}</span>` : '')
                 : `<span class="tiny" style="display:block;color:var(--warn)">
-                    doesn't usually work ${esc(DAY_NAMES[weekdayIndex(day)])}</span>`;
+                    unavailable on ${esc(DAY_FULL[weekdayIndex(day)])}</span>`;
               return `<label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
                 <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
                 ${avatar(c.name)}
@@ -1105,8 +1309,8 @@ async function openScheduleEditor(data, buildingId, day) {
             || '<p class="small muted">No cleaners yet — add them under People.</p>'}
         </div>
         <p class="tiny muted" style="margin:7px 0 0">
-          More than one person can be put on the same building. People who don't normally
-          work that day are listed last, but you can still pick them.</p>
+          More than one person can be put on the same building. People who aren't available
+          that day are listed last, but you can still pick them.</p>
       </div>
 
       <label class="field"><span>Note for this job (optional)</span>
@@ -1118,6 +1322,14 @@ async function openScheduleEditor(data, buildingId, day) {
       ${scheduled ? '<button class="wide danger" id="clear">Remove from schedule</button>' : ''}
       <button class="wide" id="cancel">Cancel</button>
     </div>`);
+
+  sheet.querySelectorAll('[data-type]').forEach((b) => {
+    b.onclick = () => {
+      cleanType = b.dataset.type;
+      sheet.querySelectorAll('[data-type]').forEach((x) =>
+        x.setAttribute('aria-pressed', String(x === b)));
+    };
+  });
 
   // The <label> wraps the checkbox, so the whole row is already a hit target.
   // Just mirror the resulting state into the class - flipping it by hand here
@@ -1138,7 +1350,7 @@ async function openScheduleEditor(data, buildingId, day) {
       await api('/schedule', {
         method: 'POST',
         body: {
-          buildingId, day,
+          buildingId, day, cleanType,
           priority: Number(sheet.querySelector('#prio').value) || 1,
           note: sheet.querySelector('#note').value,
           assignees,
@@ -1167,8 +1379,9 @@ async function openScheduleEditor(data, buildingId, day) {
       confirmText: 'Remove',
       danger: true,
       checkbox: workDone
-        ? `Also wipe that day's ticks and sign-off
-           <span class="tiny muted" style="display:block">The building goes back to 0 done.</span>`
+        ? `Also wipe that day's ticks, photos and sign-off
+           <span class="tiny muted" style="display:block">Only for the
+             ${esc(typeLabel(cell.cleanType ?? 'full'))} checklist. Goes back to 0 done.</span>`
         : null,
     });
     if (!res) return;
@@ -1193,27 +1406,47 @@ function nextPriority(data, day) {
 
 /* ---------------------------------------------- view: building checklist */
 
-async function renderBuilding(id) {
+async function renderBuilding(id, wantType) {
+  const live = screen('#/b/');
   const day = state.user.role === 'cleaner' ? state.config.today : viewDay();
 
   let data;
   try {
-    data = await api(`/building?id=${id}&day=${day}`);
+    const q = isCleanType(wantType) ? `&type=${wantType}` : '';
+    data = await api(`/building?id=${id}&day=${day}${q}`);
   } catch (e) {
+    if (!live()) return;
     chrome({ title: 'Not available', back: true });
     app.innerHTML = `<div class="card pad"><p class="err">${esc(e.message)}</p></div>`;
     return;
   }
+  if (!live()) return;
 
   state.building = data;
   chrome({ title: data.building.name, back: true });
   const locked = data.readOnly;
+  const type = data.cleanType;
+  // Warn when the office planned the other one - the single most expensive
+  // mistake this app can let somebody make is cleaning the wrong list.
+  const mismatch = data.scheduledType && data.scheduledType !== type;
 
   app.innerHTML = `
     <div class="card">
       <div class="pad">
         ${state.user.role !== 'cleaner' ? `${dayNav(day)}<div style="height:10px"></div>` : ''}
-        <div class="spread">
+        <div class="seg" id="typeSeg">
+          ${CLEAN_TYPES().map((t) => `<button type="button" class="seg-btn"
+            data-type="${esc(t.id)}" aria-pressed="${t.id === type}">${esc(t.label)}
+            <span class="tiny muted" style="display:block">${data.sizes[t.id]} items</span>
+          </button>`).join('')}
+        </div>
+        ${mismatch ? `<div class="banner warn" style="margin-top:10px;border-radius:var(--r-sm)">
+          <strong>The office scheduled a ${esc(typeLabel(data.scheduledType))} here.</strong>
+          You're looking at the ${esc(typeLabel(type))} checklist.
+        </div>` : ''}
+        ${data.scheduleNote ? `<p class="small" style="margin:10px 0 0">
+          <strong>Note from the office:</strong> ${esc(data.scheduleNote)}</p>` : ''}
+        <div class="spread" style="margin-top:12px">
           <strong id="count"></strong>
           <span class="small muted">${esc(dayLabel(day))}</span>
         </div>
@@ -1222,7 +1455,7 @@ async function renderBuilding(id) {
       </div>
     </div>
 
-    <div id="areas">${data.areas.map(areaCard).join('')}</div>
+    <div id="areas">${data.areas.map((a) => areaCard(a, locked)).join('')}</div>
 
     <div class="card" id="issues" hidden><h2>Open issues here</h2><div id="issuelist"></div></div>
 
@@ -1233,54 +1466,92 @@ async function renderBuilding(id) {
       </div>`}`;
 
   paintBuilding(data, locked);
+  wireTaskPhotos(id, day, locked);
 
-  if (state.user.role !== 'cleaner') wireDayNav(app, () => renderBuilding(id));
+  app.querySelectorAll('#typeSeg [data-type]').forEach((b) => {
+    b.onclick = () => {
+      if (b.dataset.type === type) return;
+      location.hash = `#/b/${id}/${b.dataset.type}`;
+    };
+  });
+
+  if (state.user.role !== 'cleaner') wireDayNav(app, () => renderBuilding(id, type));
 
   if (!locked) {
     app.querySelectorAll('.task').forEach((el) => {
       el.onclick = () => toggleTask(el, id, day);
     });
     $('#report').onclick = () => renderReport(data);
-    $('#complete').onclick = async () => {
-      const { done, total } = counts(state.building);
-      const undo = Boolean(state.building.completed);
-      const left = total - done;
-
-      const go = await ask({
-        title: undo ? 'Reopen this building?' : `Finished ${data.building.name}?`,
-        body: undo
-          ? 'It goes back to in-progress and the office will see it as unfinished.'
-          : left
-            ? `<strong>${left}</strong> item${left === 1 ? ' is' : 's are'} still unticked.
-               You can still mark it done — the office sees ${done} of ${total} ticked.`
-            : `All <strong>${total}</strong> items are ticked. The office will see it
-               as finished.`,
-        confirmText: undo ? 'Reopen' : 'Yes, all done',
-      });
-      if (!go) return;
-
-      try {
-        const res = await api('/building/complete', {
-          method: 'POST', body: { buildingId: id, day, undo },
-        });
-        if (undo) {
-          state.building.completed = res.completed;
-          paintBuilding(state.building, locked);
-          toast('Building reopened');
-          return;
-        }
-        // Finishing a building ends the job, so hand them back their list
-        // rather than leaving them on a checklist they are done with.
-        toast(`${data.building.name} marked complete`);
-        location.hash = '#/';
-      } catch (e) {
-        toast(e.message, true);
-      }
-    };
+    $('#complete').onclick = () => completeBuilding(id, day, type, data, locked);
   }
 
   // Frequent enough that two cleaners in the same room see each other's ticks.
-  poll(() => refreshBuilding(id, day, locked), 20000);
+  poll(() => refreshBuilding(id, day, type, locked), 20000);
+}
+
+async function completeBuilding(id, day, type, data, locked) {
+  const { done, total } = counts(state.building);
+  const undo = Boolean(state.building.completed);
+  const left = total - done;
+
+  const go = await ask({
+    title: undo
+      ? `Reopen this ${typeLabel(type).toLowerCase()}?`
+      : `Finished the ${typeLabel(type).toLowerCase()} at ${data.building.name}?`,
+    body: undo
+      ? 'It goes back to in-progress and the office will see it as unfinished.'
+      : left
+        ? `<strong>${left}</strong> item${left === 1 ? ' is' : 's are'} still unticked.
+           You can still mark it done — the office sees ${done} of ${total} ticked.`
+        : `All <strong>${total}</strong> items are ticked. The office will see it
+           as finished.`,
+    confirmText: undo ? 'Reopen' : 'Yes, all done',
+  });
+  if (!go) return;
+
+  const send = (override) => api('/building/complete', {
+    method: 'POST', body: { buildingId: id, day, undo, cleanType: type, override },
+  });
+
+  try {
+    let res;
+    try {
+      res = await send(false);
+    } catch (e) {
+      // The server refuses when an item the admin marked "photo required" has
+      // no photo. A dead phone camera shouldn't strand a finished building, so
+      // this can be overridden - but never silently, and the override is
+      // written into the activity log.
+      if (e.status !== 409 || !e.data.missingPhotos) throw e;
+      const missing = e.data.missingPhotos;
+      const anyway = await ask({
+        title: 'Some photos are missing',
+        body: `These items need a photo before this counts as finished:
+          <br><strong>${missing.slice(0, 6).map((m) => esc(`${m.area} — ${m.item}`)).join('<br>')}</strong>
+          ${missing.length > 6 ? `<br>…and ${missing.length - 6} more` : ''}
+          <br><br>Add the photos if you can. If you genuinely can't, you can sign off
+          anyway and the office will see the photos are missing.`,
+        confirmText: 'Sign off without them',
+        cancelText: 'Go back and add photos',
+        danger: true,
+      });
+      if (!anyway) return;
+      res = await send(true);
+    }
+
+    if (undo) {
+      state.building.completed = res.completed;
+      paintBuilding(state.building, locked);
+      toast(`${typeLabel(type)} reopened`);
+      return;
+    }
+    // Finishing a building ends the job, so hand them back their list
+    // rather than leaving them on a checklist they are done with.
+    toast(`${data.building.name} — ${typeLabel(type).toLowerCase()} complete`);
+    location.hash = '#/';
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 const counts = (data) => {
@@ -1288,7 +1559,39 @@ const counts = (data) => {
   return { done: tasks.filter((t) => t.done).length, total: tasks.length };
 };
 
-function areaCard(area) {
+/* --------------------------------------------------- photos on an item */
+
+const PHOTO_BADGE = {
+  required: '<span class="pill late shot-badge">📷 Photo required</span>',
+  optional: '<span class="pill idle shot-badge">📷 Photo</span>',
+};
+
+function photoStrip(task, locked) {
+  if (task.photoMode === 'none') return '';
+  if (!state.config.photos) {
+    // The bucket isn't bound, so there is nowhere to put a photo. Say so once
+    // rather than showing a camera button that can only fail.
+    return task.photoMode === 'required'
+      ? `<div class="shots"><span class="tiny muted">Photo requested — photo storage
+         is not set up on this site.</span></div>`
+      : '';
+  }
+
+  const missing = task.photoMode === 'required' && !task.photos.length;
+  return `<div class="shots${missing ? ' needed' : ''}" data-shots="${task.id}">
+    ${PHOTO_BADGE[task.photoMode]}
+    ${task.photos.map((p) => `<span class="shot" data-photo-id="${p.id}">
+      <img alt="${esc(task.item)}" hidden data-photo="${esc(p.key)}">
+      ${locked ? '' : `<button class="shot-x" data-drop="${p.id}"
+        aria-label="Remove photo" title="Remove photo">✕</button>`}
+    </span>`).join('')}
+    ${locked ? '' : `<button class="shot-add" data-add="${task.id}">
+      <span aria-hidden="true">＋</span> ${task.photos.length ? 'Add another' : 'Add photo'}
+    </button>`}
+  </div>`;
+}
+
+function areaCard(area, locked) {
   const done = area.tasks.filter((t) => t.done).length;
   return `<div class="card">
     <div class="area-head">
@@ -1296,15 +1599,105 @@ function areaCard(area) {
       <span class="small muted" data-areacount="${area.id}">${done}/${area.tasks.length}</span>
     </div>
     ${area.tasks.map((t) => `
-      <button class="task${t.done ? ' is-done' : ''}" data-t="${t.id}" data-done="${t.done ? 1 : 0}">
-        <span class="box">✓</span>
-        <span class="grow">
-          <span class="item">${esc(t.item)}</span>
-          <span class="desc" style="display:block">${esc(t.description)}</span>
-          <span class="who">${t.done && t.by ? `${esc(t.by)} · ${esc(time(t.at))}` : ''}</span>
-        </span>
-      </button>`).join('')}
+      <div class="taskwrap" data-tw="${t.id}">
+        <button class="task${t.done ? ' is-done' : ''}" data-t="${t.id}"
+          data-done="${t.done ? 1 : 0}">
+          <span class="box">✓</span>
+          <span class="grow">
+            <span class="item">${esc(t.item)}</span>
+            <span class="desc" style="display:block">${esc(t.description)}</span>
+            <span class="who">${t.done && t.by ? `${esc(t.by)} · ${esc(time(t.at))}` : ''}</span>
+          </span>
+        </button>
+        ${photoStrip(t, locked)}
+      </div>`).join('')}
   </div>`;
+}
+
+/**
+ * Opens the phone's photo picker. Left without `capture` on purpose: that
+ * attribute forces the camera and hides the library, and half the time the
+ * photo has already been taken.
+ */
+function pickPhotos() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    document.body.append(input);
+
+    let settled = false;
+    const finish = (files) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      removeEventListener('focus', onFocus);
+      resolve(files);
+    };
+    // Cancelling the picker fires no change event anywhere, so the window
+    // regaining focus is the only signal that nothing is coming.
+    const onFocus = () => setTimeout(() => finish([]), 600);
+
+    input.onchange = () => finish([...input.files]);
+    addEventListener('focus', onFocus, { once: true });
+    input.click();
+  });
+}
+
+function wireTaskPhotos(buildingId, day, locked) {
+  app.querySelectorAll('[data-photo]').forEach((img) => loadPhoto(img, img.dataset.photo));
+  if (locked) return;
+
+  app.querySelectorAll('[data-add]').forEach((btn) => {
+    btn.onclick = async () => {
+      const taskId = Number(btn.dataset.add);
+      const files = await pickPhotos();
+      if (!files.length) return;
+
+      btn.disabled = true;
+      const original = btn.innerHTML;
+      let added = 0;
+      try {
+        for (const file of files) {
+          btn.innerHTML = `Uploading ${added + 1}/${files.length}…`;
+          const blob = await shrinkImage(file);
+          await api(`/task/photo?taskId=${taskId}&day=${day}`, {
+            method: 'POST', raw: true, body: blob, contentType: 'image/jpeg',
+          });
+          added++;
+        }
+        toast(added === 1 ? 'Photo added' : `${added} photos added`);
+      } catch (e) {
+        toast(e.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
+      if (added) await refreshBuilding(buildingId, day, state.building.cleanType, locked, true);
+    };
+  });
+
+  app.querySelectorAll('[data-drop]').forEach((btn) => {
+    btn.onclick = async () => {
+      const go = await ask({
+        title: 'Remove this photo?',
+        body: 'It is deleted from storage and cannot be recovered.',
+        confirmText: 'Remove',
+        danger: true,
+      });
+      if (!go) return;
+      try {
+        await api('/task/photo/delete', { method: 'POST', body: { id: Number(btn.dataset.drop) } });
+        toast('Photo removed');
+        await refreshBuilding(buildingId, day, state.building.cleanType, locked, true);
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
 }
 
 /** Updates the summary, sign-off line and issue list from `data`, in place. */
@@ -1318,7 +1711,8 @@ function paintBuilding(data, locked) {
   meter.firstElementChild.style.width = `${pct}%`;
 
   $('#signoff').textContent = data.completed
-    ? `✓ Signed off by ${data.completed.completed_by} at ${time(data.completed.completed_at)}`
+    ? `✓ ${typeLabel(data.cleanType)} signed off by ${data.completed.completed_by} at `
+      + `${time(data.completed.completed_at)}`
     : '';
 
   for (const area of data.areas) {
@@ -1338,24 +1732,26 @@ function paintBuilding(data, locked) {
 
   if (!locked) {
     $('#complete').textContent = data.completed
-      ? 'Reopen this building'
-      : 'Done — mark this building complete';
+      ? `Reopen this ${typeLabel(data.cleanType).toLowerCase()}`
+      : `Done — mark this ${typeLabel(data.cleanType).toLowerCase()} complete`;
   }
 }
 
 /** Polling refresh: patch the DOM rather than rebuild it, so nobody's scroll
     position or half-finished tap gets thrown away mid-shift. */
-async function refreshBuilding(id, day, locked) {
+async function refreshBuilding(id, day, type, locked, force = false) {
   let data;
   try {
-    data = await api(`/building?id=${id}&day=${day}`);
+    data = await api(`/building?id=${id}&day=${day}&type=${type}`);
   } catch {
     return; // transient - the next tick will catch up
   }
 
-  const before = state.building.areas.flatMap((a) => a.tasks).map((t) => t.id).join();
-  const after = data.areas.flatMap((a) => a.tasks).map((t) => t.id).join();
-  if (before !== after) return renderBuilding(id); // checklist itself changed
+  const shape = (d) => d.areas.flatMap((a) => a.tasks)
+    .map((t) => `${t.id}:${t.photos.length}`).join();
+  // A changed checklist (or a photo added or removed) means the markup itself
+  // is out of date, so a full redraw is the only correct answer.
+  if (force || shape(state.building) !== shape(data)) return renderBuilding(id, type);
 
   state.building = data;
   for (const task of data.areas.flatMap((a) => a.tasks)) {
@@ -1384,6 +1780,13 @@ async function toggleTask(el, buildingId, day) {
     const res = await api('/task', { method: 'POST', body: { taskId, done: next, day } });
     if (task) { task.by = res.by; task.at = res.at; }
     el.querySelector('.who').textContent = next ? `${res.by} · ${time(res.at)}` : '';
+
+    // Nudge, not a block: ticking an item that is meant to carry a photo and
+    // doesn't is the moment to say so, while they're still standing there.
+    if (next && task?.photoMode === 'required' && !task.photos.length && state.config.photos) {
+      toast('That item needs a photo');
+      el.closest('.taskwrap')?.querySelector('[data-add]')?.focus();
+    }
   } catch (e) {
     el.classList.toggle('is-done', !next);
     el.dataset.done = next ? '0' : '1';
@@ -1400,7 +1803,7 @@ async function toggleTask(el, buildingId, day) {
     people back to where they started, not into a building they may never
     have opened). */
 function renderReport(data, { back } = {}) {
-  const goBack = back || (() => renderBuilding(data.building.id));
+  const goBack = back || (() => renderBuilding(data.building.id, data.cleanType));
   stopPolling();
   chrome({ title: 'Report', back: true });
   let kind = 'maintenance';
@@ -1415,14 +1818,12 @@ function renderReport(data, { back } = {}) {
             .join('')}
         </div></div>
       <label class="field"><span>Where (optional)</span>
-        <select id="area">
-          <option value="">Not specific</option>
-          ${data.areas.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
-        </select></label>
+        <input id="where" maxlength="120" autocomplete="off"
+          placeholder="Kitchen near main entrance"></label>
       <label class="field"><span>Details</span>
         <textarea id="detail" placeholder="${esc(REPORT_KINDS[kind].placeholder)}"></textarea></label>
       ${state.config.photos ? `<label class="field"><span>Photo (optional)</span>
-        <input type="file" id="photo" accept="image/*" capture="environment"></label>
+        <input type="file" id="photo" accept="image/*"></label>
         <img class="thumb" id="preview" hidden alt="">` : ''}
       <p class="err" id="err"></p>
       <button class="primary wide" id="send">Send</button>
@@ -1469,7 +1870,7 @@ function renderReport(data, { back } = {}) {
         method: 'POST',
         body: {
           buildingId: data.building.id,
-          areaId: $('#area').value || null,
+          location: $('#where').value,
           kind,
           detail: $('#detail').value,
           photoKey,
@@ -1548,7 +1949,9 @@ async function shrinkImage(file, max = 1280, quality = 0.75) {
 /* ----------------------------------------------------- view: issues list */
 
 async function renderIssues(status = 'open') {
+  const live = screen('#/issues');
   const { items } = await api(`/maintenance?status=${status}`);
+  if (!live()) return;
   chrome({ title: 'Reports', section: 'issues' });
   const canResolve = state.user.role !== 'cleaner';
 
@@ -1563,10 +1966,11 @@ async function renderIssues(status = 'open') {
     <div class="card">
       ${items.length ? items.map((i) => {
         const meta = REPORT_KINDS[i.kind] ?? REPORT_KINDS.maintenance;
+        const where = i.location || i.area || '';
         return `
         <div class="list-item">
           <div class="spread wrap">
-            <strong>${esc(i.building)}${i.area ? ` — ${esc(i.area)}` : ''}</strong>
+            <strong>${esc(i.building)}${where ? ` — ${esc(where)}` : ''}</strong>
             <span class="pill ${meta.pill}">${meta.emoji} ${esc(meta.label)}</span>
           </div>
           <div style="margin:4px 0">${esc(i.detail)}</div>
@@ -1592,11 +1996,15 @@ async function renderIssues(status = 'open') {
   });
   app.querySelectorAll('[data-r]').forEach((b) => {
     b.onclick = async () => {
-      await api('/maintenance/resolve', {
-        method: 'POST',
-        body: { id: Number(b.dataset.r), reopen: b.dataset.reopen === 'true' },
-      });
-      renderIssues(status);
+      try {
+        await api('/maintenance/resolve', {
+          method: 'POST',
+          body: { id: Number(b.dataset.r), reopen: b.dataset.reopen === 'true' },
+        });
+        renderIssues(status);
+      } catch (e) {
+        toast(e.message, true);
+      }
     };
   });
 }
@@ -1606,11 +2014,14 @@ async function renderIssues(status = 'open') {
 const VERB = {
   done: 'ticked', undone: 'un-ticked', completed: 'signed off',
   reopened: 'reopened', issue: 'reported', note: 'left a note', scheduled: 'scheduled',
+  photo: 'photographed', photo_removed: 'removed a photo from',
 };
 
 async function renderHistory() {
+  const live = screen('#/history');
   const day = viewDay();
   const { activity } = await api(`/activity?day=${day}`);
+  if (!live()) return;
   chrome({ title: 'Activity', section: 'history' });
 
   app.innerHTML = `
@@ -1627,85 +2038,603 @@ async function renderHistory() {
     <button class="wide" id="csv">Download CSV for this day</button>`;
 
   wireDayNav(app, renderHistory);
-  $('#csv').onclick = async () => {
+  $('#csv').onclick = () => download(`/report?from=${day}&to=${day}`, `cleaning-${auDate(day)}.csv`);
+}
+
+/** Fetches with the auth header, then hands the blob to the browser. */
+async function download(path, filename) {
+  try {
+    const res = await request(path);
+    const url = URL.createObjectURL(await res.blob());
+    Object.assign(document.createElement('a'), { href: url, download: filename }).click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/* ------------------------------------ availability editing (per person) */
+
+/**
+ * The seven rows of the availability sheet: a switch per day plus the hours.
+ * Times are <input type="time">, which gives a native picker on a phone and
+ * a keyboard-friendly field on the desktop, and always hands back HH:MM.
+ */
+function availabilityRows(days) {
+  return DAY_NAMES.map((name, i) => {
+    const entry = days?.[i] ?? null;
+    const on = Boolean(entry);
+    return `<div class="avrow ${on ? 'on' : ''}" data-avrow="${i}">
+      <label class="avday">
+        <input type="checkbox" ${on ? 'checked' : ''}>
+        <span>${name}</span>
+      </label>
+      <span class="avtimes">
+        <input type="time" class="avfrom" value="${esc(entry?.from ?? '')}"
+          ${on ? '' : 'disabled'} aria-label="${name} start">
+        <span class="tiny muted">to</span>
+        <input type="time" class="avto" value="${esc(entry?.to ?? '')}"
+          ${on ? '' : 'disabled'} aria-label="${name} finish">
+      </span>
+    </div>`;
+  }).join('');
+}
+
+function wireAvailabilityRows(root) {
+  root.querySelectorAll('[data-avrow]').forEach((row) => {
+    const box = row.querySelector('input[type="checkbox"]');
+    const times = row.querySelectorAll('input[type="time"]');
+    box.onchange = () => {
+      row.classList.toggle('on', box.checked);
+      times.forEach((t) => { t.disabled = !box.checked; });
+    };
+  });
+}
+
+/** Reads the sheet back into the 7 entries the API expects. */
+const readAvailabilityRows = (root) => [...root.querySelectorAll('[data-avrow]')].map((row) => {
+  if (!row.querySelector('input[type="checkbox"]').checked) return null;
+  return {
+    from: row.querySelector('.avfrom').value,
+    to: row.querySelector('.avto').value,
+  };
+});
+
+/** "Mon, Tue, Wed · 8am–4pm" style summary for a person's row. */
+function availabilitySummary(days) {
+  if (!Array.isArray(days)) return 'available every day';
+  const on = days.map((d, i) => (d ? i : -1)).filter((i) => i >= 0);
+  if (!on.length) return 'no days set';
+
+  const ranges = new Set(on.map((i) => timeRange(days[i].from, days[i].to)).filter(Boolean));
+  const dayText = on.length === 7 ? 'every day' : on.map((i) => DAY_NAMES[i]).join(', ');
+  if (!ranges.size) return dayText;
+  return `${dayText} · ${ranges.size === 1 ? [...ranges][0] : 'varying hours'}`;
+}
+
+function editAvailability(person, onDone) {
+  const sheet = openSheet(`
+    <div class="sheet-head"><strong>${esc(person.name)}</strong>
+      <span class="tiny muted">availability</span></div>
+    <div class="pad stack">
+      <p class="dialog-body">Which days do they work, and between what times?
+        Leave the times blank for a day with no set hours.</p>
+      <div class="avlist">${availabilityRows(person.availability)}</div>
+      <div class="row wrap" style="gap:6px">
+        <button class="ghost" data-preset="weekdays">Mon–Fri 8–4</button>
+        <button class="ghost" data-preset="copy">Copy first day down</button>
+        <button class="ghost" data-preset="clear">Clear all</button>
+      </div>
+      <p class="err" id="err"></p>
+      <button class="primary wide" id="save">Save availability</button>
+      <button class="wide" id="cancel">Cancel</button>
+    </div>`);
+
+  wireAvailabilityRows(sheet);
+
+  const rows = () => [...sheet.querySelectorAll('[data-avrow]')];
+  const setRow = (row, on, from = '', to = '') => {
+    const box = row.querySelector('input[type="checkbox"]');
+    box.checked = on;
+    row.classList.toggle('on', on);
+    row.querySelectorAll('input[type="time"]').forEach((t) => { t.disabled = !on; });
+    row.querySelector('.avfrom').value = from;
+    row.querySelector('.avto').value = to;
+  };
+
+  sheet.querySelectorAll('[data-preset]').forEach((b) => {
+    b.onclick = () => {
+      const kind = b.dataset.preset;
+      if (kind === 'weekdays') {
+        rows().forEach((row, i) => setRow(row, i < 5, i < 5 ? '08:00' : '', i < 5 ? '16:00' : ''));
+      } else if (kind === 'clear') {
+        rows().forEach((row) => setRow(row, false));
+      } else {
+        const first = rows()[0];
+        const on = first.querySelector('input[type="checkbox"]').checked;
+        const from = first.querySelector('.avfrom').value;
+        const to = first.querySelector('.avto').value;
+        rows().slice(1).forEach((row) => setRow(row, on, from, to));
+      }
+    };
+  });
+
+  sheet.querySelector('#cancel').onclick = closeSheet;
+  sheet.querySelector('#save').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
     try {
-      const res = await request(`/report?from=${day}&to=${day}`);
-      const url = URL.createObjectURL(await res.blob());
-      Object.assign(document.createElement('a'),
-        { href: url, download: `cleaning-${auDate(day)}.csv` }).click();
-      URL.revokeObjectURL(url);
+      await api('/availability', {
+        method: 'POST',
+        body: { userId: person.id, days: readAvailabilityRows(sheet) },
+      });
+      closeSheet();
+      state.cleaners = null;
+      toast('Availability saved');
+      onDone();
     } catch (e) {
-      toast(e.message, true);
+      sheet.querySelector('#err').textContent = e.message;
+      ev.currentTarget.disabled = false;
     }
   };
 }
 
-/* ------------------------------------ availability helpers (admin editor) */
+/* ------------------------------------- view: everyone's availability */
 
-/** `days`: 7 booleans (Mon..Sun) - just which days someone works, no times. */
-function dayToggles(days) {
-  return DAY_NAMES.map((name, i) => {
-    const on = Boolean(days[i]);
-    return `<label class="check-row ${on ? 'on' : ''}" data-day-toggle="${i}">
-      <input type="checkbox" ${on ? 'checked' : ''}>
-      <span class="grow">${name}</span>
-    </label>`;
-  }).join('');
-}
+async function renderAvailability() {
+  const live = screen();
+  const from = weekFrom();
+  const data = await api(`/availability?from=${from}`);
+  if (!live()) return;
+  chrome({ title: 'Availability', section: 'schedule', wide: true });
 
-function wireDayToggles(root) {
-  root.querySelectorAll('[data-day-toggle]').forEach((row) => {
-    const box = row.querySelector('input[type="checkbox"]');
-    box.onchange = () => row.classList.toggle('on', box.checked);
+  const f = state.availFilter;
+  const overlaps = (entry) => {
+    if (!f.from || !f.to) return true;
+    if (!entry) return false;
+    if (!entry.from || !entry.to) return true; // no set hours: available whenever
+    return entry.from < f.to && entry.to > f.from;
+  };
+
+  const dayMatches = (person, index) => {
+    const entry = person.availability[index];
+    if (f.status === 'available' && !entry) return false;
+    if (f.status === 'unavailable' && entry) return false;
+    return overlaps(entry);
+  };
+
+  const shown = data.staff.filter((p) => {
+    if (f.q && !p.name.toLowerCase().includes(f.q)) return false;
+    const indexes = f.day === 'all' ? [0, 1, 2, 3, 4, 5, 6] : [Number(f.day)];
+    return indexes.some((i) => dayMatches(p, i));
+  });
+
+  const dim = (person, index) =>
+    (f.status === 'all' && f.day === 'all' && !f.from ? false : !dayMatches(person, index));
+
+  app.innerHTML = `
+    ${planningTabs('availability')}
+    <div class="card"><div class="pad">${weekNav(from)}</div></div>
+
+    <div class="card noprint">
+      <div class="pad filters">
+        <label class="field"><span>Staff member</span>
+          <input id="fq" value="${esc(f.q)}" placeholder="Search by name" autocomplete="off"></label>
+        <label class="field"><span>Day</span>
+          <select id="fday">
+            <option value="all">Every day</option>
+            ${DAY_FULL.map((d, i) =>
+              `<option value="${i}" ${String(i) === f.day ? 'selected' : ''}>${d}</option>`).join('')}
+          </select></label>
+        <label class="field"><span>Status</span>
+          <select id="fstatus">
+            <option value="all" ${f.status === 'all' ? 'selected' : ''}>Anyone</option>
+            <option value="available" ${f.status === 'available' ? 'selected' : ''}>Available</option>
+            <option value="unavailable" ${f.status === 'unavailable' ? 'selected' : ''}>Unavailable</option>
+          </select></label>
+        <label class="field"><span>Free between</span>
+          <span class="row" style="gap:6px">
+            <input type="time" id="ffrom" value="${esc(f.from)}" aria-label="Available from">
+            <input type="time" id="fto" value="${esc(f.to)}" aria-label="Available to">
+          </span></label>
+        <div class="field"><span>&nbsp;</span>
+          <button class="ghost wide" id="fclear">Clear filters</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>${shown.length} of ${data.staff.length} staff</h2>
+      <div class="grid-wrap">
+        <table class="sched avail">
+          <thead><tr>
+            <th class="corner">Staff</th>
+            ${data.days.map((d, i) => `<th class="${d === data.today ? 'is-today' : ''}">
+              ${esc(DAY_NAMES[i])}<small>${esc(dayOfMonth(d))}</small></th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${shown.map((p) => `<tr>
+              <th class="rowhead">
+                <button class="linkish" data-edit="${p.id}">${esc(p.name)}</button>
+                <small>${esc(p.role)}</small>
+              </th>
+              ${p.availability.map((entry, i) => {
+                const rostered = p.rostered[i];
+                return `<td class="${dim(p, i) ? 'dimmed' : ''}">
+                  <div class="avcell ${entry ? 'yes' : 'no'}">
+                    ${esc(availabilityText(entry))}
+                    ${rostered ? `<span class="tiny muted" style="display:block">
+                      ${rostered} shift${rostered === 1 ? '' : 's'}</span>` : ''}
+                  </div></td>`;
+              }).join('')}
+            </tr>`).join('') || `<tr><td colspan="8">
+              <div class="empty">Nobody matches those filters.</div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <div class="legend">
+        <span><i class="sw yes"></i>Available</span>
+        <span><i class="sw no"></i>Unavailable</span>
+        <span class="tiny">Tap a name to change their availability</span>
+      </div>
+    </div>`;
+
+  wirePlanningTabs(app);
+  wireWeekNav(app, renderAvailability);
+
+  const setFilter = (patch) => {
+    Object.assign(state.availFilter, patch);
+    renderAvailability();
+  };
+  // Re-rendering on every keystroke would lose focus, so the name box filters
+  // the rows that are already on screen and only the selects re-render.
+  $('#fq').oninput = (ev) => {
+    state.availFilter.q = ev.currentTarget.value.trim().toLowerCase();
+    const q = state.availFilter.q;
+    app.querySelectorAll('table.avail tbody tr').forEach((row) => {
+      const name = row.querySelector('.rowhead')?.textContent.toLowerCase() ?? '';
+      row.hidden = Boolean(q) && !name.includes(q);
+    });
+  };
+  $('#fday').onchange = (ev) => setFilter({ day: ev.currentTarget.value });
+  $('#fstatus').onchange = (ev) => setFilter({ status: ev.currentTarget.value });
+  $('#ffrom').onchange = (ev) => setFilter({ from: ev.currentTarget.value });
+  $('#fto').onchange = (ev) => setFilter({ to: ev.currentTarget.value });
+  $('#fclear').onclick = () =>
+    setFilter({ q: '', day: 'all', status: 'all', from: '', to: '' });
+
+  app.querySelectorAll('[data-edit]').forEach((b) => {
+    b.onclick = () => editAvailability(
+      data.staff.find((p) => p.id === Number(b.dataset.edit)),
+      renderAvailability,
+    );
   });
 }
 
-/** "Mon, Tue, Wed" style summary of which days someone works. */
-function daysSummary(days) {
-  if (!Array.isArray(days)) return 'every day';
-  const on = DAY_NAMES.filter((_, i) => days[i]);
-  if (!on.length) return 'no days set';
-  if (on.length === 7) return 'every day';
-  return on.join(', ');
+/* ------------------------------------------------------- view: the roster */
+
+const FLAG_TEXT = {
+  unavailable: 'Rostered on a day they are not available',
+  outside: 'Outside the hours they are available',
+  overlap: 'Overlaps another shift the same day',
+};
+
+async function renderRoster() {
+  const live = screen();
+  const from = weekFrom();
+  const data = await api(`/roster?from=${from}&days=7`);
+  if (!live()) return;
+  chrome({ title: 'Staff roster', section: planningSection(), wide: true });
+  const canEdit = data.canEdit;
+
+  const shiftsFor = (userId, day) =>
+    data.shifts.filter((s) => s.user_id === userId && s.day === day);
+
+  // Only people who are on the roster this week, plus (for the office) anyone
+  // who could be - a table of thirty names with two shifts in it is unusable.
+  const onRoster = new Set(data.shifts.map((s) => s.user_id));
+  const staff = canEdit ? data.staff : data.staff.filter((p) => onRoster.has(p.id));
+  const conflicts = data.shifts.filter((s) => s.flags.length);
+
+  const cell = (person, day) => {
+    const shifts = shiftsFor(person.id, day);
+    const entry = availabilityOn(person, day);
+    const classes = ['cell', 'rcell', shifts.length ? 'on' : '', entry ? '' : 'off-day']
+      .filter(Boolean).join(' ');
+
+    const inner = shifts.length
+      ? shifts.map((s) => `<span class="shift ${s.flags.length ? 'clash' : ''} ${
+        s.confirmed ? 'ok' : ''}">
+          <b>${esc(timeRange(s.start_time, s.end_time))}</b>
+          ${s.duty ? `<span class="tiny">${esc(s.duty)}</span>` : ''}
+          ${s.flags.length ? '<span class="tiny warnmark">⚠</span>' : ''}
+          ${s.confirmed ? '<span class="tiny tick">✓</span>' : ''}
+        </span>`).join('')
+      : `<span class="offtext">${entry ? (canEdit ? '+' : '—') : 'OFF'}</span>`;
+
+    return `<td class="${day === data.today ? 'today-col' : ''}">
+      <button class="${classes}" data-shift="${person.id}|${day}"
+        title="${esc(person.name)} — ${esc(dayLabel(day))}" ${canEdit ? '' : 'disabled'}
+        >${inner}</button></td>`;
+  };
+
+  app.innerHTML = `
+    ${planningTabs('roster')}
+    <div class="card noprint"><div class="pad">${weekNav(from)}</div></div>
+
+    ${conflicts.length ? `<div class="card noprint">
+      <div class="banner warn">
+        <strong>${conflicts.length} shift${conflicts.length === 1 ? '' : 's'} clash with
+        availability.</strong>
+        ${conflicts.slice(0, 4).map((s) => `${esc(s.user_name)} on
+          ${esc(DAY_NAMES[weekdayIndex(s.day)])} (${esc(FLAG_TEXT[s.flags[0]].toLowerCase())})`)
+          .join('; ')}${conflicts.length > 4 ? `; and ${conflicts.length - 4} more` : ''}.
+      </div></div>` : ''}
+
+    <div class="card" id="printarea">
+      <h1 class="printonly print-title">STAFF ROSTER — WEEK COMMENCING ${esc(auDate(from))}</h1>
+      <div class="grid-wrap">
+        <table class="sched roster">
+          <thead><tr>
+            <th class="corner">Staff</th>
+            ${data.days.map((d, i) => `<th class="${d === data.today ? 'is-today' : ''}">
+              ${esc(DAY_NAMES[i])}<small>${esc(dayOfMonth(d))}</small></th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${staff.map((p) => `<tr>
+              <th class="rowhead">${esc(p.name)}
+                <small>${esc(p.role)}</small></th>
+              ${data.days.map((d) => cell(p, d)).join('')}
+            </tr>`).join('') || `<tr><td colspan="8">
+              <div class="empty"><b>Nobody rostered this week</b>
+              ${canEdit ? 'Tap a square to add a shift.' : ''}</div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <p class="printonly print-foot">
+        ✓ confirmed · ⚠ clashes with availability · OFF not available</p>
+    </div>
+
+    <div class="row wrap noprint" style="gap:8px">
+      <button class="ghost" id="print">Print / save as PDF</button>
+      ${canEdit ? `<button class="ghost" id="csv">Download CSV</button>
+      <button class="ghost" id="copyweek">Copy last week into this one</button>` : ''}
+    </div>
+
+    <p class="tiny muted center noprint">
+      ${canEdit
+        ? 'Tap any square to add or change a shift. Shifts that clash with someone\'s '
+          + 'availability are flagged rather than blocked.'
+        : 'This is the roster the office has set.'}</p>`;
+
+  wirePlanningTabs(app);
+  wireWeekNav(app, renderRoster);
+
+  $('#print').onclick = () => window.print();
+  $('#csv')?.addEventListener('click', () =>
+    download(`/roster/export?from=${from}`, `roster-week-${auDate(from)}.csv`));
+
+  $('#copyweek')?.addEventListener('click', async () => {
+    const go = await ask({
+      title: 'Copy last week?',
+      body: `Every shift from the week of <strong>${esc(auDate(addDays(from, -7)))}</strong>
+        is copied into this one, unconfirmed so you can check each before it counts.
+        This only works while this week is empty.`,
+      confirmText: 'Copy them across',
+    });
+    if (!go) return;
+    try {
+      const res = await api('/roster/copy', {
+        method: 'POST', body: { from: addDays(from, -7), to: from },
+      });
+      toast(`${res.copied} shift${res.copied === 1 ? '' : 's'} copied`);
+      renderRoster();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+
+  if (canEdit) {
+    app.querySelectorAll('[data-shift]').forEach((b) => {
+      b.onclick = () => {
+        const [uid, day] = b.dataset.shift.split('|');
+        openShiftEditor(data, Number(uid), day);
+      };
+    });
+  }
 }
 
-/** Reads the sheet back into the 7-boolean shape the API expects. */
-const readDayToggles = (root) => [...root.querySelectorAll('[data-day-toggle]')]
-  .map((row) => row.querySelector('input[type="checkbox"]').checked);
+/** Add, change or delete the shifts one person has on one day. */
+function openShiftEditor(data, userId, day) {
+  const person = data.staff.find((p) => p.id === userId);
+  const existing = data.shifts.filter((s) => s.user_id === userId && s.day === day);
+  const entry = availabilityOn(person, day);
+  const suggested = entry && entry.from
+    ? { from: entry.from, to: entry.to }
+    : { from: '08:00', to: '16:00' };
+
+  const draw = (shift, forceForm = false) => {
+    const sheet = openSheet(`
+      <div class="sheet-head">
+        <div>
+          <strong>${esc(person.name)}</strong>
+          <div class="small muted">${esc(DAY_FULL[weekdayIndex(day)])} ${esc(auDate(day))}</div>
+        </div>
+        <span class="pill ${entry ? 'done' : 'late'}">${esc(availabilityText(entry))}</span>
+      </div>
+      <div class="pad stack">
+        ${existing.length && !shift && !forceForm ? `<div class="stack">
+          ${existing.map((s) => `<div class="list-item shiftrow">
+            <div class="spread wrap">
+              <span class="grow"><strong>${esc(timeRange(s.start_time, s.end_time))}</strong>
+                ${s.duty ? `<span class="small muted"> · ${esc(s.duty)}</span>` : ''}
+                ${s.confirmed ? '<span class="pill done">Confirmed</span>'
+                  : '<span class="pill idle">Not confirmed</span>'}
+                ${s.flags.map((fl) => `<span class="pill late" title="${esc(FLAG_TEXT[fl])}"
+                  >⚠ ${esc(fl)}</span>`).join('')}
+                ${s.note ? `<span class="tiny muted" style="display:block">${esc(s.note)}</span>` : ''}
+              </span>
+              <span class="row" style="gap:6px">
+                <button class="ghost" data-editshift="${s.id}">Edit</button>
+                <button class="ghost danger" data-delshift="${s.id}">Delete</button>
+              </span>
+            </div>
+          </div>`).join('')}
+          <button class="primary wide" data-new>Add another shift</button>
+          <button class="wide" data-close>Close</button>
+        </div>` : `
+          <label class="field"><span>Start</span>
+            <input type="time" id="sfrom" value="${esc(shift?.start_time ?? suggested.from)}"></label>
+          <label class="field"><span>Finish</span>
+            <input type="time" id="sto" value="${esc(shift?.end_time ?? suggested.to)}"></label>
+          <label class="field"><span>Duties or role (optional)</span>
+            <input id="sduty" maxlength="80" value="${esc(shift?.duty ?? '')}"
+              placeholder="Basecamps and bell tents"></label>
+          <label class="field"><span>Notes (optional)</span>
+            <input id="snote" maxlength="200" value="${esc(shift?.note ?? '')}"
+              placeholder="Finishing early — dentist"></label>
+          <label class="check-row ${shift?.confirmed ? 'on' : ''}" data-conf>
+            <input type="checkbox" ${shift?.confirmed ? 'checked' : ''}>
+            <span class="grow">Shift confirmed with them
+              <span class="tiny muted" style="display:block">Unconfirmed shifts still show on
+                the roster, marked as such.</span></span>
+          </label>
+          <p class="err" id="err"></p>
+          <button class="primary wide" id="save">${shift ? 'Save shift' : 'Add shift'}</button>
+          ${shift ? `<button class="wide danger" data-delshift="${shift.id}">Delete shift</button>` : ''}
+          <button class="wide" data-close>Cancel</button>`}
+      </div>`);
+
+    sheet.querySelectorAll('[data-close]').forEach((b) => { b.onclick = closeSheet; });
+    sheet.querySelector('[data-new]')?.addEventListener('click', () => draw(null, true));
+    sheet.querySelectorAll('[data-editshift]').forEach((b) => {
+      b.onclick = () => draw(existing.find((s) => s.id === Number(b.dataset.editshift)));
+    });
+
+    sheet.querySelectorAll('[data-delshift]').forEach((b) => {
+      b.onclick = async () => {
+        const go = await ask({
+          title: 'Delete this shift?',
+          body: 'It comes off the roster. Nothing else is affected.',
+          confirmText: 'Delete',
+          danger: true,
+        });
+        if (!go) return;
+        try {
+          await api('/roster/delete', { method: 'POST', body: { id: Number(b.dataset.delshift) } });
+          closeSheet();
+          toast('Shift deleted');
+          renderRoster();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      };
+    });
+
+    const conf = sheet.querySelector('[data-conf] input');
+    if (conf) conf.onchange = () => conf.closest('.check-row').classList.toggle('on', conf.checked);
+
+    sheet.querySelector('#save')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      const payload = {
+        id: shift?.id,
+        userId,
+        day,
+        start: sheet.querySelector('#sfrom').value,
+        end: sheet.querySelector('#sto').value,
+        duty: sheet.querySelector('#sduty').value,
+        note: sheet.querySelector('#snote').value,
+        confirmed: conf.checked,
+      };
+
+      try {
+        await api('/roster', { method: 'POST', body: payload });
+      } catch (e) {
+        // Availability clashes come back as a 409 with the reasons listed, so
+        // the office is told exactly what is wrong before choosing to go ahead.
+        if (e.status === 409 && e.data.conflicts) {
+          const anyway = await ask({
+            title: 'That clashes with their availability',
+            body: e.data.conflicts.map((c) => esc(c.message)).join('<br>')
+              + '<br><br>You can roster it anyway — it stays flagged on the roster so '
+              + 'nobody forgets.',
+            confirmText: 'Roster anyway',
+            cancelText: 'Change the times',
+            danger: true,
+          });
+          if (!anyway) { btn.disabled = false; return; }
+          try {
+            await api('/roster', { method: 'POST', body: { ...payload, force: true } });
+          } catch (err) {
+            sheet.querySelector('#err').textContent = err.message;
+            btn.disabled = false;
+            return;
+          }
+        } else {
+          sheet.querySelector('#err').textContent = e.message;
+          btn.disabled = false;
+          return;
+        }
+      }
+
+      closeSheet();
+      toast(shift ? 'Shift updated' : 'Shift added');
+      renderRoster();
+    });
+  };
+
+  draw(null);
+}
 
 /* ------------------------------------------ view: checklist editor (admin) */
 
-async function renderChecklistAdmin() {
-  const data = await api('/admin/checklist');
-  chrome({ title: 'Checklists', section: 'buildings', wide: true });
-  const areasFor = (id) => data.areas.filter((a) => a.building_id === id);
+/** The Full Clean / Check tab strip, shared by both admin checklist screens. */
+function typeTabs(current) {
+  return `<div class="seg typeseg">${CLEAN_TYPES().map((t) => `
+    <button type="button" class="seg-btn" data-settype="${esc(t.id)}"
+      aria-pressed="${t.id === current}">${esc(t.label)}</button>`).join('')}</div>`;
+}
 
-  // Grouped by building.grp, in the order groups first appear - matches the
-  // schedule grid's ordering so the two screens read the same way. With 20+
-  // buildings a flat list was a wall of text; folding groups shut makes it
-  // scannable.
+function wireTypeTabs(root, rerender) {
+  root.querySelectorAll('[data-settype]').forEach((b) => {
+    b.onclick = () => {
+      if (b.dataset.settype === state.editType) return;
+      state.editType = b.dataset.settype;
+      rerender();
+    };
+  });
+}
+
+async function renderChecklistAdmin() {
+  const live = screen('#/buildings');
+  const type = state.editType;
+  const data = await api(`/admin/checklist?type=${type}`);
+  if (!live()) return;
+  chrome({ title: 'Checklists', section: 'buildings', wide: true });
+  const areasFor = (id) => data.areas.filter((a) => a.building_id === id && a.active);
+
   const groups = groupBuildings(data.buildings);
 
   const buildingRow = (b, groupKey, folded) => {
-    const areas = areasFor(b.id).filter((a) => a.active);
+    const areas = areasFor(b.id);
     const tasks = areas.reduce((n, a) => n + a.tasks, 0);
     const search = [b.name, b.grp, ...areas.flatMap((a) => [a.name, ...(a.items ?? [])])]
       .join(' ').toLowerCase();
-    return `<div class="list-item" data-search="${esc(search)}" data-group="${esc(groupKey)}"
-        ${folded ? 'hidden' : ''} style="${b.active ? '' : 'opacity:.5'}">
+    return `<button class="list-item brow" data-open="${b.id}" data-search="${esc(search)}"
+        data-group="${esc(groupKey)}" ${folded ? 'hidden' : ''}
+        style="${b.active ? '' : 'opacity:.5'}">
       <div class="spread wrap">
         <strong class="grow">${esc(b.name)}
           ${b.active ? '' : '<span class="pill idle">hidden</span>'}</strong>
-        <button class="ghost" data-editb="${b.id}">Edit</button>
+        <span class="muted" aria-hidden="true">›</span>
       </div>
-      <div class="small muted" style="margin:4px 0 8px">
-        ${areas.length} area${areas.length === 1 ? '' : 's'} · ${tasks} tasks</div>
-      <div class="tabs" style="margin:0">
-        ${areas.map((a) => `<button class="ghost" data-area="${a.id}">
-          ${esc(a.name)} <span class="muted">${a.tasks}</span></button>`).join('')}
-        <button class="ghost" data-addarea="${b.id}">+ Area</button>
+      <div class="small muted" style="margin-top:4px">
+        ${areas.length} area${areas.length === 1 ? '' : 's'} · ${tasks} item${tasks === 1 ? '' : 's'}
+        on the ${esc(typeLabel(type))}
+        <span class="tiny">· ${data.otherCounts[b.id] ?? 0} on the
+          ${esc(typeLabel(otherType(type)))}</span>
+        ${tasks === 0 ? '<span class="pill late">empty</span>' : ''}
       </div>
-    </div>`;
+    </button>`;
   };
 
   /** Re-applies search-match and fold state together, so folding a group
@@ -1716,11 +2645,6 @@ async function renderChecklistAdmin() {
       const folded = !q && state.collapsedGroups.has(el.dataset.group);
       el.hidden = !matches || folded;
     });
-    // Hide any group heading whose buildings are now all filtered out. Stops
-    // at the first element that isn't a building row - the last group's
-    // heading sits right before the "Add a building" button, which must
-    // never count as a visible row or that group's heading never hides.
-    // Folding (rather than filtering) never hides the heading itself.
     app.querySelectorAll('.grouphead').forEach((head) => {
       if (!q) { head.hidden = false; return; }
       let sib = head.nextElementSibling;
@@ -1732,6 +2656,8 @@ async function renderChecklistAdmin() {
       head.hidden = !anyVisible;
     });
   }
+
+  const empties = data.buildings.filter((b) => b.active && !areasFor(b.id).length);
 
   app.innerHTML = `
     <div class="card">
@@ -1746,11 +2672,21 @@ async function renderChecklistAdmin() {
     </div>
 
     <div class="card">
+      <div class="pad" style="padding-bottom:0">${typeTabs(type)}</div>
       <div class="pad" style="padding-bottom:0">
         <input id="search" placeholder="Search buildings, areas or items…" autocomplete="off">
       </div>
       <h2 style="border:none;padding-bottom:0">
-        Buildings — ${data.buildings.filter((b) => b.active).length} active</h2>
+        ${esc(typeLabel(type))} — ${data.buildings.filter((b) => b.active).length} buildings</h2>
+      ${empties.length ? `<div class="pad" style="padding-top:0">
+        <div class="banner warn" style="border-radius:var(--r-sm)">
+          <strong>${empties.length} building${empties.length === 1 ? ' has' : 's have'} no
+          ${esc(typeLabel(type))} checklist:</strong>
+          ${empties.slice(0, 6).map((b) => esc(b.name)).join(', ')}${
+            empties.length > 6 ? `, and ${empties.length - 6} more` : ''}.
+          Open one and use <strong>Copy from the ${esc(typeLabel(otherType(type)))}</strong>
+          to start it off.
+        </div></div>` : ''}
       ${groups.map((g) => {
         const folded = g.label && state.collapsedGroups.has(g.key);
         const head = g.label ? `<button class="grouphead spread" data-grouptoggle="${esc(g.key)}"
@@ -1761,29 +2697,35 @@ async function renderChecklistAdmin() {
         </button>` : '';
         return head + g.buildings.map((b) => buildingRow(b, g.key, folded)).join('');
       }).join('')}
-      <div class="pad"><button class="primary wide" id="addb">Add a building</button></div>
+      <div class="pad row wrap" style="gap:8px">
+        <button class="primary grow" id="addb">Add a building</button>
+        <button class="ghost" id="orderb">Reorder buildings</button>
+      </div>
     </div>
 
     <div class="card danger">
       <h2>Restore from the checklist file</h2>
       <div class="pad">
         <p class="small muted" style="margin:0 0 10px">Throws away edits made here and
-          rebuilds every checklist from <code>data/checklist.json</code>. Cleaning
-          history is not affected.</p>
+          rebuilds <strong>both</strong> checklists from <code>data/checklist.json</code>.
+          Cleaning history is not affected.</p>
         <button class="wide danger" id="restore">Restore from file</button>
       </div>
     </div>`;
 
-  app.querySelectorAll('[data-area]').forEach((b) => {
-    b.onclick = () => { location.hash = `#/buildings/${b.dataset.area}`; };
+  wireTypeTabs(app, renderChecklistAdmin);
+
+  app.querySelectorAll('[data-open]').forEach((b) => {
+    b.onclick = () => { location.hash = `#/buildings/${b.dataset.open}`; };
   });
-  app.querySelectorAll('[data-editb]').forEach((b) => {
-    b.onclick = () => editBuilding(data.buildings.find((x) => x.id === Number(b.dataset.editb)));
+  $('#addb').onclick = () => editBuilding(null, renderChecklistAdmin);
+  $('#orderb').onclick = () => openReorder({
+    title: 'Reorder buildings',
+    hint: 'This is the order buildings appear on the schedule, the overview and every list.',
+    items: data.buildings.map((b) => ({ id: b.id, label: b.name, sub: b.grp })),
+    kind: 'buildings',
+    onDone: renderChecklistAdmin,
   });
-  app.querySelectorAll('[data-addarea]').forEach((b) => {
-    b.onclick = () => editArea({ building_id: Number(b.dataset.addarea) });
-  });
-  $('#addb').onclick = () => editBuilding(null);
 
   $('#search').oninput = (ev) => applyChecklistFilter(ev.currentTarget.value.trim().toLowerCase());
 
@@ -1796,9 +2738,9 @@ async function renderChecklistAdmin() {
   $('#restore').onclick = async () => {
     const typed = await askText({
       title: 'Restore from the checklist file?',
-      body: 'Every building, area and item goes back to what <code>data/checklist.json</code> '
-        + 'says. Anything you added here that is not in the file will be hidden. '
-        + 'Cleaning records are kept.',
+      body: 'Every building, area and item on <strong>both</strong> checklists goes back to '
+        + 'what <code>data/checklist.json</code> says. Anything you added here that is not in '
+        + 'the file will be hidden. Cleaning records are kept.',
       label: 'Type "restore" to confirm',
       confirmText: 'Restore',
     });
@@ -1813,7 +2755,317 @@ async function renderChecklistAdmin() {
   };
 }
 
-function editBuilding(b) {
+/**
+ * Everything about one building's checklist on one page: its areas in order,
+ * every item inside them, and the controls to add, edit, reorder and remove.
+ * The old three-level drill-down meant four taps to fix a typo.
+ */
+async function renderBuildingEditor(buildingId) {
+  const live = screen('#/buildings/');
+  const type = state.editType;
+  const data = await api(`/admin/checklist?type=${type}`);
+  if (!live()) return;
+  const building = data.buildings.find((b) => b.id === buildingId);
+  if (!building) {
+    chrome({ title: 'Not found', back: true, section: 'buildings' });
+    app.innerHTML = '<div class="card pad"><p class="err">That building no longer exists.</p></div>';
+    return;
+  }
+
+  chrome({ title: building.name, back: true, section: 'buildings', wide: true });
+
+  const areas = data.areas.filter((a) => a.building_id === buildingId);
+  // Only the unfolded areas need their items fetched. Pulling all of them
+  // would be eight round trips to draw a page showing one open card.
+  const open = areas.filter((a) => state.openAreas.has(a.id));
+  const details = await Promise.all(open.map((a) => api(`/admin/area?id=${a.id}`)));
+  if (!live()) return;
+  const byArea = new Map(details.map((d) => [d.area.id, d]));
+  const totalItems = areas.filter((a) => a.active).reduce((n, a) => n + a.tasks, 0);
+
+  const PHOTO_LABEL = {
+    none: '', optional: '<span class="pill idle">📷 photo</span>',
+    required: '<span class="pill late">📷 required</span>',
+  };
+
+  const areaCardHtml = (area) => {
+    const detail = byArea.get(area.id);
+    const unfolded = Boolean(detail);
+    return `<div class="card areacard">
+      <button class="card-toggle spread" data-areatoggle="${area.id}" aria-expanded="${unfolded}">
+        <span class="grow">
+          <strong>${esc(area.name)}</strong>
+          ${area.clean_type === 'both' ? '<span class="pill open">on both checklists</span>' : ''}
+          ${area.active ? '' : '<span class="pill idle">hidden</span>'}
+          <span class="muted" style="font-weight:500"> · ${area.tasks} item${
+            area.tasks === 1 ? '' : 's'}</span>
+        </span>
+        <span class="chev">${unfolded ? '▾' : '▸'}</span>
+      </button>
+      ${unfolded ? `
+        ${detail.tasks.map((t, i) => `<div class="list-item itemrow"
+            style="${t.active ? '' : 'opacity:.5'}">
+          <div class="spread wrap">
+            <span class="grow">
+              <strong>${esc(t.item)}</strong>
+              ${PHOTO_LABEL[t.photo_mode] ?? ''}
+              ${t.active ? '' : '<span class="pill idle">hidden</span>'}
+              <span class="small muted" style="display:block">${esc(t.description)}</span>
+              ${t.history ? `<span class="tiny muted">${t.history} record${
+                t.history === 1 ? '' : 's'}</span>` : ''}
+            </span>
+            <span class="row" style="gap:4px">
+              <button class="ghost tiny-btn" data-move="${t.id}" data-dir="-1"
+                ${i === 0 ? 'disabled' : ''} aria-label="Move up" title="Move up">▲</button>
+              <button class="ghost tiny-btn" data-move="${t.id}" data-dir="1"
+                ${i === detail.tasks.length - 1 ? 'disabled' : ''}
+                aria-label="Move down" title="Move down">▼</button>
+              <button class="ghost" data-edititem="${t.id}" data-area="${area.id}">Edit</button>
+            </span>
+          </div>
+        </div>`).join('') || '<div class="empty">No items yet.</div>'}
+        <div class="pad row wrap" style="gap:8px">
+          <button class="primary grow" data-additem="${area.id}">Add an item</button>
+          <button class="ghost" data-editarea="${area.id}">Rename or hide</button>
+          <button class="ghost" data-orderitems="${area.id}">Reorder</button>
+        </div>` : ''}
+    </div>`;
+  };
+
+  app.innerHTML = `
+    <div class="card">
+      <div class="pad">${typeTabs(type)}</div>
+      <div class="pad spread wrap" style="padding-top:0">
+        <div>
+          <strong>${esc(building.name)}</strong>
+          <div class="small muted">${building.grp ? `${esc(building.grp)} · ` : ''}${
+            areas.filter((a) => a.active).length} area${areas.length === 1 ? '' : 's'} ·
+            ${totalItems} item${totalItems === 1 ? '' : 's'} on the ${esc(typeLabel(type))}</div>
+        </div>
+        <button class="ghost" id="editb">Edit building</button>
+      </div>
+    </div>
+
+    ${areas.length
+      ? areas.map(areaCardHtml).join('')
+      : `<div class="card"><div class="empty">
+          <b>No ${esc(typeLabel(type))} checklist yet</b>
+          Add an area, or copy the ${esc(typeLabel(otherType(type)))} across and trim it down.
+        </div></div>`}
+
+    <div class="card">
+      <div class="pad row wrap" style="gap:8px">
+        <button class="primary grow" id="addarea">Add an area</button>
+        ${areas.length > 1 ? '<button class="ghost" id="orderareas">Reorder areas</button>' : ''}
+        <button class="ghost" id="copyover">Copy from the ${esc(typeLabel(otherType(type)))}</button>
+      </div>
+      <p class="tiny muted pad" style="padding-top:0">
+        Hiding an item or area takes it off future checklists and keeps every record of it
+        having been cleaned. Deleting throws those records away.</p>
+    </div>
+
+    <div class="card danger">
+      <h2>Delete this building</h2>
+      <div class="pad">
+        <p class="small muted" style="margin:0 0 10px">Removes <strong>${esc(building.name)}</strong>,
+          both of its checklists, every tick, every photo, its schedule and its reports.
+          <strong>There is no undo.</strong> To take it off the schedule but keep its history,
+          use <strong>Edit building</strong> and turn it off instead.</p>
+        <button class="wide danger" id="delb">Delete building permanently</button>
+      </div>
+    </div>`;
+
+  wireTypeTabs(app, () => renderBuildingEditor(buildingId));
+  const again = () => renderBuildingEditor(buildingId);
+
+  app.querySelectorAll('[data-areatoggle]').forEach((b) => {
+    b.onclick = () => {
+      const id = Number(b.dataset.areatoggle);
+      if (state.openAreas.has(id)) state.openAreas.delete(id); else state.openAreas.add(id);
+      again();
+    };
+  });
+
+  $('#editb').onclick = () => editBuilding(building, again);
+  $('#addarea').onclick = () => editArea({ building_id: buildingId, clean_type: type }, again);
+
+  $('#orderareas')?.addEventListener('click', () => openReorder({
+    title: 'Reorder areas',
+    hint: `The order they appear on the ${typeLabel(type)} checklist.`,
+    items: areas.map((a) => ({
+      id: a.id, label: a.name, sub: a.clean_type === 'both' ? 'on both checklists' : '',
+    })),
+    kind: 'areas',
+    parentId: buildingId,
+    cleanType: type,
+    onDone: again,
+  }));
+
+  app.querySelectorAll('[data-editarea]').forEach((b) => {
+    b.onclick = () => editArea(
+      areas.find((a) => a.id === Number(b.dataset.editarea)), again,
+    );
+  });
+
+  app.querySelectorAll('[data-additem]').forEach((b) => {
+    b.onclick = () => editTask({ area_id: Number(b.dataset.additem) }, again);
+  });
+
+  app.querySelectorAll('[data-edititem]').forEach((b) => {
+    b.onclick = () => {
+      const areaId = Number(b.dataset.area);
+      const task = byArea.get(areaId).tasks.find((t) => t.id === Number(b.dataset.edititem));
+      editTask({ ...task, area_id: areaId }, again);
+    };
+  });
+
+  app.querySelectorAll('[data-orderitems]').forEach((b) => {
+    b.onclick = () => {
+      const areaId = Number(b.dataset.orderitems);
+      openReorder({
+        title: 'Reorder items',
+        hint: 'The order cleaners work through them.',
+        items: byArea.get(areaId).tasks.map((t) => ({
+          id: t.id, label: t.item, sub: t.active ? '' : 'hidden',
+        })),
+        kind: 'tasks',
+        parentId: areaId,
+        onDone: again,
+      });
+    };
+  });
+
+  // One-tap nudge up or down, which is what people actually reach for when a
+  // single item is in the wrong place.
+  app.querySelectorAll('[data-move]').forEach((b) => {
+    b.onclick = async () => {
+      const taskId = Number(b.dataset.move);
+      const dir = Number(b.dataset.dir);
+      const areaId = Number(b.closest('.areacard').querySelector('[data-areatoggle]')
+        .dataset.areatoggle);
+      const ids = byArea.get(areaId).tasks.map((t) => t.id);
+      const at = ids.indexOf(taskId);
+      if (at < 0 || at + dir < 0 || at + dir >= ids.length) return;
+      [ids[at], ids[at + dir]] = [ids[at + dir], ids[at]];
+      try {
+        await api('/admin/reorder', { method: 'POST', body: { kind: 'tasks', parentId: areaId, ids } });
+        again();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+
+  $('#copyover').onclick = async () => {
+    const source = otherType(type);
+    const go = await ask({
+      title: `Copy the ${typeLabel(source)} across?`,
+      body: `Every area and item on the <strong>${esc(typeLabel(source))}</strong> checklist for
+        ${esc(building.name)} is copied onto the <strong>${esc(typeLabel(type))}</strong>, ready
+        to trim down. Areas already on this checklist are left alone — nothing is doubled up.`,
+      confirmText: 'Copy them across',
+    });
+    if (!go) return;
+    try {
+      const res = await api('/admin/area/copy', {
+        method: 'POST', body: { buildingId, from: source, to: type },
+      });
+      toast(`${res.areas} area${res.areas === 1 ? '' : 's'}, ${res.tasks} items copied`);
+      again();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+
+  $('#delb').onclick = async () => {
+    const typed = await askText({
+      title: `Delete "${building.name}"?`,
+      body: `This deletes the building, both checklists, every item, every photo and every day
+             any of it was ever ticked. <strong>This cannot be undone.</strong>`,
+      label: 'Type the building name to confirm',
+      confirmText: 'Delete permanently',
+      danger: true,
+    });
+    if (typed === null) return;
+    try {
+      await api('/admin/building/delete', {
+        method: 'POST', body: { id: buildingId, confirm: typed },
+      });
+      toast(`${building.name} deleted`);
+      location.hash = '#/buildings';
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+}
+
+/**
+ * Generic reorder sheet: move rows with the buttons, save once. The whole
+ * ordered list goes to the server, which refuses it if anything was added or
+ * removed in the meantime rather than writing a stale order over the top.
+ */
+function openReorder({ title, hint, items, kind, parentId, cleanType, onDone }) {
+  const order = [...items];
+
+  const sheet = openSheet(`
+    <div class="sheet-head"><strong>${esc(title)}</strong></div>
+    <div class="pad stack">
+      <p class="dialog-body">${esc(hint)}</p>
+      <div class="reorder" id="rows"></div>
+      <p class="err" id="err"></p>
+      <button class="primary wide" id="save">Save this order</button>
+      <button class="wide" id="cancel">Cancel</button>
+    </div>`);
+
+  const rows = sheet.querySelector('#rows');
+  const draw = () => {
+    rows.innerHTML = order.map((item, i) => `<div class="reorder-row">
+      <span class="grow">
+        <strong>${esc(item.label)}</strong>
+        ${item.sub ? `<span class="tiny muted" style="display:block">${esc(item.sub)}</span>` : ''}
+      </span>
+      <button class="ghost tiny-btn" data-up="${i}" ${i === 0 ? 'disabled' : ''}
+        aria-label="Move up">▲</button>
+      <button class="ghost tiny-btn" data-down="${i}" ${i === order.length - 1 ? 'disabled' : ''}
+        aria-label="Move down">▼</button>
+    </div>`).join('');
+
+    rows.querySelectorAll('[data-up]').forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.dataset.up);
+        [order[i - 1], order[i]] = [order[i], order[i - 1]];
+        draw();
+      };
+    });
+    rows.querySelectorAll('[data-down]').forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.dataset.down);
+        [order[i + 1], order[i]] = [order[i], order[i + 1]];
+        draw();
+      };
+    });
+  };
+  draw();
+
+  sheet.querySelector('#cancel').onclick = closeSheet;
+  sheet.querySelector('#save').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      await api('/admin/reorder', {
+        method: 'POST',
+        body: { kind, parentId, cleanType, ids: order.map((i) => i.id) },
+      });
+      closeSheet();
+      toast('Order saved');
+      onDone();
+    } catch (e) {
+      sheet.querySelector('#err').textContent = e.message;
+      ev.currentTarget.disabled = false;
+    }
+  };
+}
+
+function editBuilding(b, onDone) {
   const sheet = openSheet(`
     <div class="sheet-head"><strong>${b ? 'Edit building' : 'Add a building'}</strong></div>
     <div class="pad stack">
@@ -1849,7 +3101,7 @@ function editBuilding(b) {
       });
       closeSheet();
       toast(b ? 'Building saved' : 'Building added');
-      renderChecklistAdmin();
+      onDone();
     } catch (e) {
       sheet.querySelector('#err').textContent = e.message;
       ev.currentTarget.disabled = false;
@@ -1858,23 +3110,46 @@ function editBuilding(b) {
 }
 
 function editArea(a, onDone) {
+  const current = a?.clean_type ?? state.editType;
   const sheet = openSheet(`
     <div class="sheet-head"><strong>${a?.id ? 'Edit area' : 'Add an area'}</strong></div>
     <div class="pad stack">
       <label class="field"><span>Area name</span>
         <input id="an" value="${esc(a?.name ?? '')}" placeholder="Bathrooms"></label>
+      <div class="field"><span>Which checklist is it on?</span>
+        <div class="seg" id="areaType">
+          ${[...CLEAN_TYPES(), { id: 'both', label: 'Both' }].map((t) => `
+            <button type="button" class="seg-btn" data-atype="${esc(t.id)}"
+              aria-pressed="${t.id === current}">${esc(t.label)}</button>`).join('')}
+        </div>
+        <p class="tiny muted" style="margin:6px 0 0">"Both" is for anything done on every
+          visit — edit it once and it stays the same on each checklist.</p>
+      </div>
       ${a?.id ? `<label class="check-row ${a.active ? 'on' : ''}" data-act>
           <input type="checkbox" ${a.active ? 'checked' : ''}>
-          <span class="grow">Show on the checklist</span>
+          <span class="grow">Show on the checklist
+            <span class="tiny muted" style="display:block">Hiding keeps every record of it
+              having been cleaned.</span></span>
         </label>` : ''}
       <p class="err" id="err"></p>
       <button class="primary wide" id="save">${a?.id ? 'Save' : 'Add area'}</button>
+      ${a?.id ? '<button class="wide danger" id="del">Delete this area</button>' : ''}
       <button class="wide" id="cancel">Cancel</button>
     </div>`);
+
+  let cleanType = current;
+  sheet.querySelectorAll('[data-atype]').forEach((b) => {
+    b.onclick = () => {
+      cleanType = b.dataset.atype;
+      sheet.querySelectorAll('[data-atype]').forEach((x) =>
+        x.setAttribute('aria-pressed', String(x === b)));
+    };
+  });
 
   const act = sheet.querySelector('[data-act] input');
   if (act) act.onchange = () => act.closest('.check-row').classList.toggle('on', act.checked);
   sheet.querySelector('#cancel').onclick = closeSheet;
+
   sheet.querySelector('#save').onclick = async (ev) => {
     ev.currentTarget.disabled = true;
     try {
@@ -1884,127 +3159,7 @@ function editArea(a, onDone) {
           id: a?.id,
           buildingId: a?.building_id,
           name: sheet.querySelector('#an').value,
-          active: act ? act.checked : true,
-        },
-      });
-      closeSheet();
-      toast('Saved');
-      if (onDone) onDone(); else renderChecklistAdmin();
-    } catch (e) {
-      sheet.querySelector('#err').textContent = e.message;
-      ev.currentTarget.disabled = false;
-    }
-  };
-}
-
-async function renderAreaEditor(areaId) {
-  const data = await api(`/admin/area?id=${areaId}`);
-  chrome({ title: data.area.name, back: true, section: 'buildings' });
-
-  app.innerHTML = `
-    <div class="card">
-      <div class="pad spread wrap">
-        <div>
-          <strong>${esc(data.area.name)}</strong>
-          <div class="small muted">${esc(data.area.building)}</div>
-        </div>
-        <button class="ghost" id="editarea">Rename or hide</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Items — ${data.tasks.filter((t) => t.active).length} on the checklist</h2>
-      ${data.tasks.map((t) => `<div class="list-item" style="${t.active ? '' : 'opacity:.5'}">
-        <div class="spread wrap">
-          <span class="grow">
-            <strong>${esc(t.item)}</strong>
-            ${t.active ? '' : '<span class="pill idle">hidden</span>'}
-            <span class="small muted" style="display:block">${esc(t.description)}</span>
-          </span>
-          <button class="ghost" data-edit="${t.id}">Edit</button>
-        </div>
-      </div>`).join('') || '<div class="empty">No items yet.</div>'}
-      <div class="pad"><button class="primary wide" id="addtask">Add an item</button></div>
-    </div>
-
-    <p class="tiny muted center">Hiding an item takes it off future checklists and keeps
-      every record of it having been cleaned.</p>
-
-    <div class="card danger">
-      <h2>Delete this area</h2>
-      <div class="pad">
-        <p class="small muted" style="margin:0 0 10px">Removes <strong>${esc(data.area.name)}</strong>
-          and every item in it completely — unlike hiding, this also deletes
-          <strong>every record of it ever being cleaned</strong>. Only use this for an area
-          that should never have existed. To take it off checklists but keep the history,
-          use <strong>Rename or hide</strong> above instead.</p>
-        <button class="wide danger" id="deletearea">Delete area permanently</button>
-      </div>
-    </div>`;
-
-  $('#editarea').onclick = () => editArea(
-    { ...data.area, building_id: data.area.building_id },
-    () => renderAreaEditor(areaId),
-  );
-  $('#addtask').onclick = () => editTask({ area_id: areaId }, () => renderAreaEditor(areaId));
-  app.querySelectorAll('[data-edit]').forEach((b) => {
-    b.onclick = () => editTask(
-      data.tasks.find((t) => t.id === Number(b.dataset.edit)),
-      () => renderAreaEditor(areaId),
-    );
-  });
-
-  $('#deletearea').onclick = async () => {
-    const typed = await askText({
-      title: `Delete "${data.area.name}"?`,
-      body: `This deletes the area, every item in it, and every day it was ever ticked.
-             <strong>This cannot be undone.</strong>`,
-      label: `Type the area name to confirm`,
-      confirmText: 'Delete permanently',
-      danger: true,
-    });
-    if (typed === null) return;
-    try {
-      await api('/admin/area/delete', { method: 'POST', body: { id: areaId, confirm: typed } });
-      toast(`${data.area.name} deleted`);
-      location.hash = '#/buildings';
-    } catch (e) {
-      toast(e.message, true);
-    }
-  };
-}
-
-function editTask(t, onDone) {
-  const sheet = openSheet(`
-    <div class="sheet-head"><strong>${t?.id ? 'Edit item' : 'Add an item'}</strong></div>
-    <div class="pad stack">
-      <label class="field"><span>Item</span>
-        <input id="ti" value="${esc(t?.item ?? '')}" placeholder="Toilet"></label>
-      <label class="field"><span>What to do</span>
-        <input id="td" value="${esc(t?.description ?? '')}"
-          placeholder="Clean including behind the cistern"></label>
-      ${t?.id ? `<label class="check-row ${t.active ? 'on' : ''}" data-act>
-          <input type="checkbox" ${t.active ? 'checked' : ''}>
-          <span class="grow">Show on the checklist</span>
-        </label>` : ''}
-      <p class="err" id="err"></p>
-      <button class="primary wide" id="save">${t?.id ? 'Save' : 'Add item'}</button>
-      <button class="wide" id="cancel">Cancel</button>
-    </div>`);
-
-  const act = sheet.querySelector('[data-act] input');
-  if (act) act.onchange = () => act.closest('.check-row').classList.toggle('on', act.checked);
-  sheet.querySelector('#cancel').onclick = closeSheet;
-  sheet.querySelector('#save').onclick = async (ev) => {
-    ev.currentTarget.disabled = true;
-    try {
-      await api('/admin/task', {
-        method: 'POST',
-        body: {
-          id: t?.id,
-          areaId: t?.area_id,
-          item: sheet.querySelector('#ti').value,
-          description: sheet.querySelector('#td').value,
+          cleanType,
           active: act ? act.checked : true,
         },
       });
@@ -2016,17 +3171,152 @@ function editTask(t, onDone) {
       ev.currentTarget.disabled = false;
     }
   };
+
+  sheet.querySelector('#del')?.addEventListener('click', async () => {
+    const typed = await askText({
+      title: `Delete "${a.name}"?`,
+      body: `This deletes the area, every item in it, and every day any of them was ever
+             ticked. <strong>This cannot be undone.</strong> To take it off checklists but
+             keep the history, turn off <strong>Show on the checklist</strong> instead.`,
+      label: 'Type the area name to confirm',
+      confirmText: 'Delete permanently',
+      danger: true,
+    });
+    if (typed === null) return;
+    try {
+      await api('/admin/area/delete', { method: 'POST', body: { id: a.id, confirm: typed } });
+      state.openAreas.delete(a.id);
+      closeSheet();
+      toast(`${a.name} deleted`);
+      onDone();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+}
+
+function editTask(t, onDone) {
+  const mode = t?.photo_mode ?? 'none';
+  const PHOTO_CHOICES = [
+    ['none', 'No photo', 'Just a tick box'],
+    ['optional', 'Photo allowed', 'They can attach one if it helps'],
+    ['required', 'Photo required', 'Flagged at sign-off if missing'],
+  ];
+
+  const sheet = openSheet(`
+    <div class="sheet-head"><strong>${t?.id ? 'Edit item' : 'Add an item'}</strong></div>
+    <div class="pad stack">
+      <label class="field"><span>Item</span>
+        <input id="ti" value="${esc(t?.item ?? '')}" placeholder="Fire extinguisher"></label>
+      <label class="field"><span>What to do</span>
+        <input id="td" value="${esc(t?.description ?? '')}"
+          placeholder="Check it is present and in date"></label>
+
+      <div class="field"><span>Photo</span>
+        <div class="check-list">
+          ${PHOTO_CHOICES.map(([id, label, hint]) => `
+            <label class="check-row ${id === mode ? 'on' : ''}" data-photo="${id}">
+              <input type="radio" name="photomode" ${id === mode ? 'checked' : ''}>
+              <span class="grow">${esc(label)}
+                <span class="tiny muted" style="display:block">${esc(hint)}</span></span>
+            </label>`).join('')}
+        </div>
+      </div>
+
+      ${t?.id ? `<label class="check-row ${t.active ? 'on' : ''}" data-act>
+          <input type="checkbox" ${t.active ? 'checked' : ''}>
+          <span class="grow">Show on the checklist
+            <span class="tiny muted" style="display:block">Hiding keeps every record of it
+              having been cleaned — this is the usual way to retire an item.</span></span>
+        </label>` : ''}
+      <p class="err" id="err"></p>
+      <button class="primary wide" id="save">${t?.id ? 'Save' : 'Add item'}</button>
+      ${t?.id ? '<button class="wide danger" id="del">Delete this item</button>' : ''}
+      <button class="wide" id="cancel">Cancel</button>
+    </div>`);
+
+  let photoMode = mode;
+  sheet.querySelectorAll('[data-photo]').forEach((row) => {
+    row.querySelector('input').onchange = () => {
+      photoMode = row.dataset.photo;
+      sheet.querySelectorAll('[data-photo]').forEach((x) => x.classList.toggle('on', x === row));
+    };
+  });
+
+  const act = sheet.querySelector('[data-act] input');
+  if (act) act.onchange = () => act.closest('.check-row').classList.toggle('on', act.checked);
+  sheet.querySelector('#cancel').onclick = closeSheet;
+
+  sheet.querySelector('#save').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      await api('/admin/task', {
+        method: 'POST',
+        body: {
+          id: t?.id,
+          areaId: t?.area_id,
+          item: sheet.querySelector('#ti').value,
+          description: sheet.querySelector('#td').value,
+          photoMode,
+          active: act ? act.checked : true,
+        },
+      });
+      closeSheet();
+      toast('Saved');
+      onDone();
+    } catch (e) {
+      sheet.querySelector('#err').textContent = e.message;
+      ev.currentTarget.disabled = false;
+    }
+  };
+
+  sheet.querySelector('#del')?.addEventListener('click', async () => {
+    const send = (acknowledgeHistory) =>
+      api('/admin/task/delete', { method: 'POST', body: { id: t.id, acknowledgeHistory } });
+
+    try {
+      await send();
+    } catch (e) {
+      // Anything with history behind it needs a second, informed yes - the
+      // number of records is quoted back so the choice is made knowing it.
+      if (e.status !== 409 || !e.data.history) {
+        toast(e.message, true);
+        return;
+      }
+      const go = await ask({
+        title: `Delete "${t.item}"?`,
+        body: `It has <strong>${e.data.history}</strong> record${e.data.history === 1 ? '' : 's'}
+          against it — ticks and photos from days it was cleaned. Deleting throws those away too.
+          <br><br><strong>Hiding it instead keeps all of them</strong> and takes it off future
+          checklists, which is almost always what you want.`,
+        confirmText: 'Delete it and its records',
+        cancelText: 'Keep it',
+        danger: true,
+      });
+      if (!go) return;
+      try {
+        await send(e.data.history);
+      } catch (err) {
+        toast(err.message, true);
+        return;
+      }
+    }
+    closeSheet();
+    toast('Item deleted');
+    onDone();
+  });
 }
 
 /* ---------------------------------------------------------- view: admin */
 
-
 async function renderAdmin() {
+  const live = screen('#/admin');
   chrome({ title: 'People', section: 'admin' });
   const [{ users }, notif] = await Promise.all([
     api('/users'),
     api('/admin/notifications'),
   ]);
+  if (!live()) return;
 
   app.innerHTML = `
     <div>
@@ -2037,7 +3327,7 @@ async function renderAdmin() {
           <label class="field"><span>Role</span>
             <select id="r">
               <option value="cleaner">Cleaner — ticks checklists</option>
-              <option value="office">Office — sees the overview, sets the schedule</option>
+              <option value="office">Office — sees the overview, sets the schedule and roster</option>
               <option value="admin">Admin — everything, including people</option>
             </select></label>
           <label class="field"><span>PIN (4-8 digits)</span>
@@ -2057,11 +3347,11 @@ async function renderAdmin() {
             <span class="grow">
               <strong style="display:block">${esc(u.name)}</strong>
               <span class="tiny muted">${esc(u.role)}${u.active ? '' : ' · disabled'}
-                · ${esc(daysSummary(u.availability))}</span>
+                · ${esc(availabilitySummary(u.availability))}</span>
             </span>
           </div>
           <div class="row wrap" style="gap:6px;margin-top:10px">
-            <button class="ghost" data-days>Days</button>
+            <button class="ghost" data-days>Availability</button>
             <button class="ghost" data-pin>New PIN</button>
             <button class="ghost" data-tog>${u.active ? 'Disable' : 'Enable'}</button>
             <button class="ghost danger" data-del
@@ -2070,7 +3360,9 @@ async function renderAdmin() {
           </div>
         </div>`).join('')}
         <p class="tiny muted pad">
-          PINs are stored hashed — they can be replaced, never read back.</p>
+          PINs are stored hashed — they can be replaced, never read back.
+          Availability feeds the roster; see <strong>Planning → Availability</strong>
+          for everyone at once.</p>
       </div>
     </div>
 
@@ -2092,7 +3384,7 @@ async function renderAdmin() {
       <h2>Maintenance alerts</h2>
       <div class="pad stack narrow">
         <p class="small muted" style="margin:0">Push a free phone notification the moment a
-          cleaner reports a maintenance issue or lost property. Uses
+          cleaner reports a maintenance issue or a note. Uses
           <strong>ntfy.sh</strong> — no account, no cost, but the topic name below is the
           <em>only</em> thing keeping your alerts private, so don't share it anywhere public.</p>
         <label class="field"><span>Topic</span>
@@ -2118,10 +3410,9 @@ async function renderAdmin() {
       <h2>Danger zone</h2>
       <div class="pad stack">
         <p class="small muted" style="margin:0">
-          Clears every cleaning record, schedule, sign-off and maintenance report so you
-          can start fresh after testing. Your buildings and checklists are
-          <strong>not</strong> touched — those come from the checklist file. Tables are
-          never deleted.</p>
+          Clears every cleaning record, schedule, roster, sign-off, photo and maintenance
+          report so you can start fresh after testing. Your buildings and checklists are
+          <strong>not</strong> touched. Tables are never deleted.</p>
         <label class="check-row" id="peoplerow">
           <input type="checkbox" id="wipepeople">
           <span class="grow">Also remove everyone except me
@@ -2135,7 +3426,9 @@ async function renderAdmin() {
       </div>
     </div>`;
 
-  $('#add').onclick = async () => {
+  $('#add').onclick = async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
     try {
       await api('/users', {
         method: 'POST',
@@ -2146,6 +3439,7 @@ async function renderAdmin() {
       renderAdmin();
     } catch (e) {
       $('#err').textContent = e.message;
+      btn.disabled = false;
     }
   };
 
@@ -2214,7 +3508,7 @@ async function renderAdmin() {
     const alsoPeople = $('#wipepeople').checked;
     const go = await ask({
       title: 'Clear the database?',
-      body: `This deletes every tick, sign-off, schedule and report${alsoPeople
+      body: `This deletes every tick, photo, sign-off, schedule, roster and report${alsoPeople
         ? ', <strong>and removes everyone except you</strong>' : ''}.
         Your buildings and checklists are kept. <strong>This cannot be undone.</strong>`,
       confirmText: alsoPeople ? 'Clear everything' : 'Clear records',
@@ -2241,34 +3535,8 @@ async function renderAdmin() {
 
   app.querySelectorAll('[data-days]').forEach((b) => {
     b.onclick = () => {
-      const row = rowOf(b);
-      const person = users.find((u) => u.id === Number(row.id));
-      const sheet = openSheet(`
-        <div class="sheet-head"><strong>${esc(person.name)}</strong></div>
-        <div class="pad stack">
-          <p class="dialog-body">Which days do they normally work? Used when building the
-            roster — you can still assign them to any day.</p>
-          <div class="check-list">${dayToggles(person.availability ?? Array(7).fill(null))}</div>
-          <p class="err" id="err"></p>
-          <button class="primary wide" id="save">Save</button>
-          <button class="wide" id="cancel">Cancel</button>
-        </div>`);
-      wireDayToggles(sheet);
-      sheet.querySelector('#cancel').onclick = closeSheet;
-      sheet.querySelector('#save').onclick = async () => {
-        try {
-          await api('/availability', {
-            method: 'POST',
-            body: { userId: person.id, days: readDayToggles(sheet) },
-          });
-          closeSheet();
-          state.cleaners = null;
-          toast('Days saved');
-          renderAdmin();
-        } catch (e) {
-          sheet.querySelector('#err').textContent = e.message;
-        }
-      };
+      const person = users.find((u) => u.id === Number(rowOf(b).id));
+      editAvailability(person, renderAdmin);
     };
   });
 
@@ -2303,18 +3571,20 @@ async function renderAdmin() {
       const row = rowOf(b);
       const go = await ask({
         title: `Delete ${row.name}?`,
-        body: `They will be removed from the people list and taken off any
-               buildings they are assigned to. <strong>What they have already
-               cleaned stays in the records</strong> under their name.
+        body: `They will be removed from the people list, taken off any buildings they are
+               assigned to, and <strong>every shift they have on the roster is deleted</strong>.
+               What they have already cleaned stays in the records under their name.
                Disabling instead keeps the account and blocks sign-in.`,
         confirmText: 'Delete permanently',
         danger: true,
       });
       if (!go) return;
       try {
-        await api('/users/delete', { method: 'POST', body: { id: Number(row.id) } });
+        const res = await api('/users/delete', { method: 'POST', body: { id: Number(row.id) } });
         state.cleaners = null;
-        toast(`${row.name} deleted`);
+        toast(`${row.name} deleted${res.removedShifts
+          ? ` · ${res.removedShifts} upcoming shift${res.removedShifts === 1 ? '' : 's'} removed`
+          : ''}`);
         renderAdmin();
       } catch (e) {
         toast(e.message, true);
@@ -2364,16 +3634,21 @@ async function render() {
 
   if (!state.token || !state.user) return renderLogin();
 
-  const [head, arg] = location.hash.replace(/^#\/?/, '').split('/');
+  const [head, arg, extra] = location.hash.replace(/^#\/?/, '').split('/');
 
   try {
-    if (head === 'b' && arg) return await renderBuilding(Number(arg));
+    if (head === 'b' && arg) return await renderBuilding(Number(arg), extra);
     if (head === 'schedule') return await renderSchedule();
+    if (head === 'roster') return await renderRoster();
+    if (head === 'availability') {
+      if (state.user.role === 'cleaner') return await renderRoster();
+      return await renderAvailability();
+    }
     if (head === 'issues') return await renderIssues();
     if (head === 'history') return await renderHistory();
     if (head === 'admin') return await renderAdmin();
     if (head === 'buildings') return arg
-      ? await renderAreaEditor(Number(arg))
+      ? await renderBuildingEditor(Number(arg))
       : await renderChecklistAdmin();
     return state.user.role === 'cleaner'
       ? await renderCleanerHome()

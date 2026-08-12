@@ -6,7 +6,7 @@
 // offline, that means everyone gets the latest deploy immediately, and the
 // cache only kicks in as a fallback when there's genuinely no connection.
 // Bump CACHE when the shell's file list changes.
-const CACHE = 'bc-shell-v1';
+const CACHE = 'bc-shell-v2';
 const SHELL = [
   '/', '/index.html', '/app.js', '/styles.css', '/manifest.webmanifest', '/icon.svg',
 ];
