@@ -40,32 +40,24 @@ const TABLES = [
      active     INTEGER NOT NULL DEFAULT 1
    )`,
 
-  // An area belongs to one building and one cleaning type. 'both' is the
-  // escape hatch for anything shared by the Full Clean and the Check (the
-  // "Every visit" block, mainly) so it never has to be kept in sync twice.
-  `CREATE TABLE IF NOT EXISTS areas (
-     id          INTEGER PRIMARY KEY,
-     building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
-     name        TEXT    NOT NULL,
-     clean_type  TEXT    NOT NULL DEFAULT 'both'
-                 CHECK (clean_type IN ('full', 'check', 'both')),
-     sort_order  INTEGER NOT NULL DEFAULT 0,
-     active      INTEGER NOT NULL DEFAULT 1,
-     UNIQUE (building_id, clean_type, name)
-   )`,
-  `CREATE INDEX IF NOT EXISTS idx_areas_building ON areas (building_id, active)`,
-
+  // A building's checklist is a flat list of broad areas to tick off -
+  // "Bathrooms", "Shelter", "Stairwell and second floor" - not the individual
+  // jobs inside them. The detail lives on the paper checklists the cleaners
+  // already carry; the app records that the area was done, by whom, when.
+  // 'both' is the escape hatch for anything shared by the Full Clean and the
+  // Check (the "Every visit" block, mainly) so it is never kept in sync twice.
   `CREATE TABLE IF NOT EXISTS tasks (
      id          INTEGER PRIMARY KEY,
-     area_id     INTEGER NOT NULL REFERENCES areas(id) ON DELETE CASCADE,
+     building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+     clean_type  TEXT    NOT NULL DEFAULT 'both'
+                 CHECK (clean_type IN ('full', 'check', 'both')),
      item        TEXT    NOT NULL,
      description TEXT    NOT NULL DEFAULT '',
      photo_mode  TEXT    NOT NULL DEFAULT 'none',
      sort_order  INTEGER NOT NULL DEFAULT 0,
      active      INTEGER NOT NULL DEFAULT 1,
-     UNIQUE (area_id, item)
+     UNIQUE (building_id, clean_type, item)
    )`,
-  `CREATE INDEX IF NOT EXISTS idx_tasks_area ON tasks (area_id, active)`,
 
   // Current state of every task, per cleaning day.
   `CREATE TABLE IF NOT EXISTS task_log (
@@ -78,7 +70,6 @@ const TABLES = [
      updated_at TEXT    NOT NULL,
      UNIQUE (task_id, day)
    )`,
-  `CREATE INDEX IF NOT EXISTS idx_task_log_day ON task_log (day)`,
 
   // Photos attached to an individual checklist item on a given day. Separate
   // table (rather than a column) because an item can carry several.
@@ -92,7 +83,6 @@ const TABLES = [
      user_name  TEXT    NOT NULL,
      created_at TEXT    NOT NULL
    )`,
-  `CREATE INDEX IF NOT EXISTS idx_task_photos ON task_photos (task_id, day)`,
 
   // Append-only history: who ticked what, when.
   `CREATE TABLE IF NOT EXISTS activity (
@@ -104,7 +94,6 @@ const TABLES = [
      user_name   TEXT    NOT NULL,
      created_at  TEXT    NOT NULL
    )`,
-  `CREATE INDEX IF NOT EXISTS idx_activity_day ON activity (day, id DESC)`,
 
   // One sign-off per building per day per cleaning type: a Check in the
   // morning and a Full Clean in the afternoon are two separate jobs.
@@ -118,13 +107,14 @@ const TABLES = [
      UNIQUE (building_id, day, clean_type)
    )`,
 
+  // Reports are maintenance only: something in a building needs fixing.
+  // `location` is free text - "the tap by the back door".
   `CREATE TABLE IF NOT EXISTS maintenance (
      id          INTEGER PRIMARY KEY,
      building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
-     area_id     INTEGER REFERENCES areas(id) ON DELETE SET NULL,
      location    TEXT    NOT NULL DEFAULT '',
      kind        TEXT    NOT NULL DEFAULT 'maintenance'
-                 CHECK (kind IN ('maintenance', 'lost_property', 'note')),
+                 CHECK (kind IN ('maintenance')),
      detail      TEXT    NOT NULL,
      photo_key   TEXT,
      status      TEXT    NOT NULL DEFAULT 'open'
@@ -135,10 +125,10 @@ const TABLES = [
      resolved_by TEXT,
      resolved_at TEXT
    )`,
-  `CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance (status, id DESC)`,
 
   // "This building needs this kind of clean on this day", with an order of
-  // priority. One row per building per day.
+  // priority. One row per building per day. Deliberately not a list of who is
+  // doing it: the plan says what needs doing, the roster says who is in.
   `CREATE TABLE IF NOT EXISTS schedule (
      id          INTEGER PRIMARY KEY,
      building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
@@ -150,18 +140,6 @@ const TABLES = [
      created_at  TEXT    NOT NULL,
      UNIQUE (building_id, day)
    )`,
-  `CREATE INDEX IF NOT EXISTS idx_schedule_day ON schedule (day, priority)`,
-
-  // Who is meant to clean it. Separate table because more than one cleaner
-  // can be put on the same building.
-  `CREATE TABLE IF NOT EXISTS schedule_assignees (
-     id          INTEGER PRIMARY KEY,
-     schedule_id INTEGER NOT NULL REFERENCES schedule(id) ON DELETE CASCADE,
-     user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-     user_name   TEXT    NOT NULL,
-     UNIQUE (schedule_id, user_id)
-   )`,
-  `CREATE INDEX IF NOT EXISTS idx_assignees_user ON schedule_assignees (user_id)`,
 
   // The staff roster: who is working, when. Deliberately separate from
   // `schedule` (which is about buildings) - a shift exists whether or not any
@@ -180,8 +158,6 @@ const TABLES = [
      created_at TEXT    NOT NULL,
      updated_at TEXT    NOT NULL
    )`,
-  `CREATE INDEX IF NOT EXISTS idx_roster_day ON roster (day, start_time)`,
-  `CREATE INDEX IF NOT EXISTS idx_roster_user ON roster (user_id, day)`,
 
   `CREATE TABLE IF NOT EXISTS login_attempts (
      ip       TEXT PRIMARY KEY,
@@ -190,75 +166,70 @@ const TABLES = [
    )`,
 ];
 
+/**
+ * Indexes are created after the migrations rather than alongside the tables,
+ * because several of them name a column a migration is about to add: on an
+ * upgrade the index would be built against the old shape and fail outright.
+ */
+const INDEXES = [
+  `CREATE INDEX IF NOT EXISTS idx_tasks_building ON tasks (building_id, active)`,
+  `CREATE INDEX IF NOT EXISTS idx_task_log_day ON task_log (day)`,
+  `CREATE INDEX IF NOT EXISTS idx_task_photos ON task_photos (task_id, day)`,
+  `CREATE INDEX IF NOT EXISTS idx_activity_day ON activity (day, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance (status, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_schedule_day ON schedule (day, priority)`,
+  `CREATE INDEX IF NOT EXISTS idx_roster_day ON roster (day, start_time)`,
+  `CREATE INDEX IF NOT EXISTS idx_roster_user ON roster (user_id, day)`,
+];
+
+
 /* ------------------------------------------------------- checklist planning */
 
 /**
- * Reads one task entry from checklist.json.
+ * Reads one checklist entry from checklist.json.
  *
- * ["Item", "What to do"] with an optional third value: "photo" to allow a
- * photo against the item, "photo required" to insist on one.
+ * ["Bathrooms"], optionally with a note and a photo flag:
+ * ["Bathrooms", "Both blocks", "photo required"].
  */
-function readTask([item, description, flag], sort) {
+function readTask([item, description, flag]) {
   const f = String(flag ?? '').toLowerCase();
   const photoMode = f.includes('required') ? 'required' : f.includes('photo') ? 'optional' : 'none';
-  return { item, description: description ?? '', photoMode, sort };
+  return { item, description: description ?? '', photoMode };
 }
 
 /**
- * Flattens checklist.json into the building/area/task shape the DB stores.
+ * Flattens checklist.json into the rows the DB stores: one flat list of
+ * checklist entries per building.
  *
- * A building lists its areas under "full" and "check"; each entry is either a
- * template name (a string) or an inline { name, tasks }. An area named in both
- * lists is stored once as 'both'. "Every visit" is appended to every building
- * as a 'both' area, so it shows on either kind of clean without being kept in
- * two places. `areas` is still read as a synonym for "on both lists", which is
- * what every checklist file looked like before cleaning types existed.
+ * A building lists its entries under "full" and "check". An entry named on
+ * both is stored once as 'both', so it is edited in one place and ticking it
+ * counts either way. "Every visit" is appended to every building as 'both'.
  */
 function plan() {
-  const templates = checklist.templates ?? {};
-
-  const resolve = (entry, building) => {
-    if (typeof entry !== 'string') return entry;
-    const tasks = templates[entry];
-    if (!tasks) throw new Error(`Unknown template "${entry}" on ${building.name}.`);
-    return { name: entry, tasks };
-  };
+  const both = (checklist.everyVisit ?? []).map(readTask);
 
   return checklist.buildings.map((building, bIndex) => {
-    const byType = {
-      full: (building.full ?? []).map((e) => resolve(e, building)),
-      check: (building.check ?? []).map((e) => resolve(e, building)),
-      both: (building.areas ?? []).map((e) => resolve(e, building)),
-    };
+    const read = (list) => (list ?? []).map(readTask);
+    const full = read(building.full);
+    const check = read(building.check);
 
-    // An area listed under both types is stored once, as 'both'.
-    const fullNames = new Set(byType.full.map((a) => a.name));
-    const shared = byType.check.filter((a) => fullNames.has(a.name));
-    if (shared.length) {
-      const sharedNames = new Set(shared.map((a) => a.name));
-      byType.both.push(...byType.full.filter((a) => sharedNames.has(a.name)));
-      byType.full = byType.full.filter((a) => !sharedNames.has(a.name));
-      byType.check = byType.check.filter((a) => !sharedNames.has(a.name));
-    }
+    // An entry on both lists is stored once, as 'both', so it is edited in
+    // one place and ticking it counts for either kind of clean.
+    const checkNames = new Set(check.map((t) => t.item));
+    const shared = full.filter((t) => checkNames.has(t.item));
+    const sharedNames = new Set(shared.map((t) => t.item));
 
-    if (checklist.everyVisit?.length) {
-      byType.both.push({ name: 'Every visit', tasks: checklist.everyVisit });
-    }
-
-    const areas = [];
+    const items = [];
     let sort = 0;
-    for (const type of ['full', 'check', 'both']) {
-      for (const area of byType[type]) {
-        areas.push({
-          name: area.name,
-          cleanType: type,
-          sort: sort++,
-          tasks: area.tasks.map(readTask),
-        });
-      }
-    }
+    const push = (list, cleanType) => {
+      for (const t of list) items.push({ ...t, cleanType, sort: sort++ });
+    };
+    push(full.filter((t) => !sharedNames.has(t.item)), 'full');
+    push(check.filter((t) => !sharedNames.has(t.item)), 'check');
+    push(shared, 'both');
+    push(both, 'both');
 
-    return { name: building.name, group: building.group ?? '', sort: bIndex, areas };
+    return { name: building.name, group: building.group ?? '', sort: bIndex, items };
   });
 }
 
@@ -276,34 +247,50 @@ async function sha256Hex(text) {
  */
 async function ensureColumn(db, table, column, definition) {
   const { results } = await db.prepare(`PRAGMA table_info(${table})`).all();
-  if (results.some((c) => c.name === column)) return;
+  // No rows means no such table - a table this version has dropped, on a
+  // database old enough to still have had it. Nothing to add a column to.
+  if (!results.length || results.some((c) => c.name === column)) return;
   await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+}
+
+/** The stored CREATE TABLE statement, or '' when there is no such table. */
+async function tableSql(db, table) {
+  const row = await db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+  ).bind(table).first();
+  return row?.sql ?? '';
 }
 
 /** True when the stored CREATE TABLE statement doesn't mention `needle` yet. */
 async function tableLacks(db, table, needle) {
-  const row = await db.prepare(
-    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
-  ).bind(table).first();
-  return Boolean(row) && !row.sql.includes(needle);
+  const sql = await tableSql(db, table);
+  return Boolean(sql) && !sql.includes(needle);
 }
 
 /**
- * The `maintenance` table's CHECK constraint originally only allowed
- * 'maintenance' and 'lost_property'. SQLite can't widen a CHECK constraint
- * in place, so adding the 'note' kind means rebuilding the table - the
- * standard SQLite move: create the new shape, copy the rows across, swap
- * names. Skipped once the constraint already mentions 'note'.
+ * Reduces reports to the one kind that earns its place: maintenance.
+ *
+ * "Lost property" and the general "Note" were both really just "somebody
+ * wrote something down", and the choice cost every reporter a decision at the
+ * top of the form. The kinds are gone; the reports are not - every existing
+ * one becomes a maintenance report and stays exactly where it was, detail and
+ * photo intact.
+ *
+ * That means narrowing a CHECK constraint, and dropping `area_id` with it now
+ * that "where" is free text. SQLite can't do either in place, so this is the
+ * standard rebuild: create the new shape, copy the rows across, swap names.
+ * `location` is carried over, so it has to already exist when this runs.
  */
-async function ensureNoteKind(db) {
-  if (!await tableLacks(db, 'maintenance', "'note'")) return;
+async function ensureReportKinds(db) {
+  const sql = await tableSql(db, 'maintenance');
+  if (!sql || !(sql.includes("'note'") || sql.includes('area_id'))) return;
 
   await db.prepare(`CREATE TABLE maintenance_new (
      id          INTEGER PRIMARY KEY,
      building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
-     area_id     INTEGER REFERENCES areas(id) ON DELETE SET NULL,
+     location    TEXT    NOT NULL DEFAULT '',
      kind        TEXT    NOT NULL DEFAULT 'maintenance'
-                 CHECK (kind IN ('maintenance', 'lost_property', 'note')),
+                 CHECK (kind IN ('maintenance')),
      detail      TEXT    NOT NULL,
      photo_key   TEXT,
      status      TEXT    NOT NULL DEFAULT 'open'
@@ -318,15 +305,17 @@ async function ensureNoteKind(db) {
   // later migration has already added a column the new shape doesn't have.
   await db.prepare(
     `INSERT INTO maintenance_new
-       (id, building_id, area_id, kind, detail, photo_key, status, day,
+       (id, building_id, location, kind, detail, photo_key, status, day,
         reported_by, reported_at, resolved_by, resolved_at)
-     SELECT id, building_id, area_id, kind, detail, photo_key, status, day,
+     SELECT id, building_id, location, 'maintenance', detail, photo_key, status, day,
         reported_by, reported_at, resolved_by, resolved_at FROM maintenance`,
   ).run();
   await db.prepare('DROP TABLE maintenance').run();
   await db.prepare('ALTER TABLE maintenance_new RENAME TO maintenance').run();
+
+  // The activity log is free text, so its old entries only need relabelling.
   await db.prepare(
-    'CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance (status, id DESC)',
+    `UPDATE activity SET kind = 'issue' WHERE kind IN ('note', 'lost_property')`,
   ).run();
 }
 
@@ -337,8 +326,8 @@ async function ensureNoteKind(db) {
  * (building_id, clean_type, name) - a building can now have a "Bathrooms" on
  * its Full Clean and a different "Bathrooms" on its Check - and SQLite can't
  * alter a constraint in place, so the table is rebuilt. Row ids are carried
- * across explicitly because tasks.area_id and maintenance.area_id point at
- * them; losing those would orphan every task in the park.
+ * across explicitly because the checklist items of the day hang off them;
+ * losing those would orphan every task in the park.
  *
  * Existing areas become 'both', so an installation that upgrades sees exactly
  * the checklist it had on both types until an admin splits them up. Nothing
@@ -363,9 +352,6 @@ async function ensureAreaCleanTypes(db) {
   ).run();
   await db.prepare('DROP TABLE areas').run();
   await db.prepare('ALTER TABLE areas_new RENAME TO areas').run();
-  await db.prepare(
-    'CREATE INDEX IF NOT EXISTS idx_areas_building ON areas (building_id, active)',
-  ).run();
 }
 
 /**
@@ -396,16 +382,74 @@ async function ensureStatusCleanTypes(db) {
 }
 
 /**
- * Lost property was folded into the general 'note' kind rather than deleted -
- * existing reports stay visible, just relabelled. Gated by a settings flag
- * (rather than re-running the UPDATEs, which are unindexed table scans, on
- * every single request forever) so it only does the work once.
+ * Flattens a checklist that was stored as areas containing individual jobs.
+ *
+ * The checklist is now one level: a building has a list of broad areas to
+ * tick ("Bathrooms", "Shelter"), and the detail lives on the paper checklists
+ * the cleaners already carry. So `tasks` hangs off a building and a cleaning
+ * type directly rather than off an area.
+ *
+ * Row ids are carried across, which is what keeps every tick and every photo
+ * attached to the thing it was recorded against. The old fine-grained names
+ * are prefixed with the area they belonged to - "Kitchen - Bins" - for two
+ * reasons: the new unique key is (building, type, name) and "Bins" appeared
+ * in several areas of the same building, and it keeps a year of exported
+ * history readable instead of a column of bare "Bins".
+ *
+ * Nothing is deactivated here. On the normal path the checklist file is in
+ * charge and the sync that follows retires these and inserts the new
+ * categories; if an admin had taken the checklist over in the app, they keep
+ * exactly what they had until they choose "Restore from file".
  */
-async function ensureLostPropertyFolded(db) {
-  if (await readSetting(db, 'lost_property_folded') === '1') return;
-  await db.prepare(`UPDATE maintenance SET kind = 'note' WHERE kind = 'lost_property'`).run();
-  await db.prepare(`UPDATE activity SET kind = 'note' WHERE kind = 'lost_property'`).run();
-  await writeSetting(db, 'lost_property_folded', '1');
+async function ensureFlatChecklist(db) {
+  if (!await tableLacks(db, 'tasks', 'building_id')) return;
+
+  await db.prepare(`CREATE TABLE tasks_new (
+     id          INTEGER PRIMARY KEY,
+     building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+     clean_type  TEXT    NOT NULL DEFAULT 'both'
+                 CHECK (clean_type IN ('full', 'check', 'both')),
+     item        TEXT    NOT NULL,
+     description TEXT    NOT NULL DEFAULT '',
+     photo_mode  TEXT    NOT NULL DEFAULT 'none',
+     sort_order  INTEGER NOT NULL DEFAULT 0,
+     active      INTEGER NOT NULL DEFAULT 1,
+     UNIQUE (building_id, clean_type, item)
+   )`).run();
+
+  await db.prepare(
+    `INSERT INTO tasks_new
+       (id, building_id, clean_type, item, description, photo_mode, sort_order, active)
+     SELECT t.id, a.building_id, a.clean_type, a.name || ' - ' || t.item,
+            t.description, t.photo_mode, t.sort_order, t.active
+     FROM tasks t JOIN areas a ON a.id = t.area_id`,
+  ).run();
+
+  // Anything whose area had already gone is unreachable either way; dropping
+  // it here is what stops its ticks pointing at a task that isn't there.
+  await db.prepare(
+    `DELETE FROM task_log WHERE task_id NOT IN (SELECT id FROM tasks_new)`,
+  ).run();
+  await db.prepare(
+    `DELETE FROM task_photos WHERE task_id NOT IN (SELECT id FROM tasks_new)`,
+  ).run();
+
+  await db.prepare('DROP TABLE tasks').run();
+  await db.prepare('ALTER TABLE tasks_new RENAME TO tasks').run();
+}
+
+/**
+ * Drops the two tables this version no longer has anything to say about:
+ * `areas`, now the checklist is one level deep, and `schedule_assignees`, now
+ * that the plan records what needs cleaning rather than who is on it.
+ *
+ * Both are dropped only once everything that was worth keeping has been read
+ * out of them - `areas` by the flatten above, which is the migration that
+ * moves each task onto its building.
+ */
+async function dropRetiredTables(db) {
+  await db.prepare('DROP TABLE IF EXISTS schedule_assignees').run();
+  await db.prepare('DROP TABLE IF EXISTS areas').run();
 }
 
 /* --------------------------------------------------------- checklist sync */
@@ -444,55 +488,52 @@ async function syncChecklist(db) {
        grp = excluded.grp, sort_order = excluded.sort_order, active = 1`,
   ).bind(b.name, b.group, b.sort)));
 
-  // Resolve ids in one pass so the task upserts don't need sub-selects.
+  // Resolve ids in one pass so the entry upserts don't need sub-selects.
   const { results: buildingRows } = await db.prepare('SELECT id, name FROM buildings').all();
   const buildingId = new Map(buildingRows.map((r) => [r.name, r.id]));
 
-  const { results: areaRows } = await db.prepare(
-    'SELECT id, building_id, name, clean_type FROM areas',
+  const { results: existing } = await db.prepare(
+    'SELECT id, building_id, clean_type, item FROM tasks',
   ).all();
 
-  // Match a planned area to an existing row by (building, type, name) first.
-  // Falling back to matching on name alone is what keeps an upgrade from
-  // duplicating every area: rows written before cleaning types existed are
-  // all 'both', and the file now says 'full' or 'check' for most of them.
-  // Without the fallback each of those would insert a second row and strand
-  // the original's cleaning history.
+  // Match a planned entry to an existing row by (building, type, name) first,
+  // then by name alone. The fallback is what stops an entry that moved
+  // between the Full Clean and the Check from being inserted a second time
+  // and stranding everything it has recorded.
   const exact = new Map();
   const byName = new Map();
-  for (const r of areaRows) {
-    exact.set(joinKey(r.building_id, r.clean_type, r.name), r);
-    const key = joinKey(r.building_id, r.name);
+  for (const r of existing) {
+    exact.set(joinKey(r.building_id, r.clean_type, r.item), r);
+    const key = joinKey(r.building_id, r.item);
     if (!byName.has(key)) byName.set(key, []);
     byName.get(key).push(r);
   }
 
   const claimed = new Set();
-  const inserts = [];
   const updates = [];
-  const resolved = []; // [plannedArea, buildingId, existingId|null]
+  const inserts = [];
 
   for (const b of buildings) {
     const bid = buildingId.get(b.name);
-    for (const a of b.areas) {
-      let row = exact.get(joinKey(bid, a.cleanType, a.name));
+    for (const t of b.items) {
+      let row = exact.get(joinKey(bid, t.cleanType, t.item));
       if (row && claimed.has(row.id)) row = null;
       if (!row) {
-        row = (byName.get(joinKey(bid, a.name)) ?? []).find((r) => !claimed.has(r.id)) ?? null;
+        row = (byName.get(joinKey(bid, t.item)) ?? []).find((r) => !claimed.has(r.id)) ?? null;
       }
 
       if (row) {
         claimed.add(row.id);
         updates.push(db.prepare(
-          'UPDATE areas SET clean_type = ?, sort_order = ?, active = 1 WHERE id = ?',
-        ).bind(a.cleanType, a.sort, row.id));
-        resolved.push([a, bid, row.id]);
+          `UPDATE tasks SET clean_type = ?, description = ?, photo_mode = ?,
+             sort_order = ?, active = 1 WHERE id = ?`,
+        ).bind(t.cleanType, t.description, t.photoMode, t.sort, row.id));
       } else {
         inserts.push(db.prepare(
-          `INSERT INTO areas (building_id, name, clean_type, sort_order, active)
-           VALUES (?, ?, ?, ?, 1)`,
-        ).bind(bid, a.name, a.cleanType, a.sort));
-        resolved.push([a, bid, null]);
+          `INSERT INTO tasks
+             (building_id, clean_type, item, description, photo_mode, sort_order, active)
+           VALUES (?, ?, ?, ?, ?, ?, 1)`,
+        ).bind(bid, t.cleanType, t.item, t.description, t.photoMode, t.sort));
       }
     }
   }
@@ -500,53 +541,12 @@ async function syncChecklist(db) {
   if (updates.length) await db.batch(updates);
   if (inserts.length) await db.batch(inserts);
 
-  // Re-read so the rows just inserted have ids.
-  const { results: freshAreas } = await db.prepare(
-    'SELECT id, building_id, name, clean_type FROM areas',
-  ).all();
-  const areaId = new Map(
-    freshAreas.map((r) => [joinKey(r.building_id, r.clean_type, r.name), r.id]),
-  );
-
-  const taskStatements = [];
-  const keep = new Set();
-  for (const [area, bid] of resolved) {
-    const aid = areaId.get(joinKey(bid, area.cleanType, area.name));
-    if (!aid) continue;
-    for (const t of area.tasks) {
-      keep.add(joinKey(aid, t.item));
-      taskStatements.push(db.prepare(
-        `INSERT INTO tasks (area_id, item, description, photo_mode, sort_order, active)
-         VALUES (?, ?, ?, ?, ?, 1)
-         ON CONFLICT(area_id, item) DO UPDATE SET
-           description = excluded.description,
-           photo_mode  = excluded.photo_mode,
-           sort_order  = excluded.sort_order,
-           active      = 1`,
-      ).bind(aid, t.item, t.description, t.photoMode, t.sort));
-    }
-  }
-  if (taskStatements.length) await db.batch(taskStatements);
-
-  // Retire anything no longer in the checklist. A Set, not Array.includes -
-  // the park runs to well over a thousand tasks and this used to be quadratic.
-  const { results: allTasks } = await db.prepare(
-    'SELECT id, area_id, item FROM tasks WHERE active = 1',
-  ).all();
-  const stale = allTasks.filter((t) => !keep.has(joinKey(t.area_id, t.item))).map((t) => t.id);
+  // Retire anything no longer in the checklist, rather than deleting it, so
+  // the record of what was cleaned in the past never breaks.
+  const stale = existing.filter((r) => !claimed.has(r.id)).map((r) => r.id);
   if (stale.length) {
     await db.batch(stale.map((id) =>
       db.prepare('UPDATE tasks SET active = 0 WHERE id = ?').bind(id)));
-  }
-
-  const liveAreas = new Set(resolved.map(([a, bid]) =>
-    joinKey(bid, a.cleanType, a.name)));
-  const retiredAreas = freshAreas
-    .filter((r) => !liveAreas.has(joinKey(r.building_id, r.clean_type, r.name)))
-    .map((r) => r.id);
-  if (retiredAreas.length) {
-    await db.batch(retiredAreas.map((id) =>
-      db.prepare('UPDATE areas SET active = 0 WHERE id = ?').bind(id)));
   }
 
   const liveBuildings = new Set(buildings.map((b) => b.name));
@@ -569,28 +569,27 @@ async function migrate(env) {
 
   await db.batch(TABLES.map((sql) => db.prepare(sql)));
 
-  // Order matters around the two table rebuilds below, in opposite
-  // directions, so neither can be reordered without breaking an upgrade:
-  //
-  //  - `areas.active` has to be added BEFORE the areas rebuild, because that
-  //    rebuild copies the column across and would fail on a database old
-  //    enough not to have it.
-  //  - `maintenance.location` has to be added AFTER the maintenance rebuild,
-  //    because that rebuild recreates the table from a fixed CREATE that
-  //    doesn't mention it - adding it first meant it was silently dropped
-  //    again, and every later report failed on a column that wasn't there.
+  // Every column an upgrade might be missing goes in first, because each of
+  // the rebuilds below recreates its table from a fixed CREATE and copies the
+  // columns by name: a column added afterwards is a column the rebuild would
+  // have silently dropped on the way past.
   await ensureColumn(db, 'buildings', 'grp', "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(db, 'areas', 'active', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(db, 'users', 'availability', "TEXT NOT NULL DEFAULT '1111111'");
   await ensureColumn(db, 'tasks', 'photo_mode', "TEXT NOT NULL DEFAULT 'none'");
   await ensureColumn(db, 'schedule', 'clean_type', "TEXT NOT NULL DEFAULT 'full'");
+  await ensureColumn(db, 'maintenance', 'location', "TEXT NOT NULL DEFAULT ''");
 
-  await ensureNoteKind(db);
+  await ensureReportKinds(db);
   await ensureAreaCleanTypes(db);
   await ensureStatusCleanTypes(db);
+  // After the areas rebuild, which is where it reads the building and
+  // cleaning type each entry belonged to.
+  await ensureFlatChecklist(db);
+  // Last: the flatten above is the final reader of `areas`.
+  await dropRetiredTables(db);
 
-  await ensureColumn(db, 'maintenance', 'location', "TEXT NOT NULL DEFAULT ''");
-  await ensureLostPropertyFolded(db);
+  await db.batch(INDEXES.map((sql) => db.prepare(sql)));
 
   // Once an admin edits the checklist inside the app, the app owns it and the
   // file stops being applied - otherwise the next deploy would quietly undo

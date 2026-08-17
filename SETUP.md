@@ -112,8 +112,8 @@ checklist item per day.
 ### Then, in the app
 
 Go to **Checklists**, pick the **Full Clean** or **Check** tab, open a
-building, unfold an area and either add an item or tap **Edit** on one. The
-**Photo** setting has three options:
+building, then add an entry or tap **Edit** on one. The **Photo** setting has
+three options:
 
 | Setting | What the cleaner sees |
 |---|---|
@@ -128,10 +128,10 @@ activity log records that it was signed off short.
 
 ### Housekeeping
 
-Photos are deleted from storage automatically when the item photo is removed,
-when a scheduled job's progress is wiped, when the checklist item, area or
-building is deleted, and when you clear the database from **People → Danger
-zone**. There is no orphan cleanup job because nothing is left orphaned.
+Photos are deleted from storage automatically when the photo itself is
+removed, when a scheduled job's progress is wiped, when the checklist entry or
+the building is deleted, and when you clear the database from **People →
+Danger zone**. There is no orphan cleanup job because nothing is left orphaned.
 
 ## Step 5 — Redeploy so the settings take effect
 
@@ -157,23 +157,30 @@ otherwise would.
 
 ---
 
-## Step 7 — Set the two checklists up for real
+## Step 7 — Check the two checklists
 
-Every building starts with a **Full Clean** (what was already there) and a
-**Check**. Buildings that already had a "check clean" section — the bell tents,
-the chalets, Seeonee — keep theirs. Everything else gets a generic starter
-**Check clean** list, which is deliberately bland and wants tailoring:
+A checklist here is the **broad areas** of a building, not the individual jobs
+inside them — St George is *Bathrooms* and *Shelter*, the Manor is its six
+areas. The detail stays on the paper checklists the cleaners already carry;
+the app records that the area was done, by whom, and when.
 
-1. **Checklists** → the **Check** tab. A banner names any building whose Check
-   list is still empty.
-2. Open a building. Either build the list by hand, or tap **Copy from the Full
-   Clean** and delete what a check doesn't need — usually much quicker.
-3. Anything that should be on *both* lists (the *Every visit* block already is)
-   can be set to **Both** when you add or edit the area, so you only maintain
-   it once.
+Every building starts with a **Full Clean** and a **Check**. Most walk the
+same areas either way, so both lists are the same and each entry is marked
+**on both checklists** — edit it once. The bell tents, the chalets and Seeonee
+have a genuinely different check, and theirs says so.
+
+1. **Checklists** → open a building and read its list. Add, rename, hide,
+   reorder or delete as needed.
+2. A banner names any building whose Check list is empty. Open it and either
+   add entries by hand, or tap **Add the Full Clean list** and trim.
+3. Anything that should be on *both* lists can be set to **Both** when you add
+   or edit it, so you only maintain it once.
 
 Then **Planning → Buildings**: tap a square, pick **Full Clean** or **Check**,
-and the cleaner gets exactly that list when they open the job.
+set the order it gets done in, and the cleaner gets exactly that list when
+they open the job. The plan doesn't name who cleans what — that's the roster's
+job, and the cleaners sort the buildings out between themselves on the day.
+**Print / save as PDF** under the grid prints the week's plan on one A4 sheet.
 
 ## Step 8 — Availability and the roster
 
