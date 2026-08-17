@@ -523,7 +523,16 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
   color: var(--ink-2);
 }
 
-.field-hint { margin: 5px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+/* Written as `.field > span` too, so it has to out-specify the label rule
+   above rather than being styled as one. */
+.field-hint, .field > span.field-hint {
+  display: block;
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  font-weight: 450;
+  color: var(--muted);
+  line-height: 1.45;
+}
 
 /* A form laid out as label / control pairs on desktop, stacked on a phone. */
 .filters {
@@ -1124,7 +1133,13 @@ table.avail td.dimmed { opacity: .28; }
 
 .shift { display: flex; flex-direction: column; align-items: center; line-height: 1.3; width: 100%; }
 .shift b { font-size: 12.5px; font-weight: 680; white-space: nowrap; }
-.shift .tiny { color: var(--muted); }
+.shift .tiny {
+  color: var(--muted);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .shift + .shift { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--line); }
 .shift.clash b { color: var(--warn); }
 .shift-marks { display: flex; gap: 3px; align-items: center; }
@@ -1435,6 +1450,18 @@ code.phrase {
   .shift .tick, .shift .warnmark { color: #000; }
   .offtext { color: #666; font-size: 8.5pt; }
 
+  /* The "+" and the preference star are on-screen affordances - there is
+     nothing to tap on paper, and they'd read as marks that mean something. */
+  .offtext.add, .prefstar { display: none !important; }
+
+  /* Today is a screen idea. On a printed sheet it is just another column. */
+  table.sched thead th.is-today,
+  table.sched thead th.is-today small { color: #000 !important; }
+
+  /* On screen a note is clipped to keep the row tight; on paper nothing
+     should be silently cut out of a document people work from. */
+  .shift .tiny { white-space: normal; overflow: visible; }
+
   table.sched tr { break-inside: avoid; }
 }
 
@@ -1483,19 +1510,6 @@ code.phrase {
 
 /* Hours rostered against the weekly target they gave. */
 table.sched th.rowhead .num.over { color: var(--warn); font-weight: 700; }
-
-/* The free-text rostering note, kept to one line in a table row. */
-.prefnote {
-  display: block;
-  margin-top: 1px;
-  font-size: 11px;
-  font-weight: 450;
-  color: var(--muted);
-  font-style: italic;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* Beats `.check-row .grow > .tiny`, which would otherwise mute the one line
    on that row that needs to stand out. */

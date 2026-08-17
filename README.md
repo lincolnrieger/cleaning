@@ -23,7 +23,7 @@ browser, no software to install and no commands to run.
 | Build and print the staff roster | — | ✅ | ✅ |
 | See everyone's availability on one screen | — | ✅ | ✅ |
 | Set anyone's availability (days **and** times) | — | ✅ | ✅ |
-| Record preferred days, ideal hours and rostering notes | — | ✅ | ✅ |
+| Record preferred days and ideal hours | — | ✅ | ✅ |
 | Open an individual building's detail | ✅ | read-only | ✅ |
 | Mark a maintenance issue resolved | — | ✅ | ✅ |
 | Activity log + CSV export | — | ✅ | ✅ |
@@ -200,8 +200,8 @@ and it dims everyone who can't cover that window.
 
 Tap a name to set their availability: a switch per day plus a start and finish
 time. Leave the times blank for a day they work with no set hours. Presets for
-**Mon–Fri 8–4**, **copy the first day down** and **clear all** cover most of
-it in one tap. Times use the phone's native time picker.
+**copy the first day down** and **clear all** save some typing. Times use the
+phone's native time picker.
 
 Nobody's availability is ever assumed closed: a person whose record predates
 this reads as available, not unavailable, so nobody silently drops off the
@@ -209,7 +209,7 @@ roster.
 
 ### Preferences — the soft stuff that makes rostering quicker
 
-Availability answers *can they*. Three more fields on the same sheet answer
+Availability answers *can they*. Two more fields on the same sheet answer
 *would they*, which is what you're actually weighing up when you build a week:
 
 - **Preferred days** — tap the star on any day they'd **rather** work. It
@@ -221,23 +221,16 @@ Availability answers *can they*. Three more fields on the same sheet answer
   roster then show **"22h of 25h"** against each person for the week you're
   looking at, and turn amber once they're over it. No adding shifts up by
   hand to see who's short and who's had too much.
-- **Rostering notes** — free text for the things no field will ever cover:
-  *"Prefers mornings · school run at 3pm"*, *"Happy to take extra at short
-  notice"*, *"No Saturdays in term"*. It follows them onto the availability
-  grid, the roster, the shift editor and the assignment picker, so it's in
-  front of you at the moment you're deciding rather than in somebody's head.
-
-All three are optional, and none of them can stop you doing anything — they
-sort and annotate. Availability is still the only thing that raises a
-conflict.
+Both are optional, and neither can stop you doing anything — they sort and
+annotate. Availability is still the only thing that raises a conflict.
 
 ---
 
 ## The staff roster
 
 **Planning → Staff roster** is the week: staff down the side, days across the
-top. Tap any square to add a shift with a start time, finish time, duties and
-a note, and to mark it **confirmed**.
+top. Tap any square to add a shift with a start time, finish time and an
+optional note, and to mark it **confirmed**.
 
 - The start and finish default to that person's availability for that day, so
   a normal shift is two taps.
@@ -266,7 +259,7 @@ was built re-flags it automatically.
 **Print / save as PDF** on the roster prints just the roster — not the app.
 It's a clean A4 landscape sheet:
 
-**STAFF ROSTER — WEEK COMMENCING 10-08-2026**
+**Cleaning Schedule - Week Commencing 10-08-2026**
 
 | Staff | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
 |---|---|---|---|---|---|---|---|
