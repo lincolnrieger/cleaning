@@ -179,6 +179,13 @@ and the cleaner gets exactly that list when they open the job.
 
 1. **Planning → Availability** — tap each name and set the days they work and
    the hours. **Mon–Fri 8–4** is one tap.
+
+   On the same sheet you can also record the softer things that make the
+   roster quicker to build: tap the **star** on days they'd *rather* work,
+   set their **ideal hours a week**, and add a **rostering note** ("prefers
+   mornings", "school run at 3pm"). None of it blocks anything — it puts the
+   right people at the top of the list when you're picking someone, and shows
+   hours rostered against the target.
 2. **Planning → Staff roster** — tap a square to add a shift. The times default
    to that person's availability, so a normal shift is two taps.
 3. **Print / save as PDF** when the week is set. Choose *Save as PDF* as the

@@ -98,6 +98,22 @@ const availabilityOn = (person, day) => (Array.isArray(person.availability)
 
 const worksOn = (person, day) => Boolean(availabilityOn(person, day));
 
+/** A day they would rather work. Softer than available: it never blocks. */
+const prefersOn = (person, day) => Boolean(availabilityOn(person, day)?.preferred);
+
+/**
+ * "16h of 25h" when they've told us what they want in a week, "16h" when
+ * they haven't. `over` is what turns the figure amber on the way past it.
+ */
+function hoursLabel(person) {
+  const done = person.rosteredHours ?? 0;
+  if (!person.idealHours) return done ? `${done}h` : '';
+  return `${done}h of ${person.idealHours}h`;
+}
+
+const overHours = (person) =>
+  Boolean(person.idealHours) && (person.rosteredHours ?? 0) > person.idealHours;
+
 /** 08:00 -> 8am, 16:30 -> 4:30pm. Short enough for a roster cell. */
 function shortTime(hhmm) {
   if (!hhmm) return '';
@@ -279,6 +295,7 @@ const ICONS = {
   search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 4.5 4.5"/>',
   copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 5.5h-9a2 2 0 0 0-2 2v9"/>',
   trash: '<path d="M4.5 7h15"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12.5h9L17.5 7"/>',
+  star: '<path d="m12 4.4 2.36 4.79 5.28.77-3.82 3.72.9 5.26L12 16.46l-4.72 2.48.9-5.26-3.82-3.72 5.28-.77z"/>',
 };
 
 /** An inline icon. `cls` takes `lg` for the 20px size. */
@@ -1325,31 +1342,39 @@ async function openScheduleEditor(data, buildingId, day) {
           value="${scheduled ? cell.priority : nextPriority(data, day)}"></label>
 
       <div>
-        <span class="small muted" class="eyebrow block gap-top">
+        <span class="eyebrow block gap-top">
           Who is cleaning it</span>
         <div class="check-list">
           ${[...state.cleaners]
-            .sort((x, y) => (worksOn(y, day) ? 1 : 0) - (worksOn(x, day) ? 1 : 0))
-            .map((c) => {
+            // Would rather work it, then can work it, then can't. Sorting is
+            // the whole benefit of recording a preference: the right person
+            // is the first one you see.
+            .map((c) => ({ c, rank: prefersOn(c, day) ? 2 : worksOn(c, day) ? 1 : 0 }))
+            .sort((x, y) => y.rank - x.rank)
+            .map(({ c, rank }) => {
               const window = availabilityOn(c, day);
-              const note = window
-                ? (timeRange(window.from, window.to)
-                  ? `<span class="tiny muted">available ${
-                    esc(timeRange(window.from, window.to))}</span>` : '')
-                : `<span class="tiny" class="tiny">
-                    unavailable on ${esc(DAY_FULL[weekdayIndex(day)])}</span>`;
+              const hours = timeRange(window?.from, window?.to);
+              const note = rank === 0
+                ? `<span class="tiny warntext">
+                    unavailable on ${esc(DAY_FULL[weekdayIndex(day)])}</span>`
+                : `<span class="tiny muted">${rank === 2 ? 'would rather work it' : 'available'}${
+                    hours ? ` · ${esc(hours)}` : ''}${
+                    c.prefNote ? ` · ${esc(c.prefNote)}` : ''}</span>`;
               return `<label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
                 <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
                 ${avatar(c.name)}
-                <span class="grow">${esc(c.name)} ${note}</span>
+                <span class="grow">${esc(c.name)}
+                  ${rank === 2 ? `<span class="prefstar">${svgIcon('star')}</span>` : ''}
+                  ${note}</span>
                 <span class="tiny muted">${esc(c.role)}</span>
               </label>`;
             }).join('')
             || '<p class="small muted">No cleaners yet — add them under People.</p>'}
         </div>
         <p class="tiny muted">
-          More than one person can be put on the same building. People who aren't available
-          that day are listed last, but you can still pick them.</p>
+          More than one person can be put on the same building. People who'd rather work
+          that day come first and anyone unavailable is listed last — but you can still
+          pick anyone.</p>
       </div>
 
       <label class="field"><span>Note for this job (optional)</span>
@@ -2128,6 +2153,10 @@ function availabilityRows(days) {
         <input type="time" class="avto" value="${esc(entry?.to ?? '')}"
           ${on ? '' : 'disabled'} aria-label="${name} finish">
       </span>
+      <button type="button" class="iconbtn star" data-pref
+        aria-pressed="${Boolean(entry?.preferred)}" ${on ? '' : 'disabled'}
+        title="${name}: a day they would rather work"
+        aria-label="${name}: prefers this day">${svgIcon('star')}</button>
     </div>`;
   }).join('');
 }
@@ -2136,9 +2165,18 @@ function wireAvailabilityRows(root) {
   root.querySelectorAll('[data-avrow]').forEach((row) => {
     const box = row.querySelector('input[type="checkbox"]');
     const times = row.querySelectorAll('input[type="time"]');
+    const star = row.querySelector('[data-pref]');
     box.onchange = () => {
       row.classList.toggle('on', box.checked);
       times.forEach((t) => { t.disabled = !box.checked; });
+      // Preferring a day you don't work is meaningless, so the star follows
+      // the switch off rather than being left set on a day that's gone.
+      star.disabled = !box.checked;
+      if (!box.checked) star.setAttribute('aria-pressed', 'false');
+    };
+    star.onclick = () => {
+      star.setAttribute('aria-pressed',
+        String(star.getAttribute('aria-pressed') !== 'true'));
     };
   });
 }
@@ -2149,19 +2187,29 @@ const readAvailabilityRows = (root) => [...root.querySelectorAll('[data-avrow]')
   return {
     from: row.querySelector('.avfrom').value,
     to: row.querySelector('.avto').value,
+    preferred: row.querySelector('[data-pref]').getAttribute('aria-pressed') === 'true',
   };
 });
 
 /** "Mon, Tue, Wed · 8am–4pm" style summary for a person's row. */
-function availabilitySummary(days) {
+function availabilitySummary(person) {
+  const days = person.availability;
   if (!Array.isArray(days)) return 'available every day';
   const on = days.map((d, i) => (d ? i : -1)).filter((i) => i >= 0);
   if (!on.length) return 'no days set';
 
   const ranges = new Set(on.map((i) => timeRange(days[i].from, days[i].to)).filter(Boolean));
   const dayText = on.length === 7 ? 'every day' : on.map((i) => DAY_NAMES[i]).join(', ');
-  if (!ranges.size) return dayText;
-  return `${dayText} · ${ranges.size === 1 ? [...ranges][0] : 'varying hours'}`;
+  const preferred = on.filter((i) => days[i].preferred).map((i) => DAY_NAMES[i]);
+
+  return [
+    ranges.size ? `${dayText} · ${ranges.size === 1 ? [...ranges][0] : 'varying hours'}` : dayText,
+    // Only worth saying when it narrows things - "prefers every day they work"
+    // is noise.
+    preferred.length && preferred.length < on.length ? `prefers ${preferred.join(', ')}` : '',
+    person.idealHours ? `ideally ${person.idealHours}h a week` : '',
+    person.prefNote,
+  ].filter(Boolean).join(' · ');
 }
 
 function editAvailability(person, onDone) {
@@ -2169,14 +2217,27 @@ function editAvailability(person, onDone) {
     <div class="sheet-head"><strong>${esc(person.name)}</strong>
       <span class="tiny muted">availability</span></div>
     <div class="pad stack">
-      <p class="dialog-body">Which days do they work, and between what times?
-        Leave the times blank for a day with no set hours.</p>
+      <p class="dialog-body">Which days <strong>can</strong> they work, and between what
+        times? Leave the times blank for a day with no set hours. Tap a star for a day
+        they'd <strong>rather</strong> work — that never blocks anything, it just puts
+        them first when you're picking someone.</p>
       <div class="avlist">${availabilityRows(person.availability)}</div>
       <div class="row wrap tight">
-        <button class="ghost" data-preset="weekdays">Mon–Fri 8–4</button>
-        <button class="ghost" data-preset="copy">Copy first day down</button>
-        <button class="ghost" data-preset="clear">Clear all</button>
+        <button data-preset="weekdays">Mon–Fri 8–4</button>
+        <button data-preset="copy">Copy first day down</button>
+        <button data-preset="clear">Clear all</button>
       </div>
+
+      <label class="field"><span>Ideal hours a week (optional)</span>
+        <input id="avhours" type="number" min="1" max="80" step="0.5" inputmode="decimal"
+          value="${esc(person.idealHours ?? '')}" placeholder="e.g. 25">
+        <span class="field-hint">Shown against what they're actually rostered, so you can
+          see at a glance who is short and who is over.</span></label>
+
+      <label class="field"><span>Rostering notes (optional)</span>
+        <input id="avnote" maxlength="300" value="${esc(person.prefNote ?? '')}"
+          placeholder="Prefers mornings · school run at 3pm · no Saturdays in term"></label>
+
       <p class="err" id="err"></p>
       <button class="primary wide" id="save">Save availability</button>
       <button class="wide" id="cancel">Cancel</button>
@@ -2192,6 +2253,9 @@ function editAvailability(person, onDone) {
     row.querySelectorAll('input[type="time"]').forEach((t) => { t.disabled = !on; });
     row.querySelector('.avfrom').value = from;
     row.querySelector('.avto').value = to;
+    const star = row.querySelector('[data-pref]');
+    star.disabled = !on;
+    if (!on) star.setAttribute('aria-pressed', 'false');
   };
 
   sheet.querySelectorAll('[data-preset]').forEach((b) => {
@@ -2206,7 +2270,11 @@ function editAvailability(person, onDone) {
         const on = first.querySelector('input[type="checkbox"]').checked;
         const from = first.querySelector('.avfrom').value;
         const to = first.querySelector('.avto').value;
-        rows().slice(1).forEach((row) => setRow(row, on, from, to));
+        const pref = first.querySelector('[data-pref]').getAttribute('aria-pressed') === 'true';
+        rows().slice(1).forEach((row) => {
+          setRow(row, on, from, to);
+          row.querySelector('[data-pref]').setAttribute('aria-pressed', String(on && pref));
+        });
       }
     };
   });
@@ -2217,7 +2285,12 @@ function editAvailability(person, onDone) {
     try {
       await api('/availability', {
         method: 'POST',
-        body: { userId: person.id, days: readAvailabilityRows(sheet) },
+        body: {
+          userId: person.id,
+          days: readAvailabilityRows(sheet),
+          idealHours: sheet.querySelector('#avhours').value,
+          note: sheet.querySelector('#avnote').value,
+        },
       });
       closeSheet();
       state.cleaners = null;
@@ -2233,7 +2306,7 @@ function editAvailability(person, onDone) {
 /* ------------------------------------- view: everyone's availability */
 
 async function renderAvailability() {
-  const live = screen();
+  const live = screen('#/availability');
   const from = weekFrom();
   const data = await api(`/availability?from=${from}`);
   if (!live()) return;
@@ -2250,6 +2323,7 @@ async function renderAvailability() {
   const dayMatches = (person, index) => {
     const entry = person.availability[index];
     if (f.status === 'available' && !entry) return false;
+    if (f.status === 'preferred' && !entry?.preferred) return false;
     if (f.status === 'unavailable' && entry) return false;
     return overlaps(entry);
   };
@@ -2281,6 +2355,7 @@ async function renderAvailability() {
           <select id="fstatus">
             <option value="all" ${f.status === 'all' ? 'selected' : ''}>Anyone</option>
             <option value="available" ${f.status === 'available' ? 'selected' : ''}>Available</option>
+            <option value="preferred" ${f.status === 'preferred' ? 'selected' : ''}>Would rather work it</option>
             <option value="unavailable" ${f.status === 'unavailable' ? 'selected' : ''}>Unavailable</option>
           </select></label>
         <label class="field span2"><span>Free between</span>
@@ -2306,7 +2381,11 @@ async function renderAvailability() {
             ${shown.map((p) => `<tr>
               <th class="rowhead">
                 <button class="linkish" data-edit="${p.id}">${esc(p.name)}</button>
-                <small>${esc(p.role)}</small>
+                <small>${esc(p.role)}${hoursLabel(p)
+                  ? ` · <span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
+                  : ''}</small>
+                ${p.prefNote ? `<small class="prefnote" title="${esc(p.prefNote)}"
+                  >${esc(p.prefNote)}</small>` : ''}
               </th>
               ${p.availability.map((entry, i) => {
                 const rostered = p.rostered[i];
@@ -2314,7 +2393,11 @@ async function renderAvailability() {
                 // exists to surface, so it is called out here too.
                 const clash = rostered && !entry;
                 return `<td class="${dim(p, i) ? 'dimmed' : ''}">
-                  <div class="avcell ${entry ? 'yes' : 'no'}">
+                  <div class="avcell ${entry ? 'yes' : 'no'}${
+                    entry?.preferred ? ' preferred' : ''}">
+                    ${entry?.preferred
+                      ? `<span class="prefstar" title="Would rather work this day"
+                          >${svgIcon('star')}</span>` : ''}
                     ${esc(availabilityText(entry))}
                     ${rostered ? `<span class="tiny ${clash ? 'clash' : 'muted'}">
                       ${rostered} shift${rostered === 1 ? '' : 's'}${
@@ -2329,7 +2412,8 @@ async function renderAvailability() {
       <div class="legend">
         <span><i class="sw yes"></i>Available</span>
         <span><i class="sw no"></i>Unavailable</span>
-        <span>Tap a name to change their availability</span>
+        <span><span class="prefstar">${svgIcon('star')}</span>Would rather work it</span>
+        <span>Tap a name to set days, hours and notes</span>
       </div>
     </div>`;
 
@@ -2393,7 +2477,8 @@ async function renderRoster() {
   const cell = (person, day) => {
     const shifts = shiftsFor(person.id, day);
     const entry = availabilityOn(person, day);
-    const classes = ['cell', 'rcell', shifts.length ? 'on' : '', entry ? '' : 'off-day']
+    const classes = ['cell', 'rcell', shifts.length ? 'on' : '', entry ? '' : 'off-day',
+      !shifts.length && entry?.preferred ? 'wants' : '']
       .filter(Boolean).join(' ');
 
     const inner = shifts.length
@@ -2407,7 +2492,9 @@ async function renderRoster() {
           </span>
         </span>`).join('')
       : entry
-        ? `<span class="offtext add">${canEdit ? '+' : '—'}</span>`
+        ? `<span class="offtext add">${canEdit ? '+' : '—'}</span>${entry.preferred
+          ? `<span class="prefstar" title="Would rather work this day"
+              >${svgIcon('star')}</span>` : ''}`
         : '<span class="offtext">OFF</span>';
 
     return `<td class="${day === data.today ? 'today-col' : ''}">
@@ -2441,7 +2528,11 @@ async function renderRoster() {
           <tbody>
             ${staff.map((p) => `<tr>
               <th class="rowhead">${esc(p.name)}
-                <small>${esc(p.role)}</small></th>
+                <small>${hoursLabel(p)
+                  ? `<span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
+                  : esc(p.role)}</small>
+                ${p.prefNote ? `<small class="prefnote noprint" title="${esc(p.prefNote)}"
+                  >${esc(p.prefNote)}</small>` : ''}</th>
               ${data.days.map((d) => cell(p, d)).join('')}
             </tr>`).join('') || `<tr><td colspan="8">
               <div class="empty"><b>Nobody rostered this week</b>
@@ -2518,9 +2609,14 @@ function openShiftEditor(data, userId, day) {
           <strong>${esc(person.name)}</strong>
           <div class="small muted">${esc(DAY_FULL[weekdayIndex(day)])} ${esc(auDate(day))}</div>
         </div>
-        <span class="pill ${entry ? 'done' : 'late'}">${esc(availabilityText(entry))}</span>
+        <span class="pill ${entry ? (entry.preferred ? 'open' : 'done') : 'late'}">${
+          entry?.preferred ? 'Prefers this day · ' : ''}${esc(availabilityText(entry))}</span>
       </div>
       <div class="pad stack">
+        ${hoursLabel(person) || person.prefNote ? `<p class="note">
+          ${hoursLabel(person) ? `<strong class="num">${esc(hoursLabel(person))}</strong>
+            rostered this week.` : ''}
+          ${person.prefNote ? esc(person.prefNote) : ''}</p>` : ''}
         ${existing.length && !shift && !forceForm ? `<div class="stack">
           ${existing.map((s) => `<div class="list-item shiftrow">
             <div class="spread wrap">
@@ -3411,7 +3507,7 @@ async function renderAdmin() {
               <span class="tiny muted">${esc(u.role)}${u.active ? '' : ' · disabled'}</span>
             </span>
           </div>
-          <div class="people-avail">${esc(availabilitySummary(u.availability))}</div>
+          <div class="people-avail">${esc(availabilitySummary(u))}</div>
           <div class="actions">
             <button data-days>Availability</button>
             <button data-pin>New PIN</button>
