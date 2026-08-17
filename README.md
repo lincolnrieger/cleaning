@@ -530,6 +530,14 @@ stored. If they differ, it syncs buildings and their checklists — adding new
 entries, updating wording, and deactivating anything removed. If they match it
 does nothing. That's why there is no migration step to run and no SQL to paste.
 
+**Foreign keys are enforced.** D1 has them on, and SQLite's `DROP TABLE`
+runs an implicit delete that fires `ON DELETE CASCADE` on the way past — so
+rebuilding a table that others point at will quietly take their rows with it,
+with no error to notice. Where a migration has to rebuild `tasks`, the ticks
+and photos are lifted into side tables with no constraints and put back
+afterwards. The test harness runs with foreign keys on for the same reason:
+with them off, that data loss is invisible.
+
 **Upgrading an existing camp is safe.** When the checklist went from areas
 containing individual jobs to one flat list, every existing item was carried
 across onto its building with its row id intact, so no tick and no photo was

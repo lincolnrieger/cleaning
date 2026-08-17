@@ -3557,9 +3557,9 @@ render();
 
 /* ------------------------------------------------------------ install as app */
 
-if ('serviceWorker' in navigator) {
-  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
-}
+// The service worker is registered from index.html, not here: registering it
+// from this file meant a broken app.js could never replace a broken worker,
+// which is how a bad cached response turns into a permanently stuck app.
 
 addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();

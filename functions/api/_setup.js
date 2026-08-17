@@ -320,41 +320,6 @@ async function ensureReportKinds(db) {
 }
 
 /**
- * Adds cleaning types to an `areas` table created before they existed.
- *
- * The unique key has to change from (building_id, name) to
- * (building_id, clean_type, name) - a building can now have a "Bathrooms" on
- * its Full Clean and a different "Bathrooms" on its Check - and SQLite can't
- * alter a constraint in place, so the table is rebuilt. Row ids are carried
- * across explicitly because the checklist items of the day hang off them;
- * losing those would orphan every task in the park.
- *
- * Existing areas become 'both', so an installation that upgrades sees exactly
- * the checklist it had on both types until an admin splits them up. Nothing
- * silently disappears from a cleaner's list.
- */
-async function ensureAreaCleanTypes(db) {
-  if (!await tableLacks(db, 'areas', 'clean_type')) return;
-
-  await db.prepare(`CREATE TABLE areas_new (
-     id          INTEGER PRIMARY KEY,
-     building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
-     name        TEXT    NOT NULL,
-     clean_type  TEXT    NOT NULL DEFAULT 'both'
-                 CHECK (clean_type IN ('full', 'check', 'both')),
-     sort_order  INTEGER NOT NULL DEFAULT 0,
-     active      INTEGER NOT NULL DEFAULT 1,
-     UNIQUE (building_id, clean_type, name)
-   )`).run();
-  await db.prepare(
-    `INSERT INTO areas_new (id, building_id, name, clean_type, sort_order, active)
-     SELECT id, building_id, name, 'both', sort_order, active FROM areas`,
-  ).run();
-  await db.prepare('DROP TABLE areas').run();
-  await db.prepare('ALTER TABLE areas_new RENAME TO areas').run();
-}
-
-/**
  * Same treatment for sign-offs: the unique key gains the cleaning type, so a
  * building can be checked in the morning and fully cleaned that afternoon
  * without one sign-off standing in for the other. Existing sign-offs become
@@ -400,9 +365,19 @@ async function ensureStatusCleanTypes(db) {
  * charge and the sync that follows retires these and inserts the new
  * categories; if an admin had taken the checklist over in the app, they keep
  * exactly what they had until they choose "Restore from file".
+ *
+ * The ticks and photos are lifted out to unconstrained side tables and put
+ * back afterwards, because D1 enforces foreign keys: `DROP TABLE tasks` runs
+ * an implicit DELETE, which fires the ON DELETE CASCADE on `task_log` and
+ * `task_photos` and would take every tick and every photo in the park with it,
+ * silently and with no error to notice.
  */
 async function ensureFlatChecklist(db) {
   if (!await tableLacks(db, 'tasks', 'building_id')) return;
+
+  // An `areas` table old enough to predate cleaning types has no clean_type
+  // column to read. Those areas were on every clean, which is 'both'.
+  const areaType = await tableLacks(db, 'areas', 'clean_type') ? `'both'` : 'a.clean_type';
 
   await db.prepare(`CREATE TABLE tasks_new (
      id          INTEGER PRIMARY KEY,
@@ -420,22 +395,37 @@ async function ensureFlatChecklist(db) {
   await db.prepare(
     `INSERT INTO tasks_new
        (id, building_id, clean_type, item, description, photo_mode, sort_order, active)
-     SELECT t.id, a.building_id, a.clean_type, a.name || ' - ' || t.item,
+     SELECT t.id, a.building_id, ${areaType}, a.name || ' - ' || t.item,
             t.description, t.photo_mode, t.sort_order, t.active
      FROM tasks t JOIN areas a ON a.id = t.area_id`,
   ).run();
 
-  // Anything whose area had already gone is unreachable either way; dropping
-  // it here is what stops its ticks pointing at a task that isn't there.
+  // CREATE TABLE ... AS SELECT makes a plain table with no foreign keys, so
+  // the cascade below cannot reach these. Anything whose area had already
+  // gone is left behind on purpose: it has nothing left to point at.
   await db.prepare(
-    `DELETE FROM task_log WHERE task_id NOT IN (SELECT id FROM tasks_new)`,
+    `CREATE TABLE task_log_kept AS
+     SELECT * FROM task_log WHERE task_id IN (SELECT id FROM tasks_new)`,
   ).run();
   await db.prepare(
-    `DELETE FROM task_photos WHERE task_id NOT IN (SELECT id FROM tasks_new)`,
+    `CREATE TABLE task_photos_kept AS
+     SELECT * FROM task_photos WHERE task_id IN (SELECT id FROM tasks_new)`,
   ).run();
 
   await db.prepare('DROP TABLE tasks').run();
   await db.prepare('ALTER TABLE tasks_new RENAME TO tasks').run();
+
+  // Empty either way - cleared by the cascade when foreign keys are enforced,
+  // still full when they are not - so clear them before putting the kept rows
+  // back, rather than assuming which happened.
+  await db.prepare('DELETE FROM task_log').run();
+  await db.prepare('DELETE FROM task_photos').run();
+  // Both sides came from the same table moments ago, so the column order
+  // matches by construction.
+  await db.prepare('INSERT INTO task_log SELECT * FROM task_log_kept').run();
+  await db.prepare('INSERT INTO task_photos SELECT * FROM task_photos_kept').run();
+  await db.prepare('DROP TABLE task_log_kept').run();
+  await db.prepare('DROP TABLE task_photos_kept').run();
 }
 
 /**
@@ -574,17 +564,13 @@ async function migrate(env) {
   // columns by name: a column added afterwards is a column the rebuild would
   // have silently dropped on the way past.
   await ensureColumn(db, 'buildings', 'grp', "TEXT NOT NULL DEFAULT ''");
-  await ensureColumn(db, 'areas', 'active', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(db, 'users', 'availability', "TEXT NOT NULL DEFAULT '1111111'");
   await ensureColumn(db, 'tasks', 'photo_mode', "TEXT NOT NULL DEFAULT 'none'");
   await ensureColumn(db, 'schedule', 'clean_type', "TEXT NOT NULL DEFAULT 'full'");
   await ensureColumn(db, 'maintenance', 'location', "TEXT NOT NULL DEFAULT ''");
 
   await ensureReportKinds(db);
-  await ensureAreaCleanTypes(db);
   await ensureStatusCleanTypes(db);
-  // After the areas rebuild, which is where it reads the building and
-  // cleaning type each entry belonged to.
   await ensureFlatChecklist(db);
   // Last: the flatten above is the final reader of `areas`.
   await dropRetiredTables(db);

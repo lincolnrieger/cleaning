@@ -6,7 +6,7 @@
 // offline, that means everyone gets the latest deploy immediately, and the
 // cache only kicks in as a fallback when there's genuinely no connection.
 // Bump CACHE when the shell's file list changes.
-const CACHE = 'bc-shell-v4';
+const CACHE = 'bc-shell-v5';
 const SHELL = [
   '/', '/index.html', '/app.js', '/styles.css', '/manifest.webmanifest', '/icon.svg',
 ];
@@ -32,8 +32,14 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(event.request, copy));
+        // Only a real, successful, same-origin response is worth keeping. A
+        // 404 or a 500 - which is what a request mid-deploy can come back as -
+        // used to be cached like any other, and a cached 404 for /app.js
+        // leaves the page sitting on "Loading…" until the cache is cleared.
+        if (res.ok && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(event.request, copy));
+        }
         return res;
       })
       .catch(() => caches.match(event.request)),

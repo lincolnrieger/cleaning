@@ -38,10 +38,46 @@
     <span class="signout-label">Sign out</span></button>
 </header>
 <nav class="nav" id="nav" hidden></nav>
-<main id="app"><p class="muted center">Loading…</p></main>
+<main id="app"><p class="muted center" id="booting">Loading…</p></main>
 <button class="fab" id="quickfab" hidden aria-label="Quick report" title="Quick report">
   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
 </button>
+<!-- If app.js never runs - a script error, or a bad response cached by an old
+     service worker - the page would otherwise sit on "Loading…" for ever with
+     nothing to act on. This says so instead, and offers the one fix that
+     works: throw the cached copy away and fetch it again. -->
+<script>
+  // Registered here rather than from app.js so that a broken app.js can still
+  // be repaired by a later deploy: this always runs, so a new worker always
+  // installs, and its activate step clears the older caches.
+  if ('serviceWorker' in navigator) {
+    addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  }
+
+  window.addEventListener('error', (e) => { window.__bootError = e.message; });
+  setTimeout(async () => {
+    const el = document.getElementById('booting');
+    if (!el || !el.isConnected) return; // the app took over, as it should
+    let detail = window.__bootError || '';
+    if (!detail) {
+      try {
+        const res = await fetch('/app.js', { cache: 'no-store' });
+        if (!res.ok) detail = `The app failed to load (${res.status}).`;
+      } catch { detail = 'No connection to the site.'; }
+    }
+    el.innerHTML = `<strong>The app didn't start.</strong><br>${
+      detail ? `${detail}<br>` : ''}<button id="bootreset">Reload the app</button>`;
+    document.getElementById('bootreset').onclick = async () => {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      } catch { /* nothing cached to clear */ }
+      location.reload();
+    };
+  }, 8000);
+</script>
 <script src="/app.js"></script>
 </body>
 </html>
