@@ -529,7 +529,7 @@ textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
 }
 
 .check-row:hover { background: var(--line-2); }
-.check-row input[type="checkbox"] {
+.check-row input[type="checkbox"], .check-row input[type="radio"] {
   width: 19px; min-height: 19px; height: 19px; flex: none; accent-color: var(--accent);
 }
 .check-row.on { background: var(--accent-soft); border-color: var(--accent); }
@@ -583,6 +583,12 @@ textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
   font-size: 13.5px;
 }
 
+/* An item is a tick button plus, when it takes photos, a strip underneath.
+   The separator therefore belongs to the wrapper - on the button it would
+   draw between an item and its own photos. */
+.taskwrap { border-top: 1px solid var(--line-2); }
+.area-head + .taskwrap { border-top: none; }
+
 .task {
   display: flex;
   align-items: flex-start;
@@ -590,15 +596,12 @@ textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
   width: 100%;
   padding: 12px 16px;
   border: none;
-  border-top: 1px solid var(--line-2);
   background: none;
   text-align: left;
   min-height: var(--tap);
   border-radius: 0;
   font-weight: 400;
 }
-
-.task:first-of-type { border-top: none; }
 .task:hover { background: var(--line-2); }
 .task.is-done { background: var(--done-bg); }
 .task.is-done:hover { background: var(--done-bg); }
@@ -1063,4 +1066,271 @@ code.phrase {
   main { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
   .toast { bottom: calc(78px + env(safe-area-inset-bottom)); }
   .fab { bottom: calc(78px + env(safe-area-inset-bottom)); right: 14px; width: 52px; height: 52px; }
+}
+
+/* ======================================================= cleaning types */
+
+/* Full Clean and Check need to be told apart at a glance, from across a
+   schedule grid, so they get a colour each rather than only a word. */
+.pill.type-full { background: var(--accent-soft); color: var(--accent); }
+.pill.type-check { background: var(--warn-bg); color: var(--warn); }
+
+.typetag {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.typetag.t-full { background: var(--accent); color: var(--accent-ink); }
+.typetag.t-check { background: var(--warn); color: #fff; }
+
+.cell.on.t-check { background: var(--warn-bg); }
+.cell.on.t-check:hover { background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.cell.complete { background: var(--done-bg); }
+
+.legend i.sw.t-full { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.legend i.sw.t-check { background: var(--warn-bg); box-shadow: inset 0 0 0 1px var(--warn); }
+.legend i.sw.yes { background: var(--done-bg); box-shadow: inset 0 0 0 1px var(--done); }
+.legend i.sw.no { background: var(--line); box-shadow: inset 0 0 0 1px var(--faint); }
+
+/* The "which clean is this?" sheet. Deliberately large - it is tapped with a
+   thumb, outdoors, often in gloves. */
+.bigchoice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-height: 62px;
+  padding: 12px 16px;
+  text-align: left;
+}
+
+.bigchoice strong { font-size: 16px; }
+
+/* ========================================================= item photos */
+
+.shots {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 12px 54px; /* lines up under the item text, past the box */
+}
+
+.shots.needed { background: var(--warn-bg); padding-top: 10px; }
+.shot-badge { flex: none; }
+
+.shot {
+  position: relative;
+  display: inline-block;
+  width: 62px;
+  height: 62px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--line-2);
+}
+
+.shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.shot-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  background: rgb(9 12 18 / .62);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.shot-x:hover { background: rgb(9 12 18 / .82); }
+
+.shot-add {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 13px;
+  border-style: dashed;
+}
+
+/* ===================================================== availability rows */
+
+.avlist { display: grid; gap: 7px; }
+
+.avrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--card);
+}
+
+.avrow.on { background: var(--accent-soft); border-color: var(--accent); }
+.avrow .avday { display: flex; align-items: center; gap: 8px; width: 82px; flex: none; }
+.avrow .avday span { font-weight: 600; font-size: 13.5px; }
+.avrow input[type="checkbox"] { width: 20px; height: 20px; min-height: 20px; flex: none;
+  accent-color: var(--accent); }
+.avtimes { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.avtimes input[type="time"] { min-height: 40px; padding: 0 8px; font-size: 14px; min-width: 0; }
+.avtimes input:disabled { opacity: .4; }
+
+/* The all-staff grid */
+table.avail .avcell { font-size: 12.5px; font-weight: 600; line-height: 1.3; }
+table.avail td { padding: 8px 6px; text-align: center; vertical-align: middle; }
+table.avail .avcell.yes { color: var(--done); }
+table.avail .avcell.no { color: var(--faint); font-weight: 500; }
+table.avail td.dimmed { opacity: .3; }
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.linkish {
+  border: none;
+  background: none;
+  padding: 0;
+  min-height: 0;
+  font: inherit;
+  color: var(--accent);
+  text-align: left;
+}
+
+.linkish:hover { background: none; text-decoration: underline; }
+
+/* ============================================================== roster */
+
+.cell.rcell {
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 4px;
+  min-height: 56px;
+}
+
+.cell.rcell.off-day { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.cell.rcell.on { background: var(--accent-soft); }
+
+.shift {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.25;
+  width: 100%;
+}
+
+.shift b { font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.shift .tiny { color: var(--muted); }
+.shift + .shift { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--line); }
+.shift.clash b { color: var(--warn); }
+.shift .warnmark { color: var(--warn); font-weight: 700; }
+.shift .tick { color: var(--done); font-weight: 800; }
+.offtext { color: var(--faint); font-size: 11px; font-weight: 600; }
+
+.shiftrow { border: 1px solid var(--line); border-radius: var(--r-sm); }
+
+/* ================================================== checklist editing */
+
+.brow { width: 100%; text-align: left; border-radius: 0; font-weight: 400; }
+.brow:first-of-type { border-top: none; }
+.areacard { margin-top: 12px; }
+.itemrow .tiny-btn { min-height: 32px; width: 32px; padding: 0; font-size: 11px; }
+
+.reorder { display: grid; gap: 6px; max-height: 46vh; overflow-y: auto; }
+
+.reorder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--card);
+}
+
+.reorder-row .tiny-btn { min-height: 34px; width: 34px; padding: 0; font-size: 11px; }
+
+/* ============================================================= printing */
+
+.printonly { display: none; }
+
+/* A4 portrait at 100%: seven day columns plus a name column fit only if the
+   page furniture goes and the type comes down a notch. Everything the roster
+   doesn't need is removed rather than hidden, so nothing leaves a gap. */
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+
+  header.bar, nav.nav, .fab, .toast, .testbar, .noprint, .sheet-bg,
+  .card-toggle, .legend { display: none !important; }
+
+  html, body { background: #fff; color: #000; }
+  main, main.wide { max-width: none; padding: 0; }
+
+  .printonly { display: block; }
+
+  .print-title {
+    font-size: 15pt;
+    font-weight: 700;
+    letter-spacing: .02em;
+    margin: 0 0 8pt;
+    text-align: center;
+  }
+
+  .print-foot { font-size: 8pt; color: #444; margin: 8pt 0 0; text-align: center; }
+
+  /* Only the roster itself prints. */
+  main > .card:not(#printarea) { display: none !important; }
+  main > .tabs, main > .row, main > p { display: none !important; }
+
+  #printarea {
+    border: none;
+    box-shadow: none;
+    background: #fff;
+    margin: 0;
+    padding: 0;
+  }
+
+  .grid-wrap { overflow: visible !important; }
+
+  table.sched { width: 100%; font-size: 9pt; }
+  table.sched th, table.sched td { border-color: #999 !important; padding: 4pt 3pt; }
+  table.sched thead th { background: #eee !important; color: #000; }
+  table.sched th.rowhead {
+    position: static !important;
+    background: #fff !important;
+    width: 22%;
+    font-size: 9.5pt;
+  }
+  table.sched th.rowhead small { color: #555; }
+  td.today-col, td.weekend, .cell.rcell.off-day { background: #fff !important; }
+
+  .cell.rcell {
+    min-height: 0;
+    background: #fff !important;
+    box-shadow: none;
+    border: none;
+    padding: 2pt;
+  }
+
+  .shift b { font-size: 9.5pt; color: #000; }
+  .shift .tiny { color: #444; }
+  .shift .tick { color: #000; }
+  .offtext { color: #666; font-size: 8.5pt; }
+
+  /* Keep a staff member's whole row on one page. */
+  table.sched tr { break-inside: avoid; }
 }
