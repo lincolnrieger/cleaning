@@ -1457,3 +1457,46 @@ code.phrase {
 .switch-row .grow > strong { font-size: 14px; font-weight: 640; margin-bottom: 2px; }
 .people-row .grow > strong { font-size: 14.5px; font-weight: 620; }
 .check-row .grow > .tiny { margin-top: 1px; color: var(--muted); }
+
+/* ------------------------------------------------- rostering preferences */
+
+/* A day someone would rather work. Deliberately quiet: it is a preference,
+   not a rule, and it must never read as loudly as an availability clash. */
+.prefstar { display: inline-flex; color: var(--accent); }
+.prefstar .ico { width: 12px; height: 12px; vertical-align: 0; fill: currentColor; stroke-width: 0; }
+.legend .prefstar { margin-right: 2px; }
+
+/* The star toggle in the availability sheet. */
+.avrow .star { margin-left: auto; }
+.avrow .star .ico { fill: none; }
+.avrow .star[aria-pressed="true"] { color: var(--accent); }
+.avrow .star[aria-pressed="true"] .ico { fill: currentColor; stroke-width: 0; }
+.avrow .star[disabled] { opacity: .3; }
+
+.avcell.preferred { color: var(--accent); }
+.avcell .prefstar { margin-right: 3px; vertical-align: -1px; }
+
+/* An empty roster cell on a day they'd rather work - a nudge towards the
+   person who wants the shift, without shouting at anyone. */
+.cell.rcell.wants { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.cell.rcell.wants .prefstar { opacity: .7; }
+
+/* Hours rostered against the weekly target they gave. */
+table.sched th.rowhead .num.over { color: var(--warn); font-weight: 700; }
+
+/* The free-text rostering note, kept to one line in a table row. */
+.prefnote {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 450;
+  color: var(--muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Beats `.check-row .grow > .tiny`, which would otherwise mute the one line
+   on that row that needs to stand out. */
+.warntext, .check-row .grow > .tiny.warntext { color: var(--warn); }

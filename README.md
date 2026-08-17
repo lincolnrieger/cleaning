@@ -23,6 +23,7 @@ browser, no software to install and no commands to run.
 | Build and print the staff roster | — | ✅ | ✅ |
 | See everyone's availability on one screen | — | ✅ | ✅ |
 | Set anyone's availability (days **and** times) | — | ✅ | ✅ |
+| Record preferred days, ideal hours and rostering notes | — | ✅ | ✅ |
 | Open an individual building's detail | ✅ | read-only | ✅ |
 | Mark a maintenance issue resolved | — | ✅ | ✅ |
 | Activity log + CSV export | — | ✅ | ✅ |
@@ -193,9 +194,9 @@ never have to open people one at a time.
 Each cell also shows how many shifts that person already has that day, so you
 can see who's carrying the week while you're reading who's free.
 
-Filters across the top: **staff member**, **day**, **available/unavailable**,
-and **free between** two times — set 13:00 to 17:00 and it dims everyone who
-can't cover that window.
+Filters across the top: **staff member**, **day**, **would rather work it**,
+**available/unavailable**, and **free between** two times — set 13:00 to 17:00
+and it dims everyone who can't cover that window.
 
 Tap a name to set their availability: a switch per day plus a start and finish
 time. Leave the times blank for a day they work with no set hours. Presets for
@@ -205,6 +206,30 @@ it in one tap. Times use the phone's native time picker.
 Nobody's availability is ever assumed closed: a person whose record predates
 this reads as available, not unavailable, so nobody silently drops off the
 roster.
+
+### Preferences — the soft stuff that makes rostering quicker
+
+Availability answers *can they*. Three more fields on the same sheet answer
+*would they*, which is what you're actually weighing up when you build a week:
+
+- **Preferred days** — tap the star on any day they'd **rather** work. It
+  never blocks anything and never raises a warning. What it does is sort:
+  when you assign a cleaner to a building, or open a square on the roster,
+  the people who want that day are at the top of the list, labelled *would
+  rather work it*, and anyone unavailable is at the bottom.
+- **Ideal hours a week** — a target, e.g. 25. The availability grid and the
+  roster then show **"22h of 25h"** against each person for the week you're
+  looking at, and turn amber once they're over it. No adding shifts up by
+  hand to see who's short and who's had too much.
+- **Rostering notes** — free text for the things no field will ever cover:
+  *"Prefers mornings · school run at 3pm"*, *"Happy to take extra at short
+  notice"*, *"No Saturdays in term"*. It follows them onto the availability
+  grid, the roster, the shift editor and the assignment picker, so it's in
+  front of you at the moment you're deciding rather than in somebody's head.
+
+All three are optional, and none of them can stop you doing anything — they
+sort and annotate. Availability is still the only thing that raises a
+conflict.
 
 ---
 

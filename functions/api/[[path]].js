@@ -148,42 +148,67 @@ function toMinutes(t) {
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
+const MAX_IDEAL_HOURS = 80;
+
 /**
- * Reads whatever is stored into 7 entries, Monday first. Each is either null
- * (doesn't work that day) or { from, to } - a pair of HH:MM times, or two
- * empty strings meaning "works, no particular hours".
+ * Reads whatever is stored into { days, idealHours, note }.
  *
- * Understands both older formats: the original '1111111' bitmap, and the
- * 7-booleans JSON that replaced it. Anything unrecognised reads as fully
- * available rather than fully unavailable - nobody should drop off the roster
- * because their record predates a format change.
+ * `days` is 7 entries, Monday first: null (doesn't work that day) or
+ * { from, to, preferred } - a pair of HH:MM times, or two empty strings
+ * meaning "works, no particular hours". `preferred` marks a day they would
+ * *rather* work, which is a softer thing than being available and never
+ * blocks anything; it only sorts and annotates.
+ *
+ * Understands every older format: the original '1111111' bitmap, the
+ * 7-booleans JSON that replaced it, and the bare 7-entry array that came
+ * before preferences existed. Anything unrecognised reads as fully available
+ * rather than fully unavailable - nobody should drop off the roster because
+ * their record predates a format change.
  */
 function parseAvailability(raw) {
-  const open = () => Array.from({ length: 7 }, () => ({ from: '', to: '' }));
-  if (!raw) return open();
+  const open = () => Array.from({ length: 7 }, () => ({ from: '', to: '', preferred: false }));
+  const wrap = (days) => ({ days, idealHours: null, note: '' });
+
+  if (!raw) return wrap(open());
 
   if (OLD_AVAILABILITY.test(raw)) {
-    return [...raw].map((c) => (c === '1' ? { from: '', to: '' } : null));
+    return wrap([...raw].map((c) => (c === '1' ? { from: '', to: '', preferred: false } : null)));
   }
 
+  const readDay = (entry) => {
+    if (!entry) return null;
+    if (entry === true) return { from: '', to: '', preferred: false };
+    const from = TIME_RE.test(entry.from) ? entry.from : '';
+    const to = TIME_RE.test(entry.to) ? entry.to : '';
+    // A half-set range is meaningless; treat it as "no particular hours".
+    return {
+      from: from && to ? from : '',
+      to: from && to ? to : '',
+      preferred: Boolean(entry.preferred),
+    };
+  };
+
   try {
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr) || arr.length !== 7) return open();
-    return arr.map((entry) => {
-      if (!entry) return null;
-      if (entry === true) return { from: '', to: '' };
-      const from = TIME_RE.test(entry.from) ? entry.from : '';
-      const to = TIME_RE.test(entry.to) ? entry.to : '';
-      // A half-set range is meaningless; treat it as "no particular hours".
-      return from && to ? { from, to } : { from: '', to: '' };
-    });
+    const stored = JSON.parse(raw);
+    const arr = Array.isArray(stored) ? stored : stored?.days;
+    if (!Array.isArray(arr) || arr.length !== 7) return wrap(open());
+
+    const hours = Number(stored?.idealHours);
+    return {
+      days: arr.map(readDay),
+      idealHours: Number.isFinite(hours) && hours > 0 ? Math.min(hours, MAX_IDEAL_HOURS) : null,
+      note: typeof stored?.note === 'string' ? stored.note : '',
+    };
   } catch {
-    return open();
+    return wrap(open());
   }
 }
 
+/** Just the seven days, for the many callers that only want those. */
+const availabilityDays = (raw) => parseAvailability(raw).days;
+
 /** Validates what the admin submitted and returns the string to store. */
-function validateAvailability(days) {
+function validateAvailability({ days, idealHours, note }) {
   if (!Array.isArray(days) || days.length !== 7) {
     throw new HttpError(400, 'Availability needs an entry for all seven days.');
   }
@@ -192,20 +217,30 @@ function validateAvailability(days) {
     if (!entry) return null;
     const from = clean(entry.from, 5);
     const to = clean(entry.to, 5);
-    if (!from && !to) return { from: '', to: '' };
+    const preferred = Boolean(entry.preferred);
+    if (!from && !to) return { from: '', to: '', preferred };
     if (!TIME_RE.test(from) || !TIME_RE.test(to)) {
       throw new HttpError(400, `${DAY_NAMES[i]}: times must look like 08:00.`);
     }
     if (toMinutes(to) <= toMinutes(from)) {
       throw new HttpError(400, `${DAY_NAMES[i]}: the finish time must be after the start time.`);
     }
-    return { from, to };
+    return { from, to, preferred };
   });
 
-  return JSON.stringify(out);
+  let hours = null;
+  if (idealHours !== undefined && idealHours !== null && String(idealHours).trim() !== '') {
+    hours = Number(idealHours);
+    if (!Number.isFinite(hours) || hours <= 0 || hours > MAX_IDEAL_HOURS) {
+      throw new HttpError(400, `Ideal hours must be a number between 1 and ${MAX_IDEAL_HOURS}.`);
+    }
+    hours = Math.round(hours * 2) / 2; // half-hours are as fine as anyone needs
+  }
+
+  return JSON.stringify({ days: out, idealHours: hours, note: clean(note, 300) });
 }
 
-const availabilityFor = (person, day) => parseAvailability(person.availability)[weekdayIndex(day)];
+const availabilityFor = (person, day) => availabilityDays(person.availability)[weekdayIndex(day)];
 
 /* ----------------------------------------------------------- settings */
 
@@ -634,7 +669,10 @@ const routes = {
        WHERE active = 1 AND role IN ('cleaner', 'admin') ORDER BY name`,
     ).all();
     return json({
-      cleaners: results.map((c) => ({ ...c, availability: parseAvailability(c.availability) })),
+      cleaners: results.map((c) => {
+        const { days, idealHours, note } = parseAvailability(c.availability);
+        return { ...c, availability: days, idealHours, prefNote: note };
+      }),
     });
   },
 
@@ -1248,7 +1286,10 @@ const routes = {
        FROM users ORDER BY active DESC, name`,
     ).all();
     return json({
-      users: results.map((u) => ({ ...u, availability: parseAvailability(u.availability) })),
+      users: results.map((u) => {
+        const { days, idealHours, note } = parseAvailability(u.availability);
+        return { ...u, availability: days, idealHours, prefNote: note };
+      }),
     });
   },
 
@@ -1349,14 +1390,14 @@ const routes = {
     // Cleaners' hours are managed by the office/admin, not by cleaners
     // themselves - so this always requires an elevated role, self or not.
     require(user, 'office', 'admin');
-    const { userId, days } = await req.json();
+    const { userId, days, idealHours, note } = await req.json();
     const target = userId ? Number(userId) : user.id;
-    const stored = validateAvailability(days);
+    const stored = validateAvailability({ days, idealHours, note });
 
     const res = await env.DB.prepare('UPDATE users SET availability = ? WHERE id = ?')
       .bind(stored, target).run();
     if (!res.meta.changes) throw new HttpError(404, 'That person no longer exists.');
-    return json({ ok: true, days: parseAvailability(stored) });
+    return json({ ok: true, ...parseAvailability(stored) });
   },
 
   /**
@@ -1376,24 +1417,37 @@ const routes = {
          WHERE active = 1 ORDER BY name`,
       ).all(),
       env.DB.prepare(
-        `SELECT user_id, day, COUNT(*) AS n FROM roster
-         WHERE day BETWEEN ? AND ? GROUP BY user_id, day`,
+        `SELECT user_id, day, start_time, end_time FROM roster
+         WHERE day BETWEEN ? AND ?`,
       ).bind(days[0], days[6]).all(),
     ]);
 
-    const rostered = new Map(shifts.results.map((r) => [`${r.user_id}:${r.day}`, r.n]));
+    const counts = new Map();
+    const minutes = new Map();
+    for (const r of shifts.results) {
+      const key = `${r.user_id}:${r.day}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      const span = toMinutes(r.end_time) - toMinutes(r.start_time);
+      minutes.set(r.user_id, (minutes.get(r.user_id) ?? 0) + (span > 0 ? span : 0));
+    }
 
     return json({
       from,
       days,
       today: localDay(env),
-      staff: people.results.map((p) => ({
-        id: p.id,
-        name: p.name,
-        role: p.role,
-        availability: parseAvailability(p.availability),
-        rostered: days.map((d) => rostered.get(`${p.id}:${d}`) ?? 0),
-      })),
+      staff: people.results.map((p) => {
+        const { days: avail, idealHours, note } = parseAvailability(p.availability);
+        return {
+          id: p.id,
+          name: p.name,
+          role: p.role,
+          availability: avail,
+          idealHours,
+          prefNote: note,
+          rostered: days.map((d) => counts.get(`${p.id}:${d}`) ?? 0),
+          rosteredHours: Math.round(((minutes.get(p.id) ?? 0) / 60) * 10) / 10,
+        };
+      }),
     });
   },
 
@@ -1416,9 +1470,24 @@ const routes = {
       ).all(),
     ]);
 
-    const staff = people.results.map((p) => ({
-      id: p.id, name: p.name, role: p.role, availability: parseAvailability(p.availability),
-    }));
+    const workedMinutes = new Map();
+    for (const r of shifts.results) {
+      const span = toMinutes(r.end_time) - toMinutes(r.start_time);
+      workedMinutes.set(r.user_id, (workedMinutes.get(r.user_id) ?? 0) + (span > 0 ? span : 0));
+    }
+
+    const staff = people.results.map((p) => {
+      const { days: avail, idealHours, note } = parseAvailability(p.availability);
+      return {
+        id: p.id,
+        name: p.name,
+        role: p.role,
+        availability: avail,
+        idealHours,
+        prefNote: note,
+        rosteredHours: Math.round(((workedMinutes.get(p.id) ?? 0) / 60) * 10) / 10,
+      };
+    });
     const byId = new Map(staff.map((p) => [p.id, p]));
 
     // Flag anything already on the roster that no longer fits: availability
