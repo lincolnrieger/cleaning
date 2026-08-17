@@ -21,7 +21,9 @@
 <body>
 <div class="testbar" id="testbar" hidden></div>
 <header class="bar" id="bar" hidden>
-  <button class="ghost" id="back" hidden title="Back"><span aria-hidden="true">←</span><span class="back-label">Back</span></button>
+  <button class="ghost" id="back" hidden title="Back" aria-label="Back">
+    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5"/><path d="m11 6-6 6 6 6"/></svg>
+    <span class="back-label">Back</span></button>
   <h1 id="title">Woodhouse Cleaning</h1>
   <div class="who-box" id="who" hidden>
     <span class="who-text">
@@ -30,13 +32,15 @@
     </span>
     <span class="avatar" id="whoAvatar"></span>
   </div>
-  <button class="ghost" id="signout" title="Sign out">Sign out</button>
+  <!-- Text on a laptop, icon on a phone, where the building name needs the room. -->
+  <button class="ghost" id="signout" title="Sign out" aria-label="Sign out">
+    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5h-8a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8"/><path d="M11 12h9"/><path d="m16.5 8 4 4-4 4"/></svg>
+    <span class="signout-label">Sign out</span></button>
 </header>
 <nav class="nav" id="nav" hidden></nav>
 <main id="app"><p class="muted center">Loading…</p></main>
 <button class="fab" id="quickfab" hidden aria-label="Quick report" title="Quick report">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-    stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
 </button>
 <script src="/app.js"></script>
 </body>
