@@ -17,11 +17,9 @@ const state = {
   weekFrom: null,  // first column of the schedule/roster/availability weeks
   poll: null,
   building: null,  // data for the checklist currently on screen
-  cleaners: null,  // cached list for the assignment picker
   editType: 'full', // which checklist the admin editor is showing
   collapsedGroups: new Set(), // building groups folded shut on Schedule/Checklists
   openSections: new Set(),    // secondary lists (e.g. "not scheduled") expanded open
-  openAreas: new Set(),       // area cards unfolded in the checklist editor
   availFilter: { q: '', day: 'all', status: 'all', from: '', to: '' },
 };
 
@@ -69,19 +67,10 @@ const otherType = (id) => (id === 'full' ? 'check' : 'full');
 /** One letter, for the schedule grid where a whole word won't fit. */
 const typeTag = (id) => (id === 'check' ? 'C' : 'F');
 
-/** Mirrors the server's REPORT_KINDS - what a cleaner can report from a
-    building, and how each shows up in the report form and the issues list.
-    Lost property used to be its own kind; it's folded into Note now. */
-const REPORT_KINDS = {
-  maintenance: {
-    label: 'Maintenance', pill: 'late',
-    placeholder: 'Broken cistern in the left cubicle…',
-  },
-  note: {
-    label: 'Note', pill: 'idle',
-    placeholder: 'Lost property, or anything else worth flagging…',
-  },
-};
+/** There is one kind of report - something in a building needs fixing - so
+    reporting is a description and a photo, with no category to choose first
+    and no label to read afterwards. Older reports all read as this one. */
+const REPORT_PLACEHOLDER = 'Broken cistern in the left cubicle…';
 
 /** Monday = 0, to match DAY_NAMES and the stored availability array. */
 const weekdayIndex = (day) => (asDate(day).getUTCDay() + 6) % 7;
@@ -184,9 +173,6 @@ const avatar = (name, size = '') =>
   `<span class="avatar ${size}" data-tone="${toneFor(name)}" title="${esc(name)}"
      >${esc(initials(name))}</span>`;
 
-const avatarStack = (people, size = 'sm') =>
-  `<span class="avatar-stack">${people.map((p) => avatar(p.name ?? p, size)).join('')}</span>`;
-
 let toastTimer;
 function toast(message, bad = false) {
   document.querySelector('.toast')?.remove();
@@ -255,7 +241,6 @@ async function loadPhoto(img, key) {
 function signOut() {
   state.token = '';
   state.user = null;
-  state.cleaners = null;
   localStorage.removeItem('bc.token');
   localStorage.removeItem('bc.user');
   location.hash = '';
@@ -309,7 +294,7 @@ const icon = (key) => `<span class="navicon">${svgIcon(key)}</span>`;
 // is already the most a phone can carry legibly; eight would be unreadable.
 const NAV = {
   cleaner: [
-    ['', 'My jobs', 'home'],
+    ['', 'Today', 'home'],
     ['roster', 'Roster', 'calendar'],
     ['issues', 'Reports', 'clipboard'],
   ],
@@ -816,7 +801,6 @@ async function renderOverview() {
 
   const pct = totals.total ? Math.round((totals.done / totals.total) * 100) : 0;
   const outstanding = runSheet.filter((b) => !b.completed_at).length;
-  const unassigned = runSheet.filter((b) => !b.assignees.length);
   const stale = rest.filter((b) => staleDays(b, day) >= 7);
   const fullCount = runSheet.filter((b) => b.cleanType === 'full').length;
 
@@ -842,13 +826,6 @@ async function renderOverview() {
              ${runSheet.length - fullCount} check${runSheet.length - fullCount === 1 ? '' : 's'}`
           : `Nothing scheduled — ${buildings.length} buildings in the park`}</div>
     </div>
-
-    ${unassigned.length ? `<div class="card">
-      <div class="banner warn">
-        <strong>Nobody assigned to
-        ${unassigned.map((b) => esc(b.name)).join(', ')}.</strong>
-        Open Planning to put a cleaner on ${unassigned.length > 1 ? 'them' : 'it'}.
-      </div></div>` : ''}
 
     <div class="card">
       <h2><span class="grow">Run sheet</span>
@@ -908,9 +885,6 @@ function overviewTile(b) {
   const alsoDone = b.signedOff.filter((s) => s.cleanType !== b.cleanType);
 
   const meta = [
-    b.assignees.length
-      ? `for ${b.assignees.map((a) => esc(firstName(a.name))).join(', ')}`
-      : b.scheduled ? '<span class="pill late">unassigned</span>' : null,
     b.crew.length ? `worked by ${b.crew.map((c) => esc(firstName(c))).join(', ')}` : null,
     b.last_at ? `last ${esc(time(b.last_at))}` : null,
     b.open_issues ? `${b.open_issues} open issue${b.open_issues > 1 ? 's' : ''}` : null,
@@ -930,7 +904,6 @@ function overviewTile(b) {
         ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
         ${typePill(b.cleanType)}
-        ${b.assignees.length ? avatarStack(b.assignees) : ''}
       </span>
       <span class="row tight nowrap">${status}
         <span class="tile-count num">${b.done}/${b.total}</span></span>
@@ -1086,12 +1059,12 @@ async function renderCleanerHome() {
   // "Today, Tue 12 Aug" is a fact they can act on; a greeting is not.
   chrome({ title: 'Today', section: '' });
 
-  const mine = buildings.filter((b) =>
-    b.assignees.some((a) => a.id === state.user.id));
-  const otherScheduled = buildings.filter((b) => b.scheduled && !mine.includes(b));
+  // The plan says what needs cleaning, not who does it, so today's list is
+  // the same for everyone: what is on, in priority order.
+  const todays = buildings.filter((b) => b.scheduled);
   const rest = buildings.filter((b) => !b.scheduled);
 
-  const doneCount = mine.filter((b) => b.completed_at).length;
+  const doneCount = todays.filter((b) => b.completed_at).length;
   const myShifts = (roster.shifts ?? []).filter((s) => s.user_id === state.user.id);
 
   app.innerHTML = `
@@ -1099,7 +1072,8 @@ async function renderCleanerHome() {
       <div class="pad tight spread">
         <span><strong>${esc(dayLabel(today))}</strong>
           <span class="muted small num"> ${esc(auDate(today))}</span></span>
-        ${mine.length ? `<span class="num small muted">${doneCount}/${mine.length} done</span>` : ''}
+        ${todays.length
+          ? `<span class="num small muted">${doneCount}/${todays.length} done</span>` : ''}
       </div>
       ${myShifts.length ? `<div class="banner info">
         <strong>You're on ${myShifts.map((s) =>
@@ -1110,18 +1084,14 @@ async function renderCleanerHome() {
       </div>` : ''}
     </div>
 
-    ${mine.length ? `<div class="card">
-      <h2>Your buildings</h2>
-      ${mine.map((b) => jobTile(b, true)).join('')}
+    ${todays.length ? `<div class="card">
+      <h2><span class="grow">To clean today</span>
+        <span class="num">${todays.length - doneCount} left</span></h2>
+      ${todays.map((b) => jobTile(b)).join('')}
     </div>` : `<div class="card"><div class="empty">
-      <b>Nothing assigned to you today</b>
+      <b>Nothing scheduled today</b>
       Pick any building below and start whenever you like.
     </div></div>`}
-
-    ${otherScheduled.length ? `<div class="card">
-      <h2>Also scheduled today</h2>
-      ${otherScheduled.map((b) => jobTile(b)).join('')}
-    </div>` : ''}
 
     ${rest.length ? `<div class="card">
       ${sectionToggle('home-rest', 'Other buildings', rest.length)}
@@ -1138,19 +1108,17 @@ async function renderCleanerHome() {
   poll(renderCleanerHome, 60000);
 }
 
-function jobTile(b, isMine = false) {
+function jobTile(b) {
   const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
   const status = b.completed_at
     ? `<span class="pill done">Done ${esc(time(b.completed_at))}</span>`
     : b.done ? '<span class="pill open">In progress</span>'
              : '<span class="pill idle">Not started</span>';
 
-  // On your own jobs, name the other people on it - not yourself.
-  const others = isMine
-    ? b.assignees.filter((a) => a.id !== state.user.id)
-    : b.assignees;
-  const who = others.length
-    ? `${isMine ? 'with' : 'for'} ${others.map((a) => esc(firstName(a.name))).join(', ')}`
+  // Who is already on it, so two people don't start the same building.
+  const who = b.crew.length
+    ? `${b.completed_at ? 'by' : 'started by'} ${
+      b.crew.map((c) => esc(firstName(c))).join(', ')}`
     : '';
 
   return `<button class="tile${b.completed_at ? ' finished' : ''}"
@@ -1159,7 +1127,6 @@ function jobTile(b, isMine = false) {
       <span class="row grow">
         ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
-        ${others.length ? avatarStack(others) : ''}
       </span>
       <span class="row tight nowrap">${status}
         <span class="tile-count num">${b.done}/${b.total}</span></span>
@@ -1197,7 +1164,6 @@ async function renderSchedule() {
       scheduled ? 'on' : '',
       scheduled ? `t-${type}` : '',
       c.completedAt ? 'complete' : '',
-      scheduled && !c.assignees?.length && !c.completedAt ? 'unassigned' : '',
     ].filter(Boolean).join(' ');
 
     let inner;
@@ -1206,12 +1172,11 @@ async function renderSchedule() {
           ${scheduled ? `<span class="prio">${c.priority}</span>` : ''}
           ${scheduled ? `<span class="typetag t-${type}"
             title="${esc(typeLabel(type))}">${typeTag(type)}</span>` : ''}
-          ${c.assignees?.length ? avatarStack(c.assignees) : ''}
           ${c.completedAt ? `<span class="tickmark">${svgIcon('check')}</span>` : ''}
         </div>
-        ${c.assignees?.length
-          ? `<div class="names">${c.assignees.map((a) => esc(firstName(a.name))).join(', ')}</div>`
-          : scheduled ? '<div class="warn-dot">unassigned</div>' : ''}
+        ${scheduled
+          ? `<span class="printonly celltype">${esc(typeLabel(type))}</span>` : ''}
+        ${c.note ? `<div class="names">${esc(c.note)}</div>` : ''}
         ${c.done ? `<div class="mini ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>` : ''}`;
     } else {
       inner = canEdit ? '<span class="plus">+</span>' : '';
@@ -1227,9 +1192,10 @@ async function renderSchedule() {
 
   app.innerHTML = `
     ${planningTabs('schedule')}
-    <div class="card"><div class="pad">${weekNav(from)}</div></div>
+    <div class="card noprint"><div class="pad">${weekNav(from)}</div></div>
 
-    <div class="card">
+    <div class="card" id="printarea">
+      <h1 class="printonly print-title">Cleaning Plan - Week Commencing ${esc(auDate(from))}</h1>
       <div class="grid-wrap">
         <table class="sched">
           <thead><tr>
@@ -1268,19 +1234,25 @@ async function renderSchedule() {
       <div class="legend">
         <span><i class="sw t-full"></i>Full Clean</span>
         <span><i class="sw t-check"></i>Check</span>
-        <span><i ></i>Signed off</span>
-        <span><i ></i>Nobody assigned</span>
+        <span><i class="sw done"></i>Signed off</span>
       </div>
+      <p class="printonly print-foot">
+        The number is the order it gets done in · a tick means signed off</p>
     </div>
 
-    <p class="tiny muted center">
+    <div class="row wrap noprint">
+      <button id="print">${svgIcon('printer')} Print / save as PDF</button>
+    </div>
+
+    <p class="tiny muted center noprint">
       ${canEdit
-        ? 'Tap any square to schedule that building, pick Full Clean or Check, choose who cleans it, and set its order.'
+        ? 'Tap any square to put that building on the plan, pick Full Clean or Check, and set the order it gets done in.'
         : 'This is the plan. The office sets it — tap a building on your home screen to start cleaning.'}
     </p>`;
 
   wirePlanningTabs(app);
   wireWeekNav(app, renderSchedule);
+  $('#print').onclick = () => window.print();
 
   app.querySelectorAll('[data-grouptoggle]').forEach((head) => {
     const key = head.dataset.grouptoggle;
@@ -1303,21 +1275,11 @@ async function renderSchedule() {
   poll(renderSchedule, 45000);
 }
 
-async function openScheduleEditor(data, buildingId, day) {
+function openScheduleEditor(data, buildingId, day) {
   const building = data.buildings.find((b) => b.id === buildingId);
   const cell = data.cells[`${buildingId}:${day}`] ?? {};
   const scheduled = cell.priority != null;
   let cleanType = cell.cleanType ?? 'full';
-
-  if (!state.cleaners) {
-    try {
-      state.cleaners = (await api('/cleaners')).cleaners;
-    } catch (e) {
-      return toast(e.message, true);
-    }
-  }
-
-  const picked = new Set((cell.assignees ?? []).map((a) => a.id));
 
   const sheet = openSheet(`
     <div class="sheet-head">
@@ -1340,41 +1302,6 @@ async function openScheduleEditor(data, buildingId, day) {
         <input id="prio" type="number" min="1" max="99" inputmode="numeric"
           value="${scheduled ? cell.priority : nextPriority(data, day)}"></label>
 
-      <div>
-        <span class="eyebrow block gap-top">
-          Who is cleaning it</span>
-        <div class="check-list">
-          ${[...state.cleaners]
-            // Would rather work it, then can work it, then can't. Sorting is
-            // the whole benefit of recording a preference: the right person
-            // is the first one you see.
-            .map((c) => ({ c, rank: prefersOn(c, day) ? 2 : worksOn(c, day) ? 1 : 0 }))
-            .sort((x, y) => y.rank - x.rank)
-            .map(({ c, rank }) => {
-              const window = availabilityOn(c, day);
-              const hours = timeRange(window?.from, window?.to);
-              const note = rank === 0
-                ? `<span class="tiny warntext">
-                    unavailable on ${esc(DAY_FULL[weekdayIndex(day)])}</span>`
-                : `<span class="tiny muted">${rank === 2 ? 'would rather work it' : 'available'}${
-                    hours ? ` · ${esc(hours)}` : ''}</span>`;
-              return `<label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
-                <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
-                ${avatar(c.name)}
-                <span class="grow">${esc(c.name)}
-                  ${rank === 2 ? `<span class="prefstar">${svgIcon('star')}</span>` : ''}
-                  ${note}</span>
-                <span class="tiny muted">${esc(c.role)}</span>
-              </label>`;
-            }).join('')
-            || '<p class="small muted">No cleaners yet — add them under People.</p>'}
-        </div>
-        <p class="tiny muted">
-          More than one person can be put on the same building. People who'd rather work
-          that day come first and anyone unavailable is listed last — but you can still
-          pick anyone.</p>
-      </div>
-
       <label class="field"><span>Note for this job (optional)</span>
         <input id="note" maxlength="200" value="${esc(cell.note ?? '')}"
           placeholder="Group arriving 2pm — finish by 1pm"></label>
@@ -1393,29 +1320,17 @@ async function openScheduleEditor(data, buildingId, day) {
     };
   });
 
-  // The <label> wraps the checkbox, so the whole row is already a hit target.
-  // Just mirror the resulting state into the class - flipping it by hand here
-  // would undo the browser's own toggle.
-  sheet.querySelectorAll('[data-pick]').forEach((row) => {
-    const box = row.querySelector('input');
-    box.onchange = () => row.classList.toggle('on', box.checked);
-  });
-
   sheet.querySelector('#cancel').onclick = closeSheet;
 
   sheet.querySelector('#save').onclick = async (ev) => {
     ev.currentTarget.disabled = true;
     try {
-      const assignees = [...sheet.querySelectorAll('[data-pick]')]
-        .filter((r) => r.querySelector('input').checked)
-        .map((r) => Number(r.dataset.pick));
       await api('/schedule', {
         method: 'POST',
         body: {
           buildingId, day, cleanType,
           priority: Number(sheet.querySelector('#prio').value) || 1,
           note: sheet.querySelector('#note').value,
-          assignees,
         },
       });
       closeSheet();
@@ -1521,7 +1436,15 @@ async function renderBuilding(id, wantType) {
       <div class="meter" id="meter"><i></i></div>
     </div>
 
-    <div id="areas">${data.areas.map((a) => areaCard(a, locked)).join('')}</div>
+    <div class="card" id="items">
+      ${data.items.length
+        ? data.items.map((t) => taskRow(t, locked)).join('')
+        : `<div class="empty"><b>Nothing on this checklist</b>
+           The office can add areas under Checklists.</div>`}
+    </div>
+    ${data.items.length ? `<p class="tiny muted center">
+      Tick each area as you finish it. What's inside each one is on the paper
+      checklist you carry.</p>` : ''}
 
     <div class="card" id="issues" hidden><h2>Open issues here</h2><div id="issuelist"></div></div>
 
@@ -1530,7 +1453,7 @@ async function renderBuilding(id, wantType) {
            below sixty items. -->
       <div class="actionbar">
         <button class="primary" id="complete"></button>
-        <button id="report" title="Report a problem or leave a note"
+        <button id="report" title="Report something that needs fixing"
           >${svgIcon('warning')} Report</button>
       </div>`}`;
 
@@ -1596,7 +1519,7 @@ async function completeBuilding(id, day, type, data, locked) {
       const anyway = await ask({
         title: 'Some photos are missing',
         body: `These items need a photo before this counts as finished:
-          <br><strong>${missing.slice(0, 6).map((m) => esc(`${m.area} — ${m.item}`)).join('<br>')}</strong>
+          <br><strong>${missing.slice(0, 6).map((m) => esc(m.item)).join('<br>')}</strong>
           ${missing.length > 6 ? `<br>…and ${missing.length - 6} more` : ''}
           <br><br>Add the photos if you can. If you genuinely can't, you can sign off
           anyway and the office will see the photos are missing.`,
@@ -1623,10 +1546,9 @@ async function completeBuilding(id, day, type, data, locked) {
   }
 }
 
-const counts = (data) => {
-  const tasks = data.areas.flatMap((a) => a.tasks);
-  return { done: tasks.filter((t) => t.done).length, total: tasks.length };
-};
+const counts = (data) => ({
+  done: data.items.filter((t) => t.done).length, total: data.items.length,
+});
 
 /* --------------------------------------------------- photos on an item */
 
@@ -1660,27 +1582,19 @@ function photoStrip(task, locked) {
   </div>`;
 }
 
-function areaCard(area, locked) {
-  const done = area.tasks.filter((t) => t.done).length;
-  const complete = done === area.tasks.length && area.tasks.length > 0;
-  return `<div class="card">
-    <div class="area-head${complete ? ' is-complete' : ''}" data-areahead="${area.id}">
-      <span class="grow">${esc(area.name)}</span>
-      <span class="area-count" data-areacount="${area.id}">${done}/${area.tasks.length}</span>
-    </div>
-    ${area.tasks.map((t) => `
-      <div class="taskwrap" data-tw="${t.id}">
-        <button class="task${t.done ? ' is-done' : ''}" data-t="${t.id}"
-          data-done="${t.done ? 1 : 0}">
-          <span class="box">${svgIcon('check')}</span>
-          <span class="grow">
-            <span class="item">${esc(t.item)}</span>
-            <span class="desc">${esc(t.description)}</span>
-            <span class="who">${t.done && t.by ? `${esc(t.by)} · ${esc(time(t.at))}` : ''}</span>
-          </span>
-        </button>
-        ${photoStrip(t, locked)}
-      </div>`).join('')}
+/** One tickable area of the building - "Bathrooms", "Stairwell". */
+function taskRow(t, locked) {
+  return `<div class="taskwrap" data-tw="${t.id}">
+    <button class="task${t.done ? ' is-done' : ''}" data-t="${t.id}"
+      data-done="${t.done ? 1 : 0}">
+      <span class="box">${svgIcon('check')}</span>
+      <span class="grow">
+        <span class="item">${esc(t.item)}</span>
+        <span class="desc">${esc(t.description)}</span>
+        <span class="who">${t.done && t.by ? `${esc(t.by)} · ${esc(time(t.at))}` : ''}</span>
+      </span>
+    </button>
+    ${photoStrip(t, locked)}
   </div>`;
 }
 
@@ -1788,20 +1702,10 @@ function paintBuilding(data, locked) {
       ${esc(data.completed.completed_by)} at ${esc(time(data.completed.completed_at))}</span>`;
   }
 
-  for (const area of data.areas) {
-    const cell = app.querySelector(`[data-areacount="${area.id}"]`);
-    if (!cell) continue;
-    const areaDone = area.tasks.filter((t) => t.done).length;
-    cell.textContent = `${areaDone}/${area.tasks.length}`;
-    cell.closest('.area-head')
-      ?.classList.toggle('is-complete', areaDone === area.tasks.length && area.tasks.length > 0);
-  }
-
   const issues = $('#issues');
   issues.hidden = !data.issues.length;
   $('#issuelist').innerHTML = data.issues.map((i) => `<div class="list-item small">
-      <strong>${esc((REPORT_KINDS[i.kind] ?? REPORT_KINDS.maintenance).label)}</strong> —
-      ${esc(i.detail)}
+      ${i.location ? `<strong>${esc(i.location)}</strong> — ` : ''}${esc(i.detail)}
       <div class="tiny muted">${esc(i.reported_by)} · ${esc(time(i.reported_at))}</div>
     </div>`).join('');
 
@@ -1822,14 +1726,13 @@ async function refreshBuilding(id, day, type, locked, force = false) {
     return; // transient - the next tick will catch up
   }
 
-  const shape = (d) => d.areas.flatMap((a) => a.tasks)
-    .map((t) => `${t.id}:${t.photos.length}`).join();
+  const shape = (d) => d.items.map((t) => `${t.id}:${t.photos.length}`).join();
   // A changed checklist (or a photo added or removed) means the markup itself
   // is out of date, so a full redraw is the only correct answer.
   if (force || shape(state.building) !== shape(data)) return renderBuilding(id, type);
 
   state.building = data;
-  for (const task of data.areas.flatMap((a) => a.tasks)) {
+  for (const task of data.items) {
     const el = app.querySelector(`.task[data-t="${task.id}"]`);
     if (!el) continue;
     el.classList.toggle('is-done', task.done);
@@ -1843,7 +1746,7 @@ async function refreshBuilding(id, day, type, locked, force = false) {
 async function toggleTask(el, buildingId, day) {
   const taskId = Number(el.dataset.t);
   const next = el.dataset.done !== '1';
-  const task = state.building.areas.flatMap((a) => a.tasks).find((t) => t.id === taskId);
+  const task = state.building.items.find((t) => t.id === taskId);
 
   // Flip immediately so the tap feels instant, then reconcile with the server.
   el.classList.toggle('is-done', next);
@@ -1881,22 +1784,17 @@ function renderReport(data, { back } = {}) {
   const goBack = back || (() => renderBuilding(data.building.id, data.cleanType));
   stopPolling();
   chrome({ title: 'Report', back: true });
-  let kind = 'maintenance';
 
   app.innerHTML = `<div class="card">
     <h2>${esc(data.building.name)}</h2>
     <div class="pad stack">
-      <div class="field"><span>What's this about?</span>
-        <div class="seg" id="kindSeg" role="tablist">
-          ${Object.entries(REPORT_KINDS).map(([k, m]) => `<button type="button" class="seg-btn"
-              data-kind="${k}" aria-pressed="${k === kind}">${m.emoji} ${esc(m.label)}</button>`)
-            .join('')}
-        </div></div>
+      <p class="small muted">Tell the office about something here that needs fixing.</p>
       <label class="field"><span>Where (optional)</span>
         <input id="where" maxlength="120" autocomplete="off"
           placeholder="Kitchen near main entrance"></label>
       <label class="field"><span>Details</span>
-        <textarea id="detail" placeholder="${esc(REPORT_KINDS[kind].placeholder)}"></textarea></label>
+        <textarea id="detail"
+          placeholder="${esc(REPORT_PLACEHOLDER)}"></textarea></label>
       ${state.config.photos ? `<label class="field"><span>Photo (optional)</span>
         <input type="file" id="photo" accept="image/*"></label>
         <img class="thumb" id="preview" hidden alt="">` : ''}
@@ -1905,15 +1803,6 @@ function renderReport(data, { back } = {}) {
       <button class="wide" id="cancel">Cancel</button>
     </div>
   </div>`;
-
-  $('#kindSeg').querySelectorAll('[data-kind]').forEach((b) => {
-    b.onclick = () => {
-      kind = b.dataset.kind;
-      $('#kindSeg').querySelectorAll('[data-kind]').forEach((x) =>
-        x.setAttribute('aria-pressed', String(x === b)));
-      $('#detail').placeholder = REPORT_KINDS[kind].placeholder;
-    };
-  });
 
   let photoBlob = null;
   const photoInput = $('#photo');
@@ -1946,7 +1835,6 @@ function renderReport(data, { back } = {}) {
         body: {
           buildingId: data.building.id,
           location: $('#where').value,
-          kind,
           detail: $('#detail').value,
           photoKey,
         },
@@ -2039,15 +1927,9 @@ async function renderIssues(status = 'open') {
       <button id="newreport">${svgIcon('plus')} New report</button>
     </div>
     <div class="card">
-      ${items.length ? items.map((i) => {
-        const meta = REPORT_KINDS[i.kind] ?? REPORT_KINDS.maintenance;
-        const where = i.location || i.area || '';
-        return `
+      ${items.length ? items.map((i) => `
         <div class="list-item">
-          <div class="spread wrap">
-            <strong>${esc(i.building)}${where ? ` — ${esc(where)}` : ''}</strong>
-            <span class="pill ${meta.pill}">${meta.emoji} ${esc(meta.label)}</span>
-          </div>
+          <strong>${esc(i.building)}${i.location ? ` — ${esc(i.location)}` : ''}</strong>
           <div>${esc(i.detail)}</div>
           ${i.photo_key ? `<img class="thumb" hidden alt="Reported problem"
              data-photo="${esc(i.photo_key)}">` : ''}
@@ -2056,8 +1938,7 @@ async function renderIssues(status = 'open') {
           ${canResolve ? `<div class="gap-top-sm">
             <button class="sm" data-r="${i.id}" data-reopen="${status === 'resolved'}">
               ${status === 'resolved' ? 'Reopen' : 'Mark resolved'}</button></div>` : ''}
-        </div>`;
-      }).join('')
+        </div>`).join('')
         : `<div class="empty"><b>Nothing ${status === 'open' ? 'outstanding' : 'here yet'}</b>
            ${status === 'open' ? "Everything reported so far has been dealt with." : ''}</div>`}
     </div>`;
@@ -2282,7 +2163,6 @@ function editAvailability(person, onDone) {
         },
       });
       closeSheet();
-      state.cleaners = null;
       toast('Availability saved');
       onDone();
     } catch (e) {
@@ -2744,15 +2624,13 @@ async function renderChecklistAdmin() {
   const data = await api(`/admin/checklist?type=${type}`);
   if (!live()) return;
   chrome({ title: 'Checklists', section: 'buildings', wide: true });
-  const areasFor = (id) => data.areas.filter((a) => a.building_id === id && a.active);
+  const itemsFor = (id) => (data.items[id] ?? []).filter((t) => t.active);
 
   const groups = groupBuildings(data.buildings);
 
   const buildingRow = (b, groupKey, folded) => {
-    const areas = areasFor(b.id);
-    const tasks = areas.reduce((n, a) => n + a.tasks, 0);
-    const search = [b.name, b.grp, ...areas.flatMap((a) => [a.name, ...(a.items ?? [])])]
-      .join(' ').toLowerCase();
+    const items = itemsFor(b.id);
+    const search = [b.name, b.grp, ...items.map((t) => t.item)].join(' ').toLowerCase();
     return `<button class="list-item brow" data-open="${b.id}" data-search="${esc(search)}"
         data-group="${esc(groupKey)}" ${folded ? 'hidden' : ''}
         data-off="${b.active ? 0 : 1}">
@@ -2762,11 +2640,12 @@ async function renderChecklistAdmin() {
         <span class="muted">${svgIcon('chevron')}</span>
       </div>
       <div class="small muted">
-        ${areas.length} area${areas.length === 1 ? '' : 's'} · ${tasks} item${tasks === 1 ? '' : 's'}
-        on the ${esc(typeLabel(type))}
-        <span class="tiny">· ${data.otherCounts[b.id] ?? 0} on the
-          ${esc(typeLabel(otherType(type)))}</span>
-        ${tasks === 0 ? '<span class="pill late">empty</span>' : ''}
+        ${items.length ? esc(items.map((t) => t.item).join(' · '))
+          : '<span class="pill late">empty</span>'}
+      </div>
+      <div class="tiny muted">
+        ${items.length} on the ${esc(typeLabel(type))} ·
+        ${data.otherCounts[b.id] ?? 0} on the ${esc(typeLabel(otherType(type)))}
       </div>
     </button>`;
   };
@@ -2791,7 +2670,7 @@ async function renderChecklistAdmin() {
     });
   }
 
-  const empties = data.buildings.filter((b) => b.active && !areasFor(b.id).length);
+  const empties = data.buildings.filter((b) => b.active && !itemsFor(b.id).length);
 
   app.innerHTML = `
     <div class="card">
@@ -2808,7 +2687,7 @@ async function renderChecklistAdmin() {
     <div class="card">
       <div class="pad">${typeTabs(type)}</div>
       <div class="pad">
-        <input id="search" placeholder="Search buildings, areas or items…" autocomplete="off">
+        <input id="search" placeholder="Search buildings or checklist items…" autocomplete="off">
       </div>
       <h2>
         ${esc(typeLabel(type))} — ${data.buildings.filter((b) => b.active).length} buildings</h2>
@@ -2818,7 +2697,7 @@ async function renderChecklistAdmin() {
           ${esc(typeLabel(type))} checklist:</strong>
           ${empties.slice(0, 6).map((b) => esc(b.name)).join(', ')}${
             empties.length > 6 ? `, and ${empties.length - 6} more` : ''}.
-          Open one and use <strong>Copy from the ${esc(typeLabel(otherType(type)))}</strong>
+          Open one and use <strong>Add the ${esc(typeLabel(otherType(type)))} list</strong>
           to start it off.
         </div></div>` : ''}
       ${groups.map((g) => {
@@ -2872,7 +2751,7 @@ async function renderChecklistAdmin() {
   $('#restore').onclick = async () => {
     const typed = await askText({
       title: 'Restore from the checklist file?',
-      body: 'Every building, area and item on <strong>both</strong> checklists goes back to '
+      body: 'Every building and every item on <strong>both</strong> checklists goes back to '
         + 'what <code>data/checklist.json</code> says. Anything you added here that is not in '
         + 'the file will be hidden. Cleaning records are kept.',
       label: 'Type "restore" to confirm',
@@ -2890,9 +2769,10 @@ async function renderChecklistAdmin() {
 }
 
 /**
- * Everything about one building's checklist on one page: its areas in order,
- * every item inside them, and the controls to add, edit, reorder and remove.
- * The old three-level drill-down meant four taps to fix a typo.
+ * One building's checklist on one page: the areas it is ticked off in, in
+ * order, and the controls to add, edit, reorder and remove them. The list is
+ * short by design - the jobs inside each area are on the paper checklist the
+ * cleaners carry, not in here.
  */
 async function renderBuildingEditor(buildingId) {
   const live = screen('#/buildings/');
@@ -2908,14 +2788,12 @@ async function renderBuildingEditor(buildingId) {
 
   chrome({ title: building.name, back: true, section: 'buildings', wide: true });
 
-  const areas = data.areas.filter((a) => a.building_id === buildingId);
-  // Only the unfolded areas need their items fetched. Pulling all of them
-  // would be eight round trips to draw a page showing one open card.
-  const open = areas.filter((a) => state.openAreas.has(a.id));
-  const details = await Promise.all(open.map((a) => api(`/admin/area?id=${a.id}`)));
-  if (!live()) return;
-  const byArea = new Map(details.map((d) => [d.area.id, d]));
-  const totalItems = areas.filter((a) => a.active).reduce((n, a) => n + a.tasks, 0);
+  const items = data.items[buildingId] ?? [];
+  const live_ = items.filter((t) => t.active);
+  // Most buildings walk the same areas either way, so every entry is on both
+  // and saying so on every row is noise. The badge only earns its place once
+  // this building's two lists actually differ.
+  const mixed = items.some((t) => t.clean_type !== 'both');
 
   const PHOTO_LABEL = {
     none: '',
@@ -2923,50 +2801,29 @@ async function renderBuildingEditor(buildingId) {
     required: `<span class="pill late">${svgIcon('camera')} required</span>`,
   };
 
-  const areaCardHtml = (area) => {
-    const detail = byArea.get(area.id);
-    const unfolded = Boolean(detail);
-    return `<div class="card areacard">
-      <button class="card-toggle spread" data-areatoggle="${area.id}" aria-expanded="${unfolded}">
-        <span class="grow">
-          <strong>${esc(area.name)}</strong>
-          ${area.clean_type === 'both' ? '<span class="pill open">on both checklists</span>' : ''}
-          ${area.active ? '' : '<span class="pill idle">hidden</span>'}
-          <span class="muted"> · ${area.tasks} item${
-            area.tasks === 1 ? '' : 's'}</span>
-        </span>
-        ${svgIcon('chevron', 'chev')}
-      </button>
-      ${unfolded ? `
-        ${detail.tasks.map((t, i) => `<div class="list-item itemrow"
-            data-off="${t.active ? 0 : 1}">
-          <div class="spread wrap">
-            <span class="grow">
-              <strong>${esc(t.item)}</strong>
-              ${PHOTO_LABEL[t.photo_mode] ?? ''}
-              ${t.active ? '' : '<span class="pill idle">hidden</span>'}
-              <span class="small muted">${esc(t.description)}</span>
-              ${t.history ? `<span class="tiny muted">${t.history} record${
-                t.history === 1 ? '' : 's'}</span>` : ''}
-            </span>
-            <span class="row tight">
-              <button class="iconbtn" data-move="${t.id}" data-dir="-1"
-                ${i === 0 ? 'disabled' : ''} aria-label="Move up" title="Move up"
-                >${svgIcon('up')}</button>
-              <button class="iconbtn" data-move="${t.id}" data-dir="1"
-                ${i === detail.tasks.length - 1 ? 'disabled' : ''}
-                aria-label="Move down" title="Move down">${svgIcon('down')}</button>
-              <button class="sm" data-edititem="${t.id}" data-area="${area.id}">Edit</button>
-            </span>
-          </div>
-        </div>`).join('') || '<div class="empty">No items yet.</div>'}
-        <div class="pad row wrap">
-          <button class="primary" data-additem="${area.id}">${svgIcon('plus')} Add an item</button>
-          <button data-editarea="${area.id}">Rename or hide</button>
-          <button data-orderitems="${area.id}">Reorder</button>
-        </div>` : ''}
-    </div>`;
-  };
+  const itemRow = (t, i) => `<div class="list-item itemrow" data-off="${t.active ? 0 : 1}">
+    <div class="spread wrap">
+      <span class="grow">
+        <strong>${esc(t.item)}</strong>
+        ${mixed && t.clean_type === 'both'
+          ? '<span class="pill open">on both checklists</span>' : ''}
+        ${PHOTO_LABEL[t.photo_mode] ?? ''}
+        ${t.active ? '' : '<span class="pill idle">hidden</span>'}
+        <span class="small muted">${esc(t.description)}</span>
+        ${t.history ? `<span class="tiny muted">${t.history} record${
+          t.history === 1 ? '' : 's'}</span>` : ''}
+      </span>
+      <span class="row tight">
+        <button class="iconbtn" data-move="${t.id}" data-dir="-1"
+          ${i === 0 ? 'disabled' : ''} aria-label="Move up" title="Move up"
+          >${svgIcon('up')}</button>
+        <button class="iconbtn" data-move="${t.id}" data-dir="1"
+          ${i === items.length - 1 ? 'disabled' : ''}
+          aria-label="Move down" title="Move down">${svgIcon('down')}</button>
+        <button class="sm" data-edititem="${t.id}">Edit</button>
+      </span>
+    </div>
+  </div>`;
 
   app.innerHTML = `
     <div class="card">
@@ -2974,30 +2831,32 @@ async function renderBuildingEditor(buildingId) {
       <div class="pad spread wrap">
         <div>
           <strong>${esc(building.name)}</strong>
-          <div class="small muted">${building.grp ? `${esc(building.grp)} · ` : ''}${
-            areas.filter((a) => a.active).length} area${areas.length === 1 ? '' : 's'} ·
-            ${totalItems} item${totalItems === 1 ? '' : 's'} on the ${esc(typeLabel(type))}</div>
+          <div class="small muted">${
+            building.grp && building.grp !== building.name ? `${esc(building.grp)} · ` : ''}${
+            live_.length} thing${live_.length === 1 ? '' : 's'} to tick off
+            on the ${esc(typeLabel(type))}</div>
         </div>
         <button id="editb">Edit building</button>
       </div>
     </div>
 
-    ${areas.length
-      ? areas.map(areaCardHtml).join('')
-      : `<div class="card"><div class="empty">
-          <b>No ${esc(typeLabel(type))} checklist yet</b>
-          Add an area, or copy the ${esc(typeLabel(otherType(type)))} across and trim it down.
-        </div></div>`}
-
     <div class="card">
+      ${items.length
+        ? items.map(itemRow).join('')
+        : `<div class="empty">
+            <b>No ${esc(typeLabel(type))} checklist yet</b>
+            Add an area, or bring the ${esc(typeLabel(otherType(type)))} list across.
+          </div>`}
       <div class="pad row wrap">
-        <button class="primary" id="addarea">${svgIcon('plus')} Add an area</button>
-        ${areas.length > 1 ? '<button id="orderareas">Reorder areas</button>' : ''}
-        <button id="copyover">${svgIcon('copy')} Copy from the ${esc(typeLabel(otherType(type)))}</button>
+        <button class="primary" id="additem">${svgIcon('plus')} Add an area</button>
+        ${items.length > 1 ? '<button id="orderitems">Reorder</button>' : ''}
+        <button id="copyover">${svgIcon('copy')} Add the ${
+          esc(typeLabel(otherType(type)))} list</button>
       </div>
       <p class="tiny muted pad">
-        Hiding an item or area takes it off future checklists and keeps every record of it
-        having been cleaned. Deleting throws those records away.</p>
+        Broad areas, not individual jobs — "Bathrooms", not "clean the sinks". Hiding one
+        takes it off future checklists and keeps every record of it having been cleaned;
+        deleting throws those records away.</p>
     </div>
 
     <div class="card danger">
@@ -3014,77 +2873,40 @@ async function renderBuildingEditor(buildingId) {
   wireTypeTabs(app, () => renderBuildingEditor(buildingId));
   const again = () => renderBuildingEditor(buildingId);
 
-  app.querySelectorAll('[data-areatoggle]').forEach((b) => {
-    b.onclick = () => {
-      const id = Number(b.dataset.areatoggle);
-      if (state.openAreas.has(id)) state.openAreas.delete(id); else state.openAreas.add(id);
-      again();
-    };
-  });
-
   $('#editb').onclick = () => editBuilding(building, again);
-  $('#addarea').onclick = () => editArea({ building_id: buildingId, clean_type: type }, again);
+  $('#additem').onclick = () => editTask({ building_id: buildingId, clean_type: type }, again);
 
-  $('#orderareas')?.addEventListener('click', () => openReorder({
-    title: 'Reorder areas',
+  $('#orderitems')?.addEventListener('click', () => openReorder({
+    title: 'Reorder',
     hint: `The order they appear on the ${typeLabel(type)} checklist.`,
-    items: areas.map((a) => ({
-      id: a.id, label: a.name, sub: a.clean_type === 'both' ? 'on both checklists' : '',
+    items: items.map((t) => ({
+      id: t.id, label: t.item, sub: t.active ? '' : 'hidden',
     })),
-    kind: 'areas',
+    kind: 'items',
     parentId: buildingId,
     cleanType: type,
     onDone: again,
   }));
 
-  app.querySelectorAll('[data-editarea]').forEach((b) => {
-    b.onclick = () => editArea(
-      areas.find((a) => a.id === Number(b.dataset.editarea)), again,
-    );
-  });
-
-  app.querySelectorAll('[data-additem]').forEach((b) => {
-    b.onclick = () => editTask({ area_id: Number(b.dataset.additem) }, again);
-  });
-
   app.querySelectorAll('[data-edititem]').forEach((b) => {
-    b.onclick = () => {
-      const areaId = Number(b.dataset.area);
-      const task = byArea.get(areaId).tasks.find((t) => t.id === Number(b.dataset.edititem));
-      editTask({ ...task, area_id: areaId }, again);
-    };
-  });
-
-  app.querySelectorAll('[data-orderitems]').forEach((b) => {
-    b.onclick = () => {
-      const areaId = Number(b.dataset.orderitems);
-      openReorder({
-        title: 'Reorder items',
-        hint: 'The order cleaners work through them.',
-        items: byArea.get(areaId).tasks.map((t) => ({
-          id: t.id, label: t.item, sub: t.active ? '' : 'hidden',
-        })),
-        kind: 'tasks',
-        parentId: areaId,
-        onDone: again,
-      });
-    };
+    b.onclick = () => editTask(
+      items.find((t) => t.id === Number(b.dataset.edititem)), again,
+    );
   });
 
   // One-tap nudge up or down, which is what people actually reach for when a
   // single item is in the wrong place.
   app.querySelectorAll('[data-move]').forEach((b) => {
     b.onclick = async () => {
-      const taskId = Number(b.dataset.move);
       const dir = Number(b.dataset.dir);
-      const areaId = Number(b.closest('.areacard').querySelector('[data-areatoggle]')
-        .dataset.areatoggle);
-      const ids = byArea.get(areaId).tasks.map((t) => t.id);
-      const at = ids.indexOf(taskId);
+      const ids = items.map((t) => t.id);
+      const at = ids.indexOf(Number(b.dataset.move));
       if (at < 0 || at + dir < 0 || at + dir >= ids.length) return;
       [ids[at], ids[at + dir]] = [ids[at + dir], ids[at]];
       try {
-        await api('/admin/reorder', { method: 'POST', body: { kind: 'tasks', parentId: areaId, ids } });
+        await api('/admin/reorder', {
+          method: 'POST', body: { kind: 'items', parentId: buildingId, cleanType: type, ids },
+        });
         again();
       } catch (e) {
         toast(e.message, true);
@@ -3095,18 +2917,19 @@ async function renderBuildingEditor(buildingId) {
   $('#copyover').onclick = async () => {
     const source = otherType(type);
     const go = await ask({
-      title: `Copy the ${typeLabel(source)} across?`,
-      body: `Every area and item on the <strong>${esc(typeLabel(source))}</strong> checklist for
-        ${esc(building.name)} is copied onto the <strong>${esc(typeLabel(type))}</strong>, ready
-        to trim down. Areas already on this checklist are left alone — nothing is doubled up.`,
-      confirmText: 'Copy them across',
+      title: `Add the ${typeLabel(source)} list to this one?`,
+      body: `Everything on the <strong>${esc(typeLabel(source))}</strong> checklist for
+        ${esc(building.name)} is put on the <strong>${esc(typeLabel(type))}</strong> as well,
+        ready to trim down. Anything already on this checklist is left alone — nothing is
+        doubled up, and nothing comes off the ${esc(typeLabel(source))}.`,
+      confirmText: 'Add them',
     });
     if (!go) return;
     try {
-      const res = await api('/admin/area/copy', {
+      const res = await api('/admin/checklist/copy', {
         method: 'POST', body: { buildingId, from: source, to: type },
       });
-      toast(`${res.areas} area${res.areas === 1 ? '' : 's'}, ${res.tasks} items copied`);
+      toast(`${res.items} added to the ${typeLabel(type)}`);
       again();
     } catch (e) {
       toast(e.message, true);
@@ -3245,94 +3068,9 @@ function editBuilding(b, onDone) {
   };
 }
 
-function editArea(a, onDone) {
-  const current = a?.clean_type ?? state.editType;
-  const sheet = openSheet(`
-    <div class="sheet-head"><strong>${a?.id ? 'Edit area' : 'Add an area'}</strong></div>
-    <div class="pad stack">
-      <label class="field"><span>Area name</span>
-        <input id="an" value="${esc(a?.name ?? '')}" placeholder="Bathrooms"></label>
-      <div class="field"><span>Which checklist is it on?</span>
-        <div class="seg" id="areaType">
-          ${[...CLEAN_TYPES(), { id: 'both', label: 'Both' }].map((t) => `
-            <button type="button" class="seg-btn" data-atype="${esc(t.id)}"
-              aria-pressed="${t.id === current}">${esc(t.label)}</button>`).join('')}
-        </div>
-        <p class="tiny muted">"Both" is for anything done on every
-          visit — edit it once and it stays the same on each checklist.</p>
-      </div>
-      ${a?.id ? `<label class="check-row ${a.active ? 'on' : ''}" data-act>
-          <input type="checkbox" ${a.active ? 'checked' : ''}>
-          <span class="grow">Show on the checklist
-            <span class="tiny muted">Hiding keeps every record of it
-              having been cleaned.</span></span>
-        </label>` : ''}
-      <p class="err" id="err"></p>
-      <button class="primary wide" id="save">${a?.id ? 'Save' : 'Add area'}</button>
-      ${a?.id ? '<button class="wide danger" id="del">Delete this area</button>' : ''}
-      <button class="wide" id="cancel">Cancel</button>
-    </div>`);
-
-  let cleanType = current;
-  sheet.querySelectorAll('[data-atype]').forEach((b) => {
-    b.onclick = () => {
-      cleanType = b.dataset.atype;
-      sheet.querySelectorAll('[data-atype]').forEach((x) =>
-        x.setAttribute('aria-pressed', String(x === b)));
-    };
-  });
-
-  const act = sheet.querySelector('[data-act] input');
-  if (act) act.onchange = () => act.closest('.check-row').classList.toggle('on', act.checked);
-  sheet.querySelector('#cancel').onclick = closeSheet;
-
-  sheet.querySelector('#save').onclick = async (ev) => {
-    ev.currentTarget.disabled = true;
-    try {
-      await api('/admin/area', {
-        method: 'POST',
-        body: {
-          id: a?.id,
-          buildingId: a?.building_id,
-          name: sheet.querySelector('#an').value,
-          cleanType,
-          active: act ? act.checked : true,
-        },
-      });
-      closeSheet();
-      toast('Saved');
-      onDone();
-    } catch (e) {
-      sheet.querySelector('#err').textContent = e.message;
-      ev.currentTarget.disabled = false;
-    }
-  };
-
-  sheet.querySelector('#del')?.addEventListener('click', async () => {
-    const typed = await askText({
-      title: `Delete "${a.name}"?`,
-      body: `This deletes the area, every item in it, and every day any of them was ever
-             ticked. <strong>This cannot be undone.</strong> To take it off checklists but
-             keep the history, turn off <strong>Show on the checklist</strong> instead.`,
-      label: 'Type the area name to confirm',
-      confirmText: 'Delete permanently',
-      danger: true,
-    });
-    if (typed === null) return;
-    try {
-      await api('/admin/area/delete', { method: 'POST', body: { id: a.id, confirm: typed } });
-      state.openAreas.delete(a.id);
-      closeSheet();
-      toast(`${a.name} deleted`);
-      onDone();
-    } catch (e) {
-      toast(e.message, true);
-    }
-  });
-}
-
 function editTask(t, onDone) {
   const mode = t?.photo_mode ?? 'none';
+  const current = t?.clean_type ?? state.editType;
   const PHOTO_CHOICES = [
     ['none', 'No photo', 'Just a tick box'],
     ['optional', 'Photo allowed', 'They can attach one if it helps'],
@@ -3340,13 +3078,23 @@ function editTask(t, onDone) {
   ];
 
   const sheet = openSheet(`
-    <div class="sheet-head"><strong>${t?.id ? 'Edit item' : 'Add an item'}</strong></div>
+    <div class="sheet-head"><strong>${t?.id ? 'Edit area' : 'Add an area'}</strong></div>
     <div class="pad stack">
-      <label class="field"><span>Item</span>
-        <input id="ti" value="${esc(t?.item ?? '')}" placeholder="Fire extinguisher"></label>
-      <label class="field"><span>What to do</span>
+      <label class="field"><span>Name</span>
+        <input id="ti" value="${esc(t?.item ?? '')}" placeholder="Bathrooms"></label>
+      <label class="field"><span>Note (optional)</span>
         <input id="td" value="${esc(t?.description ?? '')}"
-          placeholder="Check it is present and in date"></label>
+          placeholder="Both blocks, including the outside tap"></label>
+
+      <div class="field"><span>Which checklist is it on?</span>
+        <div class="seg" id="itemType">
+          ${[...CLEAN_TYPES(), { id: 'both', label: 'Both' }].map((c) => `
+            <button type="button" class="seg-btn" data-atype="${esc(c.id)}"
+              aria-pressed="${c.id === current}">${esc(c.label)}</button>`).join('')}
+        </div>
+        <p class="tiny muted">"Both" is for anything done on every
+          visit — edit it once and it stays the same on each checklist.</p>
+      </div>
 
       <div class="field"><span>Photo</span>
         <div class="check-list">
@@ -3366,10 +3114,19 @@ function editTask(t, onDone) {
               having been cleaned — this is the usual way to retire an item.</span></span>
         </label>` : ''}
       <p class="err" id="err"></p>
-      <button class="primary wide" id="save">${t?.id ? 'Save' : 'Add item'}</button>
-      ${t?.id ? '<button class="wide danger" id="del">Delete this item</button>' : ''}
+      <button class="primary wide" id="save">${t?.id ? 'Save' : 'Add it'}</button>
+      ${t?.id ? '<button class="wide danger" id="del">Delete this</button>' : ''}
       <button class="wide" id="cancel">Cancel</button>
     </div>`);
+
+  let cleanType = current;
+  sheet.querySelectorAll('[data-atype]').forEach((b) => {
+    b.onclick = () => {
+      cleanType = b.dataset.atype;
+      sheet.querySelectorAll('[data-atype]').forEach((x) =>
+        x.setAttribute('aria-pressed', String(x === b)));
+    };
+  });
 
   let photoMode = mode;
   sheet.querySelectorAll('[data-photo]').forEach((row) => {
@@ -3390,7 +3147,8 @@ function editTask(t, onDone) {
         method: 'POST',
         body: {
           id: t?.id,
-          areaId: t?.area_id,
+          buildingId: t?.building_id,
+          cleanType,
           item: sheet.querySelector('#ti').value,
           description: sheet.querySelector('#td').value,
           photoMode,
@@ -3438,7 +3196,7 @@ function editTask(t, onDone) {
       }
     }
     closeSheet();
-    toast('Item deleted');
+    toast(`${t.item} deleted`);
     onDone();
   });
 }
@@ -3519,7 +3277,7 @@ async function renderAdmin() {
       <h2>Maintenance alerts</h2>
       <div class="pad stack narrow">
         <p class="small muted">Push a free phone notification the moment a
-          cleaner reports a maintenance issue or a note. Uses
+          cleaner reports something that needs fixing. Uses
           <strong>ntfy.sh</strong> — no account, no cost, but the topic name below is the
           <em>only</em> thing keeping your alerts private, so don't share it anywhere public.</p>
         <label class="field"><span>Topic</span>
@@ -3569,7 +3327,6 @@ async function renderAdmin() {
         method: 'POST',
         body: { name: $('#n').value, role: $('#r').value, pin: $('#p').value },
       });
-      state.cleaners = null; // the assignment picker must pick up the new person
       toast('Person added');
       renderAdmin();
     } catch (e) {
@@ -3657,7 +3414,6 @@ async function renderAdmin() {
         method: 'POST',
         body: { confirm: confirmBox.value, includePeople: alsoPeople },
       });
-      state.cleaners = null;
       toast(`Database cleared${res.removedPeople ? ` · ${res.removedPeople} people removed` : ''}`);
       location.hash = '#/';
     } catch (e) {
@@ -3716,7 +3472,6 @@ async function renderAdmin() {
       if (!go) return;
       try {
         const res = await api('/users/delete', { method: 'POST', body: { id: Number(row.id) } });
-        state.cleaners = null;
         toast(`${row.name} deleted${res.removedShifts
           ? ` · ${res.removedShifts} upcoming shift${res.removedShifts === 1 ? '' : 's'} removed`
           : ''}`);
@@ -3738,7 +3493,6 @@ async function renderAdmin() {
             active: row.active === '1' ? 0 : 1,
           },
         });
-        state.cleaners = null;
         renderAdmin();
       } catch (e) {
         toast(e.message, true);

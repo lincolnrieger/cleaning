@@ -263,7 +263,6 @@ header.bar h1 {
 .avatar.sm { width: 20px; height: 20px; font-size: 9px; border-radius: 4px; }
 .avatar.lg { width: 36px; height: 36px; font-size: 13px; }
 
-.avatar-stack { display: inline-flex; gap: 2px; }
 
 /* Section nav */
 nav.nav {
@@ -810,30 +809,8 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 .progresshead-inner { display: flex; align-items: center; gap: var(--s3); padding: 9px var(--s4); }
 .progresshead .count { font-size: 14px; font-weight: 660; }
 
-/* Deliberately not sticky: each area is its own card, so a sticky heading
-   pins inside that card and ends up floating beside items it doesn't belong
-   to. The progress line above is what follows you down the list. */
-.area-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s3);
-  padding: 9px var(--s4);
-  background: var(--sunken);
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  font-size: 12.5px;
-  font-weight: 680;
-  letter-spacing: .01em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.area-head .area-count { font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; }
-.area-head.is-complete { color: var(--done); }
-
 .taskwrap { border-top: 1px solid var(--line-2); }
-.area-head + .taskwrap { border-top: none; }
+.taskwrap:first-child { border-top: none; }
 
 .task {
   display: flex;
@@ -1052,8 +1029,6 @@ td.weekend { background: var(--sunken); }
 .cell.on { background: var(--accent-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent); }
 .cell.on.t-check { background: var(--warn-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 28%, transparent); }
 .cell.complete { background: var(--done-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--done) 28%, transparent); }
-.cell.unassigned { box-shadow: inset 0 0 0 1px var(--warn); }
-.cell.complete.unassigned { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--done) 28%, transparent); }
 .cell[disabled] { opacity: 1; cursor: default; }
 .cell[disabled]:hover { background: none; }
 .cell.on[disabled]:hover { background: var(--accent-wash); }
@@ -1068,7 +1043,6 @@ td.weekend { background: var(--sunken); }
 .cell .mini.full > i { background: var(--done); }
 .cell .plus { color: var(--faint); opacity: 0; transition: opacity .12s; }
 .cell:hover .plus { opacity: 1; }
-.cell .warn-dot { font-size: 10px; color: var(--warn); font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
 
 /* One letter for which checklist, because a whole word won't fit in a cell. */
 .typetag {
@@ -1093,7 +1067,6 @@ td.weekend { background: var(--sunken); }
 .legend i.sw.yes { background: var(--done-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--done) 40%, transparent); }
 .legend i.sw.no { background: var(--line-2); box-shadow: inset 0 0 0 1px var(--line); }
 .legend i.sw.done { background: var(--done-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--done) 40%, transparent); }
-.legend i.sw.unassigned { background: var(--card); box-shadow: inset 0 0 0 1px var(--warn); }
 
 /* --------------------------------------------------------- availability */
 
@@ -1158,7 +1131,6 @@ table.avail td.dimmed { opacity: .28; }
 .brow:hover { background: var(--hover); }
 .brow strong { font-size: 14.5px; font-weight: 640; }
 
-.areacard { margin-top: var(--s3); }
 .itemrow { padding: 10px var(--s4); }
 .itemrow strong { font-size: 14px; font-weight: 620; }
 
@@ -1401,7 +1373,6 @@ code.phrase {
 
   .stat b { font-size: 17px; }
   .crow-list { grid-template-columns: 1fr; }
-  .area-head { top: calc(var(--bar-h) + 39px); }
 }
 
 /* On a phone the checklist is the whole screen, so its progress line sits
@@ -1457,6 +1428,27 @@ code.phrase {
   /* Today is a screen idea. On a printed sheet it is just another column. */
   table.sched thead th.is-today,
   table.sched thead th.is-today small { color: #000 !important; }
+
+  /* --- the weekly cleaning plan --- */
+
+  /* A group folded shut on screen is still part of the week. Printing the
+     plan with buildings silently missing would be worse than useless. */
+  table.sched tr[data-group] { display: table-row !important; }
+  .grouphead-row th { padding: 5pt 3pt 2pt !important; }
+  .grouphead-row .grouphead { font-size: 9pt; font-weight: 700; color: #000; padding: 0; }
+  .grouphead-row .chev, .grouphead-row .num { display: none !important; }
+
+  /* Colour is how the two cleans tell themselves apart on screen; on paper,
+     which is often greyscale, the word does it instead. */
+  .cell.on { background: #fff !important; border: none; box-shadow: none; min-height: 0; }
+  .cell .typetag, .cell .plus, .cell .mini { display: none !important; }
+  .cell .prio {
+    background: #000 !important; color: #fff !important;
+    font-size: 8pt; min-width: 13pt; padding: 0 2pt;
+  }
+  .cell .celltype { font-size: 8.5pt; color: #000; display: block; margin-top: 1pt; }
+  .cell .names { font-size: 7.5pt; color: #444; white-space: normal; overflow: visible; }
+  .cell .tickmark { color: #000; }
 
   /* On screen a note is clipped to keep the row tight; on paper nothing
      should be silently cut out of a document people work from. */

@@ -126,14 +126,14 @@ function clean(value, max) {
 const typeOf = (value, fallback = 'full') => (isCleanType(value) ? value : fallback);
 
 /**
- * Areas on a given checklist: that type's own areas, plus the shared ones.
+ * Entries on a given checklist: that type's own, plus the shared ones.
  *
  * Takes the parameter's position explicitly. SQLite numbers a bare `?` one
  * higher than the largest index used *so far in the statement text*, so a
  * fragment pasted into the middle of a query that already uses ?1/?2 can
  * silently claim an index that is already spoken for.
  */
-const typeMatch = (n) => `a.clean_type IN (?${n}, 'both')`;
+const typeMatch = (n) => `t.clean_type IN (?${n}, 'both')`;
 
 const typeLabel = (t) => CLEAN_TYPE_LABELS[t] ?? t;
 
@@ -370,10 +370,9 @@ async function logActivity(env, { day, buildingId, kind, detail, userName }) {
  */
 async function taskContext(env, taskId) {
   const row = await env.DB.prepare(
-    `SELECT a.building_id AS building_id, a.name AS area, a.clean_type AS clean_type,
+    `SELECT t.building_id AS building_id, t.clean_type AS clean_type,
             t.item AS item, t.photo_mode AS photo_mode
-     FROM tasks t JOIN areas a ON a.id = t.area_id
-     WHERE t.id = ? AND t.active = 1 AND a.active = 1`,
+     FROM tasks t WHERE t.id = ? AND t.active = 1`,
   ).bind(taskId).first();
   if (!row) throw new HttpError(404, 'That item is no longer on the checklist.');
   return row;
@@ -386,16 +385,19 @@ async function dropPhotos(env, keys) {
 }
 
 /**
- * The two things a cleaner can report from a building. `activity` is the
- * verb key logActivity/the front end's VERB map use; `tag`/`priority` feed
- * the ntfy.sh push. A general note isn't a problem, so it gets a lower push
- * priority than maintenance. Lost property used to be its own kind; it's
- * now just a note (see ensureLostPropertyFolded in _setup.js for the
- * one-time migration of existing reports).
+ * What a cleaner can report from a building. There is one kind: something
+ * needs fixing. "Lost property" and the general "note" are gone - they were a
+ * second thing to choose between at the top of the form, and choosing wrong
+ * meant a real fault sat in a list nobody was working through. Existing
+ * reports of both were turned into maintenance reports rather than deleted
+ * (see ensureReportKinds in _setup.js).
+ *
+ * `activity` is the verb key logActivity uses; `tag` and `priority` feed the
+ * ntfy.sh push. Kept as a map so the shape doesn't have to change if a second
+ * kind ever earns its place back.
  */
 const REPORT_KINDS = {
-  maintenance: { label: 'Maintenance', emoji: '🔧', tag: 'wrench', priority: 4, activity: 'issue' },
-  note: { label: 'Note', emoji: '📝', tag: 'memo', priority: 3, activity: 'note' },
+  maintenance: { label: 'Maintenance', tag: 'wrench', priority: 4, activity: 'issue' },
 };
 
 /* ------------------------------------------------------------ roster help */
@@ -535,43 +537,35 @@ const routes = {
     canRead(user);
     const day = dayParam(url, env);
 
-    const [buildings, totals, progress, crew, planned, assigned, statuses, lastDone, issues] =
+    const [buildings, totals, progress, crew, planned, statuses, lastDone, issues] =
       await Promise.all([
         env.DB.prepare(
           `SELECT id, name, grp FROM buildings WHERE active = 1 ORDER BY sort_order, name`,
         ).all(),
-        // Task counts per building per checklist, so the tiles can say how big
+        // Entry counts per building per checklist, so the rows can say how big
         // a Full Clean is versus a Check without a query each.
         env.DB.prepare(
-          `SELECT a.building_id, a.clean_type, COUNT(*) AS n
-           FROM tasks t JOIN areas a ON a.id = t.area_id
-           WHERE t.active = 1 AND a.active = 1
-           GROUP BY a.building_id, a.clean_type`,
+          `SELECT t.building_id, t.clean_type, COUNT(*) AS n
+           FROM tasks t WHERE t.active = 1
+           GROUP BY t.building_id, t.clean_type`,
         ).all(),
         env.DB.prepare(
-          `SELECT a.building_id, a.clean_type, COUNT(*) AS n
+          `SELECT t.building_id, t.clean_type, COUNT(*) AS n
            FROM task_log l
            JOIN tasks t ON t.id = l.task_id AND t.active = 1
-           JOIN areas a ON a.id = t.area_id AND a.active = 1
            WHERE l.day = ?1 AND l.done = 1
-           GROUP BY a.building_id, a.clean_type`,
+           GROUP BY t.building_id, t.clean_type`,
         ).bind(day).all(),
         env.DB.prepare(
-          `SELECT a.building_id AS building_id, l.user_name AS name, MAX(l.updated_at) AS last_at
+          `SELECT t.building_id AS building_id, l.user_name AS name, MAX(l.updated_at) AS last_at
            FROM task_log l
            JOIN tasks t ON t.id = l.task_id
-           JOIN areas a ON a.id = t.area_id
            WHERE l.day = ?1 AND l.user_name IS NOT NULL
-           GROUP BY a.building_id, l.user_name
+           GROUP BY t.building_id, l.user_name
            ORDER BY last_at DESC`,
         ).bind(day).all(),
         env.DB.prepare(
           `SELECT id, building_id, clean_type, priority, note FROM schedule WHERE day = ?`,
-        ).bind(day).all(),
-        env.DB.prepare(
-          `SELECT sa.schedule_id, sa.user_id, sa.user_name
-           FROM schedule_assignees sa JOIN schedule s ON s.id = sa.schedule_id
-           WHERE s.day = ? ORDER BY sa.user_name`,
         ).bind(day).all(),
         env.DB.prepare(
           `SELECT building_id, clean_type, completed_at, completed_by
@@ -583,11 +577,11 @@ const routes = {
         ).bind(day).all(),
         env.DB.prepare(
           `SELECT building_id, COUNT(*) AS n FROM maintenance
-           WHERE status = 'open' AND kind != 'note' GROUP BY building_id`,
+           WHERE status = 'open' GROUP BY building_id`,
         ).all(),
       ]);
 
-    // Sum a building's own areas plus the shared 'both' ones.
+    // Sum a building's own items for this type plus the shared 'both' ones.
     const perType = (rows, id) => {
       const pick = (t) => rows.results.find((r) => r.building_id === id && r.clean_type === t)?.n ?? 0;
       const shared = pick('both');
@@ -606,11 +600,6 @@ const routes = {
       if (!prev || c.last_at > prev) lastAt.set(c.building_id, c.last_at);
     }
 
-    const assigneesFor = new Map();
-    for (const a of assigned.results) {
-      if (!assigneesFor.has(a.schedule_id)) assigneesFor.set(a.schedule_id, []);
-      assigneesFor.get(a.schedule_id).push({ id: a.user_id, name: a.user_name });
-    }
     const planFor = new Map(planned.results.map((p) => [p.building_id, p]));
     const lastFor = new Map(lastDone.results.map((r) => [r.building_id, r.last_day]));
     const issuesFor = new Map(issues.results.map((r) => [r.building_id, r.n]));
@@ -644,7 +633,6 @@ const routes = {
         scheduled: Boolean(plan),
         priority: plan?.priority ?? null,
         note: plan?.note ?? null,
-        assignees: plan ? (assigneesFor.get(plan.id) ?? []) : [],
         lastCleaned: lastFor.get(b.id) ?? null,
       };
     });
@@ -659,21 +647,7 @@ const routes = {
     return json({ day, buildings: enriched });
   },
 
-  /* --- scheduling and assignment --- */
-
-  'GET /cleaners': async (_req, env, { user }) => {
-    require(user, 'office', 'admin');
-    const { results } = await env.DB.prepare(
-      `SELECT id, name, role, availability FROM users
-       WHERE active = 1 AND role IN ('cleaner', 'admin') ORDER BY name`,
-    ).all();
-    return json({
-      cleaners: results.map((c) => {
-        const { days, idealHours } = parseAvailability(c.availability);
-        return { ...c, availability: days, idealHours };
-      }),
-    });
-  },
+  /* --- the weekly cleaning plan --- */
 
   // The day-grid: every building crossed with a range of days.
   'GET /schedule': async (_req, env, { user, url }) => {
@@ -684,7 +658,7 @@ const routes = {
     const days = Array.from({ length: span }, (_, i) => addDays(from, i));
     const to = days[days.length - 1];
 
-    const [buildings, rows, assignees, totals, progress, completions] = await Promise.all([
+    const [buildings, rows, totals, progress, completions] = await Promise.all([
       env.DB.prepare(
         'SELECT id, name, grp FROM buildings WHERE active = 1 ORDER BY sort_order, name',
       ).all(),
@@ -693,22 +667,15 @@ const routes = {
          FROM schedule WHERE day BETWEEN ? AND ?`,
       ).bind(from, to).all(),
       env.DB.prepare(
-        `SELECT sa.schedule_id, sa.user_id, sa.user_name
-         FROM schedule_assignees sa JOIN schedule s ON s.id = sa.schedule_id
-         WHERE s.day BETWEEN ? AND ? ORDER BY sa.user_name`,
-      ).bind(from, to).all(),
-      env.DB.prepare(
-        `SELECT a.building_id, a.clean_type, COUNT(*) AS n FROM tasks t
-         JOIN areas a ON a.id = t.area_id
-         WHERE t.active = 1 AND a.active = 1 GROUP BY a.building_id, a.clean_type`,
+        `SELECT t.building_id, t.clean_type, COUNT(*) AS n FROM tasks t
+         WHERE t.active = 1 GROUP BY t.building_id, t.clean_type`,
       ).all(),
       env.DB.prepare(
-        `SELECT a.building_id, a.clean_type, l.day, COUNT(*) AS n
+        `SELECT t.building_id, t.clean_type, l.day, COUNT(*) AS n
          FROM task_log l
          JOIN tasks t ON t.id = l.task_id AND t.active = 1
-         JOIN areas a ON a.id = t.area_id AND a.active = 1
          WHERE l.done = 1 AND l.day BETWEEN ? AND ?
-         GROUP BY a.building_id, a.clean_type, l.day`,
+         GROUP BY t.building_id, t.clean_type, l.day`,
       ).bind(from, to).all(),
       env.DB.prepare(
         `SELECT building_id, day, clean_type, completed_at, completed_by
@@ -723,12 +690,6 @@ const routes = {
       return { full: pick('full') + shared, check: pick('check') + shared };
     };
 
-    const byScheduleId = new Map();
-    for (const a of assignees.results) {
-      if (!byScheduleId.has(a.schedule_id)) byScheduleId.set(a.schedule_id, []);
-      byScheduleId.get(a.schedule_id).push({ id: a.user_id, name: a.user_name });
-    }
-
     const cells = {};
     const put = (bid, day, patch) => {
       const key = `${bid}:${day}`;
@@ -739,7 +700,6 @@ const routes = {
         cleanType: typeOf(r.clean_type),
         priority: r.priority,
         note: r.note,
-        assignees: byScheduleId.get(r.id) ?? [],
       });
     }
     for (const p of progress.results) {
@@ -776,7 +736,7 @@ const routes = {
 
   'POST /schedule': async (req, env, { user }) => {
     require(user, 'office', 'admin');
-    const { buildingId, day: rawDay, priority, note, assignees, cleanType } = await req.json();
+    const { buildingId, day: rawDay, priority, note, cleanType } = await req.json();
     const day = isDay(rawDay) ? rawDay : localDay(env);
     const id = Number(buildingId);
     const type = typeOf(cleanType);
@@ -798,32 +758,9 @@ const routes = {
       clean(note, 200) || null, user.name, now(),
     ).run();
 
-    const row = await env.DB.prepare(
-      'SELECT id FROM schedule WHERE building_id = ? AND day = ?',
-    ).bind(id, day).first();
-
-    // Replace the assignee list wholesale - simpler than diffing, and the
-    // lists are tiny.
-    await env.DB.prepare('DELETE FROM schedule_assignees WHERE schedule_id = ?')
-      .bind(row.id).run();
-
-    const wanted = Array.isArray(assignees) ? assignees.map(Number).slice(0, 20) : [];
-    if (wanted.length) {
-      const { results: valid } = await env.DB.prepare(
-        `SELECT id, name FROM users
-         WHERE active = 1 AND id IN (${wanted.map(() => '?').join(',')})`,
-      ).bind(...wanted).all();
-      if (valid.length) {
-        await env.DB.batch(valid.map((u) => env.DB.prepare(
-          `INSERT OR IGNORE INTO schedule_assignees (schedule_id, user_id, user_name)
-           VALUES (?, ?, ?)`,
-        ).bind(row.id, u.id, u.name)));
-      }
-    }
-
     await logActivity(env, {
       day, buildingId: id, kind: 'scheduled',
-      detail: `${typeLabel(type)}${wanted.length ? ' — assigned' : ''}`,
+      detail: typeLabel(type),
       userName: user.name,
     });
 
@@ -841,12 +778,7 @@ const routes = {
     ).bind(id, day).first();
     const type = typeOf(row?.clean_type);
 
-    if (row) {
-      // Explicit child delete: D1 does not enable foreign key cascades.
-      await env.DB.prepare('DELETE FROM schedule_assignees WHERE schedule_id = ?')
-        .bind(row.id).run();
-      await env.DB.prepare('DELETE FROM schedule WHERE id = ?').bind(row.id).run();
-    }
+    if (row) await env.DB.prepare('DELETE FROM schedule WHERE id = ?').bind(row.id).run();
 
     // Optional, because un-planning a day and erasing the work someone already
     // did that day are two different intentions. Scoped to the checklist that
@@ -855,20 +787,17 @@ const routes = {
       const { results: photos } = await env.DB.prepare(
         `SELECT p.photo_key FROM task_photos p
          JOIN tasks t ON t.id = p.task_id
-         JOIN areas a ON a.id = t.area_id
-         WHERE p.day = ?1 AND a.building_id = ?2 AND ${typeMatch(3)}`,
+         WHERE p.day = ?1 AND t.building_id = ?2 AND ${typeMatch(3)}`,
       ).bind(day, id, type).all();
 
       await env.DB.batch([
         env.DB.prepare(
           `DELETE FROM task_photos WHERE day = ?1 AND task_id IN (
-             SELECT t.id FROM tasks t JOIN areas a ON a.id = t.area_id
-             WHERE a.building_id = ?2 AND ${typeMatch(3)})`,
+             SELECT t.id FROM tasks t WHERE t.building_id = ?2 AND ${typeMatch(3)})`,
         ).bind(day, id, type),
         env.DB.prepare(
           `DELETE FROM task_log WHERE day = ?1 AND task_id IN (
-             SELECT t.id FROM tasks t JOIN areas a ON a.id = t.area_id
-             WHERE a.building_id = ?2 AND ${typeMatch(3)})`,
+             SELECT t.id FROM tasks t WHERE t.building_id = ?2 AND ${typeMatch(3)})`,
         ).bind(day, id, type),
         env.DB.prepare(
           'DELETE FROM building_status WHERE building_id = ? AND day = ? AND clean_type = ?',
@@ -919,31 +848,27 @@ const routes = {
     const cleanType = typeOf(requested, typeOf(plan?.clean_type));
 
     const { results: sizes } = await env.DB.prepare(
-      `SELECT a.clean_type, COUNT(*) AS n FROM tasks t
-       JOIN areas a ON a.id = t.area_id
-       WHERE a.building_id = ? AND t.active = 1 AND a.active = 1
-       GROUP BY a.clean_type`,
+      `SELECT t.clean_type, COUNT(*) AS n FROM tasks t
+       WHERE t.building_id = ? AND t.active = 1
+       GROUP BY t.clean_type`,
     ).bind(id).all();
     const sizeOf = (t) => (sizes.find((r) => r.clean_type === t)?.n ?? 0)
       + (sizes.find((r) => r.clean_type === 'both')?.n ?? 0);
 
     const { results: rows } = await env.DB.prepare(
-      `SELECT a.id AS area_id, a.name AS area_name, a.sort_order AS area_sort,
-              t.id AS task_id, t.item, t.description, t.photo_mode, t.sort_order AS task_sort,
+      `SELECT t.id AS task_id, t.item, t.description, t.photo_mode,
               l.done, l.user_name, l.updated_at
-       FROM areas a
-       JOIN tasks t ON t.area_id = a.id AND t.active = 1
+       FROM tasks t
        LEFT JOIN task_log l ON l.task_id = t.id AND l.day = ?2
-       WHERE a.building_id = ?1 AND a.active = 1 AND ${typeMatch(3)}
-       ORDER BY a.sort_order, a.name, t.sort_order, t.id`,
+       WHERE t.building_id = ?1 AND t.active = 1 AND ${typeMatch(3)}
+       ORDER BY t.sort_order, t.id`,
     ).bind(id, day, cleanType).all();
 
     const { results: photos } = await env.DB.prepare(
       `SELECT p.id, p.task_id, p.photo_key, p.user_name, p.created_at
        FROM task_photos p
        JOIN tasks t ON t.id = p.task_id
-       JOIN areas a ON a.id = t.area_id
-       WHERE a.building_id = ?1 AND p.day = ?2 AND ${typeMatch(3)}
+       WHERE t.building_id = ?1 AND p.day = ?2 AND ${typeMatch(3)}
        ORDER BY p.id`,
     ).bind(id, day, cleanType).all();
 
@@ -955,24 +880,16 @@ const routes = {
       });
     }
 
-    const areas = [];
-    for (const r of rows) {
-      let area = areas.find((a) => a.id === r.area_id);
-      if (!area) {
-        area = { id: r.area_id, name: r.area_name, tasks: [] };
-        areas.push(area);
-      }
-      area.tasks.push({
-        id: r.task_id,
-        item: r.item,
-        description: r.description,
-        photoMode: PHOTO_MODES.includes(r.photo_mode) ? r.photo_mode : 'none',
-        photos: photosFor.get(r.task_id) ?? [],
-        done: Boolean(r.done),
-        by: r.user_name,
-        at: r.updated_at,
-      });
-    }
+    const items = rows.map((r) => ({
+      id: r.task_id,
+      item: r.item,
+      description: r.description,
+      photoMode: PHOTO_MODES.includes(r.photo_mode) ? r.photo_mode : 'none',
+      photos: photosFor.get(r.task_id) ?? [],
+      done: Boolean(r.done),
+      by: r.user_name,
+      at: r.updated_at,
+    }));
 
     const status = await env.DB.prepare(
       `SELECT completed_at, completed_by FROM building_status
@@ -980,8 +897,8 @@ const routes = {
     ).bind(id, day, cleanType).first();
 
     const { results: issues } = await env.DB.prepare(
-      `SELECT id, kind, detail, photo_key, status, reported_by, reported_at
-       FROM maintenance WHERE building_id = ? AND status = 'open' AND kind != 'note'
+      `SELECT id, location, detail, photo_key, status, reported_by, reported_at
+       FROM maintenance WHERE building_id = ? AND status = 'open'
        ORDER BY id DESC`,
     ).bind(id).all();
 
@@ -993,7 +910,7 @@ const routes = {
       sizes: { full: sizeOf('full'), check: sizeOf('check') },
       scheduledType: plan ? typeOf(plan.clean_type) : null,
       scheduleNote: plan?.note ?? null,
-      areas,
+      items,
       completed: status ?? null,
       issues,
       readOnly: user.role === 'office',
@@ -1019,7 +936,7 @@ const routes = {
       day,
       buildingId: task.building_id,
       kind: done ? 'done' : 'undone',
-      detail: `${task.area} - ${task.item}`,
+      detail: task.item,
       userName: user.name,
     });
 
@@ -1072,11 +989,8 @@ const routes = {
     ).bind(taskId, day, key, body.byteLength, user.id, user.name, ts).run();
 
     await logActivity(env, {
-      day,
-      buildingId: task.building_id,
-      kind: 'photo',
-      detail: `${task.area} - ${task.item}`,
-      userName: user.name,
+      day, buildingId: task.building_id, kind: 'photo',
+      detail: task.item, userName: user.name,
     });
 
     return json({
@@ -1089,11 +1003,8 @@ const routes = {
     canTick(user);
     const id = Number((await req.json()).id);
     const row = await env.DB.prepare(
-      `SELECT p.id, p.photo_key, p.day, t.item, a.name AS area, a.building_id
-       FROM task_photos p
-       JOIN tasks t ON t.id = p.task_id
-       JOIN areas a ON a.id = t.area_id
-       WHERE p.id = ?`,
+      `SELECT p.id, p.photo_key, p.day, t.item, t.building_id
+       FROM task_photos p JOIN tasks t ON t.id = p.task_id WHERE p.id = ?`,
     ).bind(id).first();
     if (!row) throw new HttpError(404, 'That photo has already gone.');
 
@@ -1103,7 +1014,7 @@ const routes = {
       day: row.day,
       buildingId: row.building_id,
       kind: 'photo_removed',
-      detail: `${row.area} - ${row.item}`,
+      detail: row.item,
       userName: user.name,
     });
     return json({ ok: true });
@@ -1131,13 +1042,12 @@ const routes = {
     // hard block - a dead camera phone shouldn't strand a finished building -
     // but the office sees it was signed off short.
     const { results: missing } = await env.DB.prepare(
-      `SELECT t.id, t.item, a.name AS area FROM tasks t
-       JOIN areas a ON a.id = t.area_id
-       WHERE a.building_id = ?1 AND t.active = 1 AND a.active = 1
+      `SELECT t.id, t.item FROM tasks t
+       WHERE t.building_id = ?1 AND t.active = 1
          AND t.photo_mode = 'required' AND ${typeMatch(3)}
          AND NOT EXISTS (
            SELECT 1 FROM task_photos p WHERE p.task_id = t.id AND p.day = ?2)
-       ORDER BY a.sort_order, t.sort_order`,
+       ORDER BY t.sort_order`,
     ).bind(id, day, type).all();
 
     if (missing.length && !override) {
@@ -1164,7 +1074,7 @@ const routes = {
     return json({ ok: true, completed: { completed_at: ts, completed_by: user.name } });
   },
 
-  /* --- maintenance and notes --- */
+  /* --- maintenance reports --- */
 
   'GET /maintenance': async (req, env, { user, url }) => {
     canRead(user);
@@ -1172,10 +1082,9 @@ const routes = {
     const { results } = await env.DB.prepare(
       `SELECT m.id, m.kind, m.detail, m.photo_key, m.status, m.day, m.location,
               m.reported_by, m.reported_at, m.resolved_by, m.resolved_at,
-              b.name AS building, a.name AS area
+              b.name AS building
        FROM maintenance m
        JOIN buildings b ON b.id = m.building_id
-       LEFT JOIN areas a ON a.id = m.area_id
        WHERE m.status = ? ORDER BY m.id DESC LIMIT 200`,
     ).bind(status).all();
     return json({ items: results });
@@ -1191,8 +1100,8 @@ const routes = {
     const info = REPORT_KINDS[type];
     const day = localDay(env);
     const id = Number(buildingId);
-    // Free text now, not a dropdown of areas: "the tap by the back door" is
-    // the answer people actually have, and no list of areas contains it.
+    // Free text, not a dropdown: "the tap by the back door" is the answer
+    // people actually have, and no list of places contains it.
     const where = clean(location, 120);
 
     const building = await env.DB.prepare(
@@ -1202,8 +1111,8 @@ const routes = {
 
     const res = await env.DB.prepare(
       `INSERT INTO maintenance
-         (building_id, area_id, location, kind, detail, photo_key, day, reported_by, reported_at)
-       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+         (building_id, location, kind, detail, photo_key, day, reported_by, reported_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, where, type, text, clean(photoKey, 200) || null, day, user.name, now()).run();
 
     await logActivity(env, {
@@ -1215,7 +1124,7 @@ const routes = {
     // Fires after the response is already on its way back, so a slow or dead
     // ntfy.sh never makes a cleaner wait to submit a report.
     waitUntil(sendNtfy(env, {
-      title: `${info.emoji} ${info.label} — ${building.name}${where ? ` (${where})` : ''}`,
+      title: `${info.label} — ${building.name}${where ? ` (${where})` : ''}`,
       message: `${text}\n\nReported by ${user.name}`,
       priority: info.priority,
       tags: [info.tag],
@@ -1332,11 +1241,8 @@ const routes = {
           .bind(await hashPin(env, pin), Number(id)).run();
       }
       // A renamed person should read correctly on next week's roster too.
-      await env.DB.batch([
-        env.DB.prepare('UPDATE roster SET user_name = ? WHERE user_id = ?').bind(who, Number(id)),
-        env.DB.prepare('UPDATE schedule_assignees SET user_name = ? WHERE user_id = ?')
-          .bind(who, Number(id)),
-      ]);
+      await env.DB.prepare('UPDATE roster SET user_name = ? WHERE user_id = ?')
+        .bind(who, Number(id)).run();
       return json({ ok: true });
     }
 
@@ -1372,7 +1278,6 @@ const routes = {
     ).bind(id, localDay(env)).first();
 
     await env.DB.batch([
-      env.DB.prepare('DELETE FROM schedule_assignees WHERE user_id = ?').bind(id),
       env.DB.prepare('DELETE FROM roster WHERE user_id = ?').bind(id),
       // Keep the history, drop the link.
       env.DB.prepare('UPDATE task_log SET user_id = NULL WHERE user_id = ?').bind(id),
@@ -1653,65 +1558,43 @@ const routes = {
   'GET /admin/checklist': async (_req, env, { user, url }) => {
     require(user, 'admin');
     const cleanType = typeOf(url.searchParams.get('type'));
+    const other = CLEAN_TYPES.find((t) => t !== cleanType);
 
     const { results: buildings } = await env.DB.prepare(
       'SELECT id, name, grp, sort_order, active FROM buildings ORDER BY sort_order, name',
     ).all();
-    const { results: areas } = await env.DB.prepare(
-      `SELECT a.id, a.building_id, a.name, a.clean_type, a.sort_order, a.active,
-              (SELECT COUNT(*) FROM tasks t WHERE t.area_id = a.id AND t.active = 1) AS tasks
-       FROM areas a ORDER BY a.sort_order, a.name`,
+    // A building's list is a handful of broad areas now, not forty jobs, so
+    // the whole checklist comes back in one request and opening a building
+    // costs nothing. The history counts ride along because deleting an item
+    // should be a decision - the dialog can say what goes with it.
+    const { results: rows } = await env.DB.prepare(
+      `SELECT t.id, t.building_id, t.item, t.description, t.photo_mode, t.clean_type,
+              t.sort_order, t.active,
+              (SELECT COUNT(*) FROM task_log l WHERE l.task_id = t.id) AS history,
+              (SELECT COUNT(*) FROM task_photos p WHERE p.task_id = t.id) AS photos
+       FROM tasks t ORDER BY t.sort_order, t.id`,
     ).all();
-    // Item names only, grouped by area - lets the search box on this screen
-    // find "Kettle" without a second round trip once someone taps in.
-    const { results: items } = await env.DB.prepare(
-      `SELECT area_id, item FROM tasks WHERE active = 1 ORDER BY sort_order`,
-    ).all();
-    const itemsByArea = new Map();
-    for (const { area_id, item } of items) {
-      if (!itemsByArea.has(area_id)) itemsByArea.set(area_id, []);
-      itemsByArea.get(area_id).push(item);
+
+    const items = {};
+    const otherCounts = {};
+    for (const t of rows) {
+      if (t.clean_type === cleanType || t.clean_type === 'both') {
+        (items[t.building_id] ??= []).push(t);
+      }
+      // Counts for the other checklist, so its tab can say how big it is
+      // before you switch to it.
+      if (t.active && (t.clean_type === other || t.clean_type === 'both')) {
+        otherCounts[t.building_id] = (otherCounts[t.building_id] ?? 0) + 1;
+      }
     }
 
     return json({
       cleanType,
       buildings,
-      areas: areas
-        .filter((a) => a.clean_type === cleanType || a.clean_type === 'both')
-        .map((a) => ({ ...a, items: itemsByArea.get(a.id) ?? [] })),
-      // Counts for the other checklist, so the tab can say how big it is
-      // before you switch to it.
-      otherCounts: buildings.reduce((acc, b) => {
-        const other = CLEAN_TYPES.find((t) => t !== cleanType);
-        acc[b.id] = areas
-          .filter((a) => a.building_id === b.id && a.active
-            && (a.clean_type === other || a.clean_type === 'both'))
-          .reduce((n, a) => n + a.tasks, 0);
-        return acc;
-      }, {}),
+      items,
+      otherCounts,
       source: await getSetting(env, 'checklist_source', 'file'),
     });
-  },
-
-  'GET /admin/area': async (_req, env, { user, url }) => {
-    require(user, 'admin');
-    const id = Number(url.searchParams.get('id'));
-    const area = await env.DB.prepare(
-      `SELECT a.id, a.name, a.active, a.clean_type, a.building_id, b.name AS building
-       FROM areas a JOIN buildings b ON b.id = a.building_id WHERE a.id = ?`,
-    ).bind(id).first();
-    if (!area) throw new HttpError(404, 'Area not found.');
-
-    // The history count is what makes deleting an item a decision rather than
-    // a reflex: the dialog can say exactly how many records go with it.
-    const { results: tasks } = await env.DB.prepare(
-      `SELECT t.id, t.item, t.description, t.photo_mode, t.sort_order, t.active,
-              (SELECT COUNT(*) FROM task_log l WHERE l.task_id = t.id) AS history,
-              (SELECT COUNT(*) FROM task_photos p WHERE p.task_id = t.id) AS photos
-       FROM tasks t WHERE t.area_id = ? ORDER BY t.sort_order, t.id`,
-    ).bind(id).all();
-
-    return json({ area, tasks });
   },
 
   'POST /admin/building': async (req, env, { user }) => {
@@ -1760,8 +1643,7 @@ const routes = {
 
     const { results: photos } = await env.DB.prepare(
       `SELECT p.photo_key FROM task_photos p
-       JOIN tasks t ON t.id = p.task_id
-       JOIN areas a ON a.id = t.area_id WHERE a.building_id = ?`,
+       JOIN tasks t ON t.id = p.task_id WHERE t.building_id = ?`,
     ).bind(bid).all();
     const { results: reportPhotos } = await env.DB.prepare(
       'SELECT photo_key FROM maintenance WHERE building_id = ? AND photo_key IS NOT NULL',
@@ -1771,20 +1653,13 @@ const routes = {
     await env.DB.batch([
       env.DB.prepare(
         `DELETE FROM task_photos WHERE task_id IN (
-           SELECT t.id FROM tasks t JOIN areas a ON a.id = t.area_id WHERE a.building_id = ?)`,
+           SELECT id FROM tasks WHERE building_id = ?)`,
       ).bind(bid),
       env.DB.prepare(
         `DELETE FROM task_log WHERE task_id IN (
-           SELECT t.id FROM tasks t JOIN areas a ON a.id = t.area_id WHERE a.building_id = ?)`,
+           SELECT id FROM tasks WHERE building_id = ?)`,
       ).bind(bid),
-      env.DB.prepare(
-        `DELETE FROM tasks WHERE area_id IN (SELECT id FROM areas WHERE building_id = ?)`,
-      ).bind(bid),
-      env.DB.prepare('DELETE FROM areas WHERE building_id = ?').bind(bid),
-      env.DB.prepare(
-        `DELETE FROM schedule_assignees WHERE schedule_id IN (
-           SELECT id FROM schedule WHERE building_id = ?)`,
-      ).bind(bid),
+      env.DB.prepare('DELETE FROM tasks WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM schedule WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM building_status WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM maintenance WHERE building_id = ?').bind(bid),
@@ -1800,198 +1675,114 @@ const routes = {
     return json({ ok: true, name: building.name });
   },
 
-  'POST /admin/area': async (req, env, { user }) => {
-    require(user, 'admin');
-    const { id, buildingId, name, active, cleanType } = await req.json();
-    const label = clean(name, 80);
-    if (!label) throw new HttpError(400, 'Give the area a name.');
-
-    if (id) {
-      const existing = await env.DB.prepare('SELECT building_id, clean_type FROM areas WHERE id = ?')
-        .bind(Number(id)).first();
-      if (!existing) throw new HttpError(404, 'Area not found.');
-      const type = cleanType === 'both' || isCleanType(cleanType)
-        ? cleanType : existing.clean_type;
-
-      const clash = await env.DB.prepare(
-        'SELECT id FROM areas WHERE building_id = ? AND clean_type = ? AND name = ? AND id != ?',
-      ).bind(existing.building_id, type, label, Number(id)).first();
-      if (clash) {
-        throw new HttpError(400, 'That building already has an area with that name on this checklist.');
-      }
-
-      await env.DB.prepare('UPDATE areas SET name = ?, clean_type = ?, active = ? WHERE id = ?')
-        .bind(label, type, active ? 1 : 0, Number(id)).run();
-    } else {
-      const bid = Number(buildingId);
-      const type = cleanType === 'both' || isCleanType(cleanType) ? cleanType : 'full';
-      const clash = await env.DB.prepare(
-        'SELECT id FROM areas WHERE building_id = ? AND clean_type = ? AND name = ?',
-      ).bind(bid, type, label).first();
-      if (clash) {
-        // Reuse the retired one rather than failing on the unique index.
-        await env.DB.prepare('UPDATE areas SET active = 1 WHERE id = ?').bind(clash.id).run();
-      } else {
-        const max = await env.DB.prepare(
-          'SELECT MAX(sort_order) AS m FROM areas WHERE building_id = ?',
-        ).bind(bid).first();
-        await env.DB.prepare(
-          'INSERT INTO areas (building_id, name, clean_type, sort_order, active) VALUES (?, ?, ?, ?, 1)',
-        ).bind(bid, label, type, (max?.m ?? 0) + 1).run();
-      }
-    }
-    await ownChecklist(env);
-    return json({ ok: true });
-  },
-
   /**
-   * Hard delete: unlike hiding, this throws away every record of everything
-   * in the area - including every day it was ever ticked. "Hide" is the
-   * usual tool; this is only for an area that should never have existed.
+   * Puts a building's Full Clean list onto its Check list, or the other way
+   * round. Rather than copying rows, an entry that is on one list is promoted
+   * to "both" - same row, so every tick and photo it has ever recorded stays
+   * with it, and later renaming it renames it on both lists at once.
    */
-  'POST /admin/area/delete': async (req, env, { user }) => {
+  'POST /admin/checklist/copy': async (req, env, { user }) => {
     require(user, 'admin');
-    const { id, confirm } = await req.json();
-    const area = await env.DB.prepare(
-      `SELECT a.id, a.name, b.name AS building FROM areas a
-       JOIN buildings b ON b.id = a.building_id WHERE a.id = ?`,
-    ).bind(Number(id)).first();
-    if (!area) throw new HttpError(404, 'Area not found.');
-    if (clean(confirm, 80) !== area.name) {
-      throw new HttpError(400, 'Type the area name exactly to confirm.');
-    }
-
-    const { results: photos } = await env.DB.prepare(
-      `SELECT p.photo_key FROM task_photos p
-       JOIN tasks t ON t.id = p.task_id WHERE t.area_id = ?`,
-    ).bind(area.id).all();
-
-    await env.DB.batch([
-      env.DB.prepare(
-        `DELETE FROM task_photos WHERE task_id IN (SELECT id FROM tasks WHERE area_id = ?)`,
-      ).bind(area.id),
-      env.DB.prepare(
-        `DELETE FROM task_log WHERE task_id IN (SELECT id FROM tasks WHERE area_id = ?)`,
-      ).bind(area.id),
-      env.DB.prepare('UPDATE maintenance SET area_id = NULL WHERE area_id = ?').bind(area.id),
-      env.DB.prepare('DELETE FROM tasks WHERE area_id = ?').bind(area.id),
-      env.DB.prepare('DELETE FROM areas WHERE id = ?').bind(area.id),
-    ]);
-    await dropPhotos(env, photos.map((p) => p.photo_key));
-    await ownChecklist(env);
-    return json({ ok: true, name: area.name, building: area.building });
-  },
-
-  /**
-   * Copies areas and items from one checklist onto the other. Building a
-   * Check list from the Full Clean and cutting it down beats typing forty
-   * items back in, which is the difference between the second checklist
-   * getting set up and being left empty.
-   */
-  'POST /admin/area/copy': async (req, env, { user }) => {
-    require(user, 'admin');
-    const { buildingId, from, to, areaIds } = await req.json();
+    const { buildingId, from, to, itemIds } = await req.json();
     const bid = Number(buildingId);
     const source = typeOf(from);
-    const target = typeOf(to, from === 'full' ? 'check' : 'full');
+    const target = typeOf(to, source === 'full' ? 'check' : 'full');
     if (source === target) throw new HttpError(400, 'Pick two different checklists.');
 
-    const wanted = Array.isArray(areaIds) ? areaIds.map(Number) : null;
-    const { results: areas } = await env.DB.prepare(
-      `SELECT id, name, sort_order FROM areas
-       WHERE building_id = ? AND clean_type = ? AND active = 1 ORDER BY sort_order`,
+    const wanted = Array.isArray(itemIds) ? itemIds.map(Number) : null;
+    // Only entries that are on the source alone: a "both" entry is already
+    // on the target by definition.
+    const { results: rows } = await env.DB.prepare(
+      `SELECT id, item FROM tasks
+       WHERE building_id = ? AND clean_type = ? AND active = 1 ORDER BY sort_order, id`,
     ).bind(bid, source).all();
 
-    const picked = wanted ? areas.filter((a) => wanted.includes(a.id)) : areas;
+    const picked = wanted ? rows.filter((t) => wanted.includes(t.id)) : rows;
     if (!picked.length) throw new HttpError(400, 'Nothing to copy.');
 
-    const max = await env.DB.prepare(
-      'SELECT MAX(sort_order) AS m FROM areas WHERE building_id = ?',
-    ).bind(bid).first();
-    let sort = (max?.m ?? 0) + 1;
-    let copiedAreas = 0;
-    let copiedTasks = 0;
+    // A name already sitting on the target as its own entry is left alone -
+    // silently merging two rows would take somebody's history with it.
+    const { results: onTarget } = await env.DB.prepare(
+      'SELECT item FROM tasks WHERE building_id = ? AND clean_type = ?',
+    ).bind(bid, target).all();
+    const taken = new Set(onTarget.map((t) => t.item));
 
-    for (const area of picked) {
-      // Skip a name that is already on the target checklist rather than
-      // merging into it - silently doubling someone's items would be worse
-      // than doing nothing and saying so.
-      const clash = await env.DB.prepare(
-        'SELECT id FROM areas WHERE building_id = ? AND clean_type = ? AND name = ?',
-      ).bind(bid, target, area.name).first();
-      if (clash) continue;
-
-      const res = await env.DB.prepare(
-        'INSERT INTO areas (building_id, name, clean_type, sort_order, active) VALUES (?, ?, ?, ?, 1)',
-      ).bind(bid, area.name, target, sort++).run();
-      const newId = res.meta.last_row_id;
-      copiedAreas++;
-
-      const { results: tasks } = await env.DB.prepare(
-        `SELECT item, description, photo_mode, sort_order FROM tasks
-         WHERE area_id = ? AND active = 1 ORDER BY sort_order`,
-      ).bind(area.id).all();
-
-      if (tasks.length) {
-        await env.DB.batch(tasks.map((t) => env.DB.prepare(
-          `INSERT INTO tasks (area_id, item, description, photo_mode, sort_order, active)
-           VALUES (?, ?, ?, ?, ?, 1)`,
-        ).bind(newId, t.item, t.description, t.photo_mode, t.sort_order)));
-        copiedTasks += tasks.length;
-      }
-    }
-
-    if (!copiedAreas) {
-      throw new HttpError(400, `Every one of those areas is already on the ${
+    const moving = picked.filter((t) => !taken.has(t.item));
+    if (!moving.length) {
+      throw new HttpError(400, `Every one of those is already on the ${
         typeLabel(target)} checklist.`);
     }
 
+    await env.DB.batch(moving.map((t) => env.DB.prepare(
+      `UPDATE tasks SET clean_type = 'both' WHERE id = ?`,
+    ).bind(t.id)));
+
     await ownChecklist(env);
-    return json({ ok: true, areas: copiedAreas, tasks: copiedTasks, target });
+    return json({ ok: true, items: moving.length, target });
   },
 
   'POST /admin/task': async (req, env, { user }) => {
     require(user, 'admin');
-    const { id, areaId, item, description, active, photoMode } = await req.json();
+    const { id, buildingId, cleanType, item, description, active, photoMode } = await req.json();
     const label = clean(item, 100);
     if (!label) throw new HttpError(400, 'Give the item a name.');
     const detail = clean(description, 300);
     const photo = PHOTO_MODES.includes(photoMode) ? photoMode : 'none';
 
-    if (id) {
-      const existing = await env.DB.prepare('SELECT area_id FROM tasks WHERE id = ?')
-        .bind(Number(id)).first();
-      if (!existing) throw new HttpError(404, 'That item no longer exists.');
+    /**
+     * Two entries clash when they would both show on the same checklist.
+     * "both" overlaps everything; a Full Clean entry and a Check entry of the
+     * same name are two separate lists and are fine.
+     */
+    const clashes = async (bid, type, exceptId) => {
+      const overlap = type === 'both' ? ['full', 'check', 'both'] : [type, 'both'];
+      return env.DB.prepare(
+        `SELECT id, active FROM tasks
+         WHERE building_id = ? AND item = ? AND id IS NOT ?
+           AND clean_type IN (${overlap.map(() => '?').join(', ')})`,
+      ).bind(bid, label, exceptId ?? null, ...overlap).first();
+    };
 
-      const clash = await env.DB.prepare(
-        'SELECT id FROM tasks WHERE area_id = ? AND item = ? AND id != ?',
-      ).bind(existing.area_id, label, Number(id)).first();
-      if (clash) throw new HttpError(400, 'That area already has an item with that name.');
+    if (id) {
+      const existing = await env.DB.prepare(
+        'SELECT building_id, clean_type FROM tasks WHERE id = ?',
+      ).bind(Number(id)).first();
+      if (!existing) throw new HttpError(404, 'That item no longer exists.');
+      const type = cleanType === 'both' || isCleanType(cleanType)
+        ? cleanType : existing.clean_type;
+
+      if (await clashes(existing.building_id, type, Number(id))) {
+        throw new HttpError(400, 'That building already has an item with that name on this checklist.');
+      }
 
       await env.DB.prepare(
-        'UPDATE tasks SET item = ?, description = ?, photo_mode = ?, active = ? WHERE id = ?',
-      ).bind(label, detail, photo, active ? 1 : 0, Number(id)).run();
+        `UPDATE tasks SET item = ?, description = ?, photo_mode = ?, clean_type = ?, active = ?
+         WHERE id = ?`,
+      ).bind(label, detail, photo, type, active ? 1 : 0, Number(id)).run();
     } else {
-      const aid = Number(areaId);
-      const area = await env.DB.prepare('SELECT id FROM areas WHERE id = ?').bind(aid).first();
-      if (!area) throw new HttpError(404, 'That area no longer exists.');
+      const bid = Number(buildingId);
+      const type = cleanType === 'both' || isCleanType(cleanType) ? cleanType : 'both';
+      const building = await env.DB.prepare('SELECT id FROM buildings WHERE id = ?')
+        .bind(bid).first();
+      if (!building) throw new HttpError(404, 'That building no longer exists.');
 
-      const clash = await env.DB.prepare(
-        'SELECT id FROM tasks WHERE area_id = ? AND item = ?',
-      ).bind(aid, label).first();
-      if (clash) {
-        // Bringing back a retired item keeps everything it has ever recorded.
+      const clash = await clashes(bid, type, null);
+      if (clash?.active) {
+        throw new HttpError(400, 'That building already has an item with that name on this checklist.');
+      } else if (clash) {
+        // Bringing back a retired item keeps everything it has ever recorded,
+        // which beats a second row that starts its history from nothing.
         await env.DB.prepare(
           'UPDATE tasks SET active = 1, description = ?, photo_mode = ? WHERE id = ?',
         ).bind(detail, photo, clash.id).run();
       } else {
         const max = await env.DB.prepare(
-          'SELECT MAX(sort_order) AS m FROM tasks WHERE area_id = ?',
-        ).bind(aid).first();
+          'SELECT MAX(sort_order) AS m FROM tasks WHERE building_id = ?',
+        ).bind(bid).first();
         await env.DB.prepare(
-          `INSERT INTO tasks (area_id, item, description, photo_mode, sort_order, active)
-           VALUES (?, ?, ?, ?, ?, 1)`,
-        ).bind(aid, label, detail, photo, (max?.m ?? 0) + 1).run();
+          `INSERT INTO tasks (building_id, clean_type, item, description, photo_mode, sort_order, active)
+           VALUES (?, ?, ?, ?, ?, ?, 1)`,
+        ).bind(bid, type, label, detail, photo, (max?.m ?? 0) + 1).run();
       }
     }
     await ownChecklist(env);
@@ -2014,7 +1805,7 @@ const routes = {
     // that has never been ticked but has been photographed a dozen times
     // delete without a word, taking the photos with it.
     const task = await env.DB.prepare(
-      `SELECT t.id, t.item, t.area_id,
+      `SELECT t.id, t.item,
               (SELECT COUNT(*) FROM task_log l WHERE l.task_id = t.id)
               + (SELECT COUNT(*) FROM task_photos p WHERE p.task_id = t.id) AS history
        FROM tasks t WHERE t.id = ?`,
@@ -2043,7 +1834,8 @@ const routes = {
   },
 
   /**
-   * Writes a new order for a set of items, areas or buildings.
+   * Writes a new order for a building's checklist items, or for the
+   * buildings themselves.
    *
    * The whole id list is sent and has to match what is on the server exactly.
    * That is the concurrency guard: if somebody else added or removed a row
@@ -2058,15 +1850,10 @@ const routes = {
     if (wanted.some((n) => !Number.isInteger(n))) throw new HttpError(400, 'Bad ordering.');
 
     let current;
-    if (kind === 'tasks') {
-      const { results } = await env.DB.prepare('SELECT id FROM tasks WHERE area_id = ?')
-        .bind(Number(parentId)).all();
-      current = results;
-    } else if (kind === 'areas') {
-      const type = typeOf(cleanType);
+    if (kind === 'items') {
       const { results } = await env.DB.prepare(
-        `SELECT id FROM areas WHERE building_id = ? AND clean_type IN (?, 'both')`,
-      ).bind(Number(parentId), type).all();
+        `SELECT id FROM tasks WHERE building_id = ?1 AND clean_type IN (?2, 'both')`,
+      ).bind(Number(parentId), typeOf(cleanType)).all();
       current = results;
     } else if (kind === 'buildings') {
       const { results } = await env.DB.prepare('SELECT id FROM buildings').all();
@@ -2082,7 +1869,7 @@ const routes = {
         'This list changed while you were reordering it. Reload the page and try again.');
     }
 
-    const table = { tasks: 'tasks', areas: 'areas', buildings: 'buildings' }[kind];
+    const table = { items: 'tasks', buildings: 'buildings' }[kind];
     await env.DB.batch(wanted.map((id, i) =>
       env.DB.prepare(`UPDATE ${table} SET sort_order = ? WHERE id = ?`).bind(i, id)));
 
@@ -2152,7 +1939,7 @@ const routes = {
   /**
    * Wipes operational data so the camp can start clean after testing.
    * Deliberately never drops a table and never touches the checklist itself -
-   * buildings, areas and tasks come from checklist.json.
+   * the buildings and their items come from checklist.json.
    */
   'POST /admin/reset': async (req, env, { user }) => {
     require(user, 'admin');
@@ -2174,7 +1961,7 @@ const routes = {
     }
 
     const tables = [
-      'schedule_assignees', 'schedule', 'roster', 'task_photos', 'task_log',
+      'schedule', 'roster', 'task_photos', 'task_log',
       'activity', 'building_status', 'maintenance', 'login_attempts',
     ];
     await env.DB.batch(tables.map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
@@ -2198,24 +1985,23 @@ const routes = {
       // Photo counts come from a join rather than a per-row subquery: a month
       // of a full park is tens of thousands of rows, and one extra query each
       // is the difference between an export and a timeout.
-      `SELECT l.id, l.day, b.name AS building, a.name AS area, a.clean_type, t.item,
+      `SELECT l.id, l.day, b.name AS building, t.clean_type, t.item,
               l.user_name, l.updated_at, COUNT(p.id) AS photos
        FROM task_log l
        JOIN tasks t ON t.id = l.task_id
-       JOIN areas a ON a.id = t.area_id
-       JOIN buildings b ON b.id = a.building_id
+       JOIN buildings b ON b.id = t.building_id
        LEFT JOIN task_photos p ON p.task_id = t.id AND p.day = l.day
        WHERE l.done = 1 AND l.day BETWEEN ? AND ?
        GROUP BY l.id
-       ORDER BY l.day DESC, b.sort_order, a.sort_order, t.sort_order`,
+       ORDER BY l.day DESC, b.sort_order, t.sort_order`,
     ).bind(from, to).all();
 
     const auDay = (d) => (d ? d.split('-').reverse().join('-') : '');
-    const header = 'Date,Building,Checklist,Area,Item,Cleaned by,Time,Photos\n';
+    const header = 'Date,Building,Checklist,Item,Cleaned by,Time,Photos\n';
     const csv = results.map((r) => [
       auDay(r.day), r.building,
       r.clean_type === 'both' ? 'Both' : typeLabel(r.clean_type),
-      r.area, r.item, r.user_name ?? '', r.updated_at ?? '', r.photos,
+      r.item, r.user_name ?? '', r.updated_at ?? '', r.photos,
     ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
 
     return new Response(header + csv, {

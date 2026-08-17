@@ -1,5 +1,5 @@
 {
-  "_comment": "THIS FILE IS THE STARTING CHECKLIST. Edit it on GitHub and commit - the site redeploys and picks up the changes by itself, until the first edit is made inside the app (Checklists screen), after which the app owns them. Every task is [\"Item\", \"What to do\"] and can take an optional third value: \"photo\" to allow a photo, or \"photo required\" to insist on one.",
+  "_comment": "THIS FILE IS THE STARTING CHECKLIST. Edit it on GitHub and commit - the site redeploys and picks up the changes by itself, until the first edit is made inside the app (Checklists screen), after which the app owns them. Each building has a flat list of things to tick off - broad areas, not individual jobs. An entry is [\"Name\"], or [\"Name\", \"Optional note\"], and can take a third value: \"photo\" to allow a photo against it, or \"photo required\" to insist on one.",
   "contacts": {
     "office": "0402 930 714",
     "maintenance": "0437 316 386"
@@ -12,637 +12,333 @@
     ["Damage", "Report maintenance, damage, graffiti or missing items - include photos", "photo"],
     ["Secure", "Leave tidy and secure: lights off, rooms locked where applicable"]
   ],
-  "_cleaningTypes_note": "Every building has two checklists. \"full\" is the Full Clean, \"check\" is the quicker Check. Each lists area names from \"templates\" below, or an area written out in full just for that building. An area named in both lists appears on both.",
-  "_templates_note": "Reusable areas. A building lists a template by name in its \"full\" or \"check\" list.",
-  "templates": {
-    "Check clean": [
-      ["Toilets and showers", "Check clean and flush - deal with anything obvious"],
-      ["Consumables", "Toilet paper, paper towel, soap and bin liners all stocked"],
-      ["Bins", "Empty any that need emptying"],
-      ["Surfaces", "Wipe anything visibly dirty"],
-      ["Floors", "Check and spot clean"],
-      ["Litter and tidy", "Inside and out"],
-      ["Secure", "Lights off, doors locked where applicable"]
-    ],
-    "Bathrooms": [
-      ["Toilet", "Clean including behind the cistern - no bugs or ants"],
-      ["Toilet brush", "Clean the brush and its holder"],
-      ["Sanitary bin", "Wipe over and clean"],
-      ["Urinal (boys)", "Clean, scrub and replace tablets where applicable"],
-      ["Paper towel / litter", "Pick up from floor and surfaces"],
-      ["Shower cubicle", "Clean surfaces and remove insects"],
-      ["Mirror", "Clean with glass cleaner - no streaks"],
-      ["Surfaces", "Wipe vanity and window sills"],
-      ["Basin", "Clean basins and tapware thoroughly"],
-      ["Toilet paper / paper towel / soap", "Refill all three"],
-      ["Bins", "Empty, wipe over and replace liners"],
-      ["Toilet / shower area", "Clear any cobwebs"],
-      ["Floors", "Mop all, including cubicles, and check drains"]
-    ],
-    "Shelter": [
-      ["Microwave", "Check empty and clean"],
-      ["Kettle", "Wipe over and clean"],
-      ["Kitchen surfaces and sink", "Wipe over and clean"],
-      ["Soap", "Refill soap and detergent"],
-      ["Supplies", "1 x dish cloth, 1 x green scourer, 1 x metal scourer"],
-      ["Bins", "Empty, wipe over and replace liners"],
-      ["BBQ", "Check it is clean - report to Maintenance if not"]
-    ],
-    "Accommodation": [
-      ["Double bed", "Replace mattress protector and sheet"],
-      ["Bunk mattresses", "Clean and inspect for stains"],
-      ["Windows and tracks", "Clean"],
-      ["Dining table", "Wipe down"],
-      ["Fridge", "Clean inside and out"],
-      ["Microwave", "Clean"],
-      ["Benches and stovetop", "Wipe down"],
-      ["Sink", "Clean and restock supplies"],
-      ["Games area", "Tidy and restack"],
-      ["Wall marks", "Remove"],
-      ["Broom and dustpan", "Clean"],
-      ["Cleaning box", "Restock"],
-      ["Bins", "Empty and replace liners"],
-      ["Floors and rugs", "Vacuum"],
-      ["Couch", "Spot clean"],
-      ["Skirting boards", "Wipe down"],
-      ["Kitchen floor", "Mop"],
-      ["Crockery and cutlery", "Organise and check counts"],
-      ["Drawers", "Clean out"],
-      ["Lighter", "Check it works"],
-      ["Bedside tables and lights", "Wipe down"]
-    ],
-    "Toilet and shower": [
-      ["Toilet", "Clean including behind the cistern"],
-      ["Toilet brush", "Clean the brush and its holder"],
-      ["Sanitary bin", "Wipe over and clean"],
-      ["Shower cubicle", "Check for insects"],
-      ["Cobwebs", "Remove"],
-      ["Consumables", "Refill toilet paper, paper towel and soap"],
-      ["Shower curtain", "Clean and disinfect"],
-      ["Shower surfaces", "Clean"],
-      ["Floors", "Mop"]
-    ],
-    "Outdoor": [
-      ["Front door", "Clean"],
-      ["Key lock box", "Check it is working and closed"],
-      ["Outdoor table and chairs", "Clean"]
-    ],
-    "Bell tent full clean": [
-      ["Mattresses", "Wipe over and inspect for stains"],
-      ["Tables and chairs", "Wipe down and place inside the tent"],
-      ["Floors", "Sweep, vacuum and mop"]
-    ],
-    "Bell tent check clean": [
-      ["Floors", "Check for dead bugs"],
-      ["Linen", "Check what is needed with Reception"],
-      ["BBQ and bins", "Check both"],
-      ["Air freshener", "Spray through"],
-      ["Poles", "Check for bugs and water around the poles"]
-    ],
-    "Chalet check clean": [
-      ["Bugs and cobwebs", "Check throughout"],
-      ["Windows", "Open during summer"],
-      ["Linen", "Check what is needed with Reception"],
-      ["Air freshener", "Spray through"],
-      ["Toilet and shower", "Check"],
-      ["BBQ", "Check"]
-    ]
-  },
-  "_buildings_note": "Each building gets the areas listed here, plus \"Every visit\" at the end. An entry that is just a name refers to a template above.",
+  "_cleaningTypes_note": "Every building has two checklists: \"full\" is the Full Clean, \"check\" is the quicker Check. Most buildings walk the same areas either way, so the two lists are the same; where a building has a genuinely shorter check (the bell tents, the chalets, Seeonee), its \"check\" list says so.",
+  "_buildings_note": "Each building gets the areas listed here, plus \"Every visit\" at the end. Areas named on BOTH lists are stored once and appear on both.",
   "buildings": [
     {
       "name": "St George",
       "group": "Basecamp",
-      "full": ["Bathrooms", "Shelter"],
-      "check": ["Check clean"]
+      "full": [
+        ["Bathrooms"],
+        ["Shelter"]
+      ],
+      "check": [
+        ["Bathrooms"],
+        ["Shelter"]
+      ]
     },
     {
       "name": "Gilwell",
       "group": "Basecamp",
-      "full": ["Bathrooms", "Shelter"],
-      "check": ["Check clean"]
+      "full": [
+        ["Bathrooms"],
+        ["Shelter"]
+      ],
+      "check": [
+        ["Bathrooms"],
+        ["Shelter"]
+      ]
     },
     {
       "name": "Brownsea",
       "group": "Basecamp",
       "full": [
-        "Bathrooms",
-        "Shelter",
-        {
-          "name": "Brownsea specific",
-          "tasks": [
-            ["Fridge", "Check it is empty and clean"],
-            ["Small bins", "Empty and replace liners inside the shelter, including the BBQ"],
-            ["BBQ", "Check if it needs cleaning and report to the office"]
-          ]
-        }
+        ["Bathrooms"],
+        ["Shelter"],
+        ["Fridge", "Check it is empty and clean"],
+        ["Small bins", "Empty and replace liners inside the shelter, including the BBQ"],
+        ["BBQ", "Check if it needs cleaning and report to the office"]
       ],
-      "check": ["Check clean"]
+      "check": [
+        ["Bathrooms"],
+        ["Shelter"],
+        ["Fridge", "Check it is empty and clean"],
+        ["Small bins", "Empty and replace liners inside the shelter, including the BBQ"],
+        ["BBQ", "Check if it needs cleaning and report to the office"]
+      ]
     },
     {
       "name": "Lone's Hut",
       "group": "Basecamp",
-      "full": ["Bathrooms", "Shelter"],
-      "check": ["Check clean"]
+      "full": [
+        ["Bathrooms"],
+        ["Shelter"]
+      ],
+      "check": [
+        ["Bathrooms"],
+        ["Shelter"]
+      ]
     },
     {
       "name": "Bert's Bog",
       "group": "Basecamp",
-      "full": ["Bathrooms", "Shelter"],
-      "check": ["Check clean"]
+      "full": [
+        ["Bathrooms"],
+        ["Shelter"]
+      ],
+      "check": [
+        ["Bathrooms"],
+        ["Shelter"]
+      ]
     },
     {
       "name": "Bell Tent - St George 1",
       "group": "Bell Tents",
-      "full": ["Bell tent full clean"],
-      "check": ["Bell tent check clean"]
+      "full": [
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Tables and chairs", "Wipe down and place inside the tent"],
+        ["Floors", "Sweep, vacuum and mop"]
+      ],
+      "check": [
+        ["Floors", "Check for dead bugs"],
+        ["Linen", "Check what is needed with Reception"],
+        ["BBQ and bins", "Check both"],
+        ["Air freshener", "Spray through"],
+        ["Poles", "Check for bugs and water around the poles"]
+      ]
     },
     {
       "name": "Bell Tent - St George 2",
       "group": "Bell Tents",
-      "full": ["Bell tent full clean"],
-      "check": ["Bell tent check clean"]
+      "full": [
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Tables and chairs", "Wipe down and place inside the tent"],
+        ["Floors", "Sweep, vacuum and mop"]
+      ],
+      "check": [
+        ["Floors", "Check for dead bugs"],
+        ["Linen", "Check what is needed with Reception"],
+        ["BBQ and bins", "Check both"],
+        ["Air freshener", "Spray through"],
+        ["Poles", "Check for bugs and water around the poles"]
+      ]
     },
     {
       "name": "Bell Tent - St George 3",
       "group": "Bell Tents",
-      "full": ["Bell tent full clean"],
-      "check": ["Bell tent check clean"]
+      "full": [
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Tables and chairs", "Wipe down and place inside the tent"],
+        ["Floors", "Sweep, vacuum and mop"]
+      ],
+      "check": [
+        ["Floors", "Check for dead bugs"],
+        ["Linen", "Check what is needed with Reception"],
+        ["BBQ and bins", "Check both"],
+        ["Air freshener", "Spray through"],
+        ["Poles", "Check for bugs and water around the poles"]
+      ]
     },
     {
       "name": "Bell Tent - St George 4",
       "group": "Bell Tents",
-      "full": ["Bell tent full clean"],
-      "check": ["Bell tent check clean"]
+      "full": [
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Tables and chairs", "Wipe down and place inside the tent"],
+        ["Floors", "Sweep, vacuum and mop"]
+      ],
+      "check": [
+        ["Floors", "Check for dead bugs"],
+        ["Linen", "Check what is needed with Reception"],
+        ["BBQ and bins", "Check both"],
+        ["Air freshener", "Spray through"],
+        ["Poles", "Check for bugs and water around the poles"]
+      ]
     },
     {
       "name": "Bell Tent - Tube Slide",
       "group": "Bell Tents",
       "full": [
-        "Bell tent full clean",
-        {
-          "name": "Tube Slide specific",
-          "tasks": [
-            ["Linen", "Replace the mattress protector and sheet"]
-          ]
-        }
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Tables and chairs", "Wipe down and place inside the tent"],
+        ["Floors", "Sweep, vacuum and mop"],
+        ["Linen", "Replace the mattress protector and sheet"]
       ],
-      "check": ["Bell tent check clean"]
+      "check": [
+        ["Floors", "Check for dead bugs"],
+        ["Linen", "Check what is needed with Reception"],
+        ["BBQ and bins", "Check both"],
+        ["Air freshener", "Spray through"],
+        ["Poles", "Check for bugs and water around the poles"]
+      ]
     },
     {
       "name": "Bunkhouse",
       "group": "Bunkhouse",
       "full": [
-        {
-          "name": "Dorm rooms",
-          "tasks": [
-            ["Bunk beds", "Inspect and disinfect"],
-            ["Windows", "Clean"],
-            ["Surfaces and sills", "Dust"],
-            ["Bins", "Empty and replace liners"],
-            ["Carpets", "Vacuum all carpeted areas"],
-            ["Curtains", "Open"],
-            ["Lights and locks", "Turn off lights and lock the rooms"]
-          ]
-        },
-        {
-          "name": "Bathrooms",
-          "tasks": [
-            ["Toilets", "Clean"],
-            ["Toilet brushes", "Clean brushes and holders"],
-            ["Sanitary bins", "Wipe over and clean"],
-            ["Consumables", "Refill toilet paper, paper towel and soap"],
-            ["Showers", "Clean"],
-            ["Mirrors", "Clean"],
-            ["Basins", "Clean basins and tapware"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Mop and check drains"]
-          ]
-        },
-        {
-          "name": "Corridors",
-          "tasks": [
-            ["Floors", "Vacuum and mop"]
-          ]
-        },
-        {
-          "name": "Kitchen",
-          "tasks": [
-            ["Cooktop", "Clean"],
-            ["Dishwasher", "Clean and empty"],
-            ["Surfaces and splashbacks", "Wipe down"],
-            ["Supplies", "Restock"],
-            ["Fridges", "Clean, including freezer seals"],
-            ["Sinks", "Clean"],
-            ["Oven", "Clean"],
-            ["Toaster", "Clean and empty crumb tray"],
-            ["Microwave", "Clean"],
-            ["Urn", "Clean"],
-            ["Bins", "Empty and replace liners"],
-            ["Dirty linen", "Move to the laundry"],
-            ["Floors", "Mop"],
-            ["Lights and locks", "Turn off lights and lock the room"]
-          ]
-        },
-        {
-          "name": "Group room",
-          "tasks": [
-            ["Windows and sills", "Clean"],
-            ["TV", "Clean screen and surround"],
-            ["Tables", "Wipe down"],
-            ["Glass doors", "Clean"],
-            ["Bins", "Empty"],
-            ["Floors", "Vacuum"]
-          ]
-        },
-        {
-          "name": "Tank room",
-          "tasks": [
-            ["Floors", "Vacuum"],
-            ["Rubbish", "Remove"]
-          ]
-        },
-        {
-          "name": "Wetland viewing room toilets",
-          "tasks": [
-            ["Toilets", "Clean"],
-            ["Toilet brushes", "Clean brushes and holders"],
-            ["Sanitary bins", "Wipe over and clean"],
-            ["Sinks", "Clean"],
-            ["Consumables", "Refill"],
-            ["Floors", "Sweep and mop"]
-          ]
-        }
+        ["Dorm rooms"],
+        ["Bathrooms"],
+        ["Corridors"],
+        ["Kitchen"],
+        ["Group room"],
+        ["Tank room"],
+        ["Wetland viewing room toilets"]
       ],
-      "check": ["Check clean"]
+      "check": [
+        ["Dorm rooms"],
+        ["Bathrooms"],
+        ["Corridors"],
+        ["Kitchen"],
+        ["Group room"],
+        ["Tank room"],
+        ["Wetland viewing room toilets"]
+      ]
     },
     {
       "name": "Chambers Chalet",
       "group": "Chalets",
-      "full": ["Accommodation", "Toilet and shower", "Outdoor"],
-      "check": ["Chalet check clean"]
+      "full": [
+        ["Accommodation"],
+        ["Toilet and shower"],
+        ["Outdoor"]
+      ],
+      "check": [
+        ["Bugs and cobwebs", "Check throughout"],
+        ["Windows", "Open during summer"],
+        ["Linen", "Check what is needed with Reception"],
+        ["Air freshener", "Spray through"],
+        ["Toilet and shower", "Check"],
+        ["BBQ", "Check"]
+      ]
     },
     {
       "name": "Stephens Chalet",
       "group": "Chalets",
-      "full": ["Accommodation", "Toilet and shower", "Outdoor"],
-      "check": ["Chalet check clean"]
+      "full": [
+        ["Accommodation"],
+        ["Toilet and shower"],
+        ["Outdoor"]
+      ],
+      "check": [
+        ["Bugs and cobwebs", "Check throughout"],
+        ["Windows", "Open during summer"],
+        ["Linen", "Check what is needed with Reception"],
+        ["Air freshener", "Spray through"],
+        ["Toilet and shower", "Check"],
+        ["BBQ", "Check"]
+      ]
     },
     {
       "name": "Hansons Chalet",
       "group": "Chalets",
-      "full": ["Accommodation", "Toilet and shower", "Outdoor"],
-      "check": ["Chalet check clean"]
+      "full": [
+        ["Accommodation"],
+        ["Toilet and shower"],
+        ["Outdoor"]
+      ],
+      "check": [
+        ["Bugs and cobwebs", "Check throughout"],
+        ["Windows", "Open during summer"],
+        ["Linen", "Check what is needed with Reception"],
+        ["Air freshener", "Spray through"],
+        ["Toilet and shower", "Check"],
+        ["BBQ", "Check"]
+      ]
     },
     {
       "name": "Lower Rymill",
       "group": "Lower Rymill",
       "full": [
-        {
-          "name": "Toilets",
-          "tasks": [
-            ["Toilet", "Clean"],
-            ["Consumables", "Refill"],
-            ["Floors", "Sweep or vacuum, then mop"],
-            ["Bins", "Empty and replace liners"],
-            ["Cobwebs", "Remove"],
-            ["Lights and locks", "Turn off lights and lock the rooms"]
-          ]
-        },
-        {
-          "name": "Bag room",
-          "tasks": [
-            ["Bag racks", "Clean"],
-            ["Tables", "Wipe down"],
-            ["Basins", "Clean"],
-            ["Floors", "Sweep and mop"],
-            ["Lights and locks", "Turn off lights and lock"]
-          ]
-        },
-        {
-          "name": "Staff room",
-          "tasks": [
-            ["Bins", "Empty"],
-            ["Tables", "Wipe down"],
-            ["Sink and bench", "Clean"],
-            ["Floors", "Sweep and mop"],
-            ["Lights and locks", "Turn off lights and lock"]
-          ]
-        },
-        {
-          "name": "Pem Fooks",
-          "tasks": [
-            ["Tables", "Wipe down"],
-            ["Floors", "Vacuum the room and the foyer"],
-            ["Curtains", "Open"],
-            ["Lights and locks", "Turn off lights and lock"]
-          ]
-        }
+        ["Toilets"],
+        ["Bag room"],
+        ["Staff room"],
+        ["Pem Fooks"]
       ],
-      "check": ["Check clean"]
+      "check": [
+        ["Toilets"],
+        ["Bag room"],
+        ["Staff room"],
+        ["Pem Fooks"]
+      ]
     },
     {
       "name": "Manor",
       "group": "Manor",
       "full": [
-        {
-          "name": "Stairwell and second floor",
-          "tasks": [
-            ["Bunk mattresses", "Clean and inspect"],
-            ["Surfaces", "Dust"],
-            ["Mirrors and windows", "Clean"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Vacuum and mop"],
-            ["Curtains", "Open"],
-            ["Lights", "Turn off"]
-          ]
-        },
-        {
-          "name": "Toilets",
-          "tasks": [
-            ["Toilets", "Clean"],
-            ["Toilet brushes", "Clean brushes and holders"],
-            ["Sanitary bins", "Wipe over and clean"],
-            ["Mirrors", "Clean"],
-            ["Basins", "Clean"],
-            ["Surfaces", "Wipe down"],
-            ["Consumables", "Refill"],
-            ["Floors", "Mop"]
-          ]
-        },
-        {
-          "name": "Downstairs",
-          "tasks": [
-            ["Bins", "Empty and replace liners"],
-            ["Surfaces", "Dust"],
-            ["Curtains", "Neaten"],
-            ["Furniture", "Arrange back into place"],
-            ["Windows and mirrors", "Clean"],
-            ["Floors", "Vacuum and mop"]
-          ]
-        },
-        {
-          "name": "Corridors",
-          "tasks": [
-            ["Cobwebs", "Remove"],
-            ["Windows", "Clean"],
-            ["Floors", "Sweep and vacuum"]
-          ]
-        },
-        {
-          "name": "Kitchen",
-          "tasks": [
-            ["Oven", "Clean"],
-            ["Cooktop", "Clean"],
-            ["Dishwasher", "Clean and empty"],
-            ["Toaster", "Clean and empty crumb tray"],
-            ["Urn", "Clean"],
-            ["Microwave", "Clean"],
-            ["Fridges", "Clean inside and out"],
-            ["Surfaces", "Wipe down"],
-            ["Cleaning supplies", "Restock"],
-            ["Sinks", "Clean"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Vacuum and mop"]
-          ]
-        },
-        {
-          "name": "Lower bathrooms",
-          "tasks": [
-            ["Toilets and urinals", "Clean"],
-            ["Toilet brushes", "Clean brushes and holders"],
-            ["Sanitary bins", "Wipe over and clean"],
-            ["Consumables", "Refill"],
-            ["Cobwebs", "Remove"],
-            ["Showers", "Clean"],
-            ["Mirrors", "Clean"],
-            ["Basins", "Clean"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Mop and check drains"]
-          ]
-        }
+        ["Stairwell and second floor"],
+        ["Toilets"],
+        ["Downstairs"],
+        ["Corridors"],
+        ["Kitchen"],
+        ["Lower bathrooms"]
       ],
-      "check": ["Check clean"]
+      "check": [
+        ["Stairwell and second floor"],
+        ["Toilets"],
+        ["Downstairs"],
+        ["Corridors"],
+        ["Kitchen"],
+        ["Lower bathrooms"]
+      ]
     },
     {
       "name": "Office Upstairs",
       "group": "Offices",
       "full": [
-        {
-          "name": "Office",
-          "tasks": [
-            ["Desks", "Clean"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Vacuum"]
-          ]
-        },
-        {
-          "name": "Kitchen",
-          "tasks": [
-            ["Sink and surfaces", "Clean"]
-          ]
-        }
+        ["Office"],
+        ["Kitchen"]
       ],
-      "check": ["Check clean"]
+      "check": [
+        ["Office"],
+        ["Kitchen"]
+      ]
     },
     {
       "name": "Office / Reception Downstairs",
       "group": "Offices",
       "full": [
-        {
-          "name": "Kitchen",
-          "tasks": [
-            ["Sink and surfaces", "Clean"]
-          ]
-        },
-        {
-          "name": "Workspaces",
-          "tasks": [
-            ["Desks", "Clean"],
-            ["Front counter", "Clean"],
-            ["Windows and glass doors", "Clean"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Sweep and mop"]
-          ]
-        },
-        {
-          "name": "Staff room",
-          "tasks": [
-            ["Table", "Tidy"],
-            ["Dishes", "Wash and put away"],
-            ["Consumables", "Refill"],
-            ["Bins", "Empty"],
-            ["Floors", "Vacuum or mop"]
-          ]
-        }
+        ["Kitchen"],
+        ["Workspaces"],
+        ["Staff room"]
       ],
-      "check": ["Check clean"]
+      "check": [
+        ["Kitchen"],
+        ["Workspaces"],
+        ["Staff room"]
+      ]
     },
     {
       "name": "Rymill Centre",
       "group": "Rymill Centre",
       "full": [
-        {
-          "name": "Dorms and ensuites",
-          "tasks": [
-            ["Toilets", "Clean"],
-            ["Toilet brushes", "Clean brushes and holders"],
-            ["Sanitary bins", "Wipe over and clean"],
-            ["Shower curtains", "Clean"],
-            ["Rubber mats", "Disinfect"],
-            ["Shower surfaces", "Clean"],
-            ["Consumables", "Refill"],
-            ["Mirrors", "Clean"],
-            ["Basins", "Clean"],
-            ["Cobwebs", "Remove"],
-            ["Windows", "Clean"],
-            ["Mattresses", "Clean and inspect"],
-            ["Bins", "Empty and replace liners"],
-            ["Rooms", "Vacuum"],
-            ["Curtains", "Open"],
-            ["Floors", "Mop"],
-            ["Lights and locks", "Turn off lights and lock the rooms"]
-          ]
-        },
-        {
-          "name": "Group room / Henry Rymill Room",
-          "tasks": [
-            ["Windows and sills", "Clean"],
-            ["TV", "Clean screen and surround"],
-            ["Tables", "Wipe down"],
-            ["Glass doors", "Clean"],
-            ["Hand basin", "Clean"],
-            ["Fridge", "Check and clean"],
-            ["Bins", "Empty"],
-            ["Floors", "Vacuum"]
-          ]
-        },
-        {
-          "name": "Kitchen",
-          "tasks": [
-            ["Oven", "Clean"],
-            ["Cooktop", "Clean"],
-            ["Toaster", "Clean and empty crumb tray"],
-            ["Microwave", "Clean"],
-            ["Urn", "Clean"],
-            ["Dishwasher", "Clean and empty"],
-            ["Fridges and freezer", "Clean, including seals"],
-            ["Sinks", "Clean"],
-            ["Benches", "Wipe down"],
-            ["Consumables", "Refill"],
-            ["Cleaning boxes", "Restock"],
-            ["Supplies", "Restock"],
-            ["Roller door", "Clean"],
-            ["Linen", "Move to the laundry"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Mop"]
-          ]
-        },
-        {
-          "name": "Toilets off group room",
-          "tasks": [
-            ["Toilets and urinals", "Clean"],
-            ["Toilet brushes", "Clean brushes and holders"],
-            ["Sanitary bins", "Wipe over and clean"],
-            ["Consumables", "Refill"],
-            ["Mirrors", "Clean"],
-            ["Basins", "Clean"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Mop"]
-          ]
-        }
+        ["Dorms and ensuites"],
+        ["Group room / Henry Rymill Room"],
+        ["Kitchen"],
+        ["Toilets off group room"]
       ],
-      "check": ["Check clean"]
+      "check": [
+        ["Dorms and ensuites"],
+        ["Group room / Henry Rymill Room"],
+        ["Kitchen"],
+        ["Toilets off group room"]
+      ]
     },
     {
       "name": "Seeonee",
       "group": "Seeonee",
       "full": [
-        {
-          "name": "Acacia Room / Banksia Room",
-          "tasks": [
-            ["Chairs", "Neaten and stack"],
-            ["Table tops", "Clean"],
-            ["Wall marks", "Remove"],
-            ["Windows and tracks", "Clean"],
-            ["Glass doors", "Clean"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Vacuum"]
-          ]
-        },
-        {
-          "name": "Kitchen",
-          "tasks": [
-            ["Fridge", "Clean inside and out"],
-            ["Microwave", "Clean"],
-            ["Coffee machine", "Empty and clean"],
-            ["Sink", "Clean and restock supplies"],
-            ["Benchtops", "Wipe down"],
-            ["Drawers", "Organise"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Vacuum then mop"]
-          ]
-        },
-        {
-          "name": "Bathrooms",
-          "tasks": [
-            ["Toilets", "Clean"],
-            ["Toilet brushes", "Clean brushes and holders"],
-            ["Sanitary bins", "Wipe over and clean"],
-            ["Urinals", "Clean and replace tablets"],
-            ["Consumables", "Refill"],
-            ["Showers", "Clean"],
-            ["Mirrors", "Clean"],
-            ["Cobwebs", "Remove"],
-            ["Front door", "Clean"],
-            ["Lock box", "Check"],
-            ["Outdoor entrance", "Sweep"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Sweep and mop, including toilet and shower"]
-          ]
-        }
+        ["Acacia Room / Banksia Room"],
+        ["Kitchen"],
+        ["Bathrooms"]
       ],
       "check": [
-        {
-          "name": "Seeonee check clean",
-          "tasks": [
-            ["Toilet and shower", "Check"],
-            ["Floors and windows", "Check"],
-            ["Kitchen benches and bins", "Check"],
-            ["Fridge", "Check for leftover food"]
-          ]
-        }
+        ["Toilet and shower", "Check"],
+        ["Floors and windows", "Check"],
+        ["Kitchen benches and bins", "Check"],
+        ["Fridge", "Check for leftover food"]
       ]
     },
     {
       "name": "Stags",
       "group": "Stags",
       "full": [
-        {
-          "name": "Bathrooms",
-          "tasks": [
-            ["Litter", "Remove from floor and surfaces"],
-            ["Toilets", "Clean"],
-            ["Toilet brushes", "Clean brushes and holders"],
-            ["Sanitary bins", "Wipe over and clean"],
-            ["Cobwebs", "Remove"],
-            ["Mirrors", "Clean"],
-            ["Basins", "Clean"],
-            ["Surfaces", "Wipe down"],
-            ["Bins", "Empty and replace liners"],
-            ["Floors", "Mop and check drains"]
-          ]
-        },
-        {
-          "name": "Kitchen area",
-          "tasks": [
-            ["Sink and bench", "Clean"],
-            ["Microwave", "Clean"],
-            ["Bins", "Empty and replace liners"]
-          ]
-        }
+        ["Bathrooms"],
+        ["Kitchen area"]
       ],
-      "check": ["Check clean"]
+      "check": [
+        ["Bathrooms"],
+        ["Kitchen area"]
+      ]
     }
   ]
 }
