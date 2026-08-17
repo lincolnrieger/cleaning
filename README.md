@@ -335,19 +335,38 @@ restriction, not just a hidden button.
 
 ## Screens and devices
 
-One layout, built for both. On a phone it's a single column with 48px tap
-targets; on a desktop the overview splits into two columns and the week grids
-show all seven days at once. Grids scroll sideways on a narrow screen with the
-names pinned in place.
+The interface is meant to read as a work tool, not an app: neutral surfaces,
+one accent colour, and colour spent only where it means something — a state,
+a warning, a clash. Everything else is typography, spacing and alignment.
+There's one pattern per job (one kind of tab, one kind of segmented control,
+one kind of button hierarchy) and no decoration that isn't carrying
+information.
 
-Text inputs are set to 16px, which is the threshold below which iOS Safari
-zooms the page when you tap a field — so it never does that. Buttons use
-`touch-action: manipulation` to drop the double-tap-to-zoom delay, and the
-layout respects the notch and home indicator via safe-area insets.
+One layout serves both audiences deliberately. A cleaner holding a phone
+one-handed in a wet bathroom gets 44px+ targets and one obvious next action;
+the office on a laptop gets density and rows that scan, so people and
+checklist items become tables rather than stacked cards.
 
-The bottom tab bar stays at six tabs at most, which is why the building
-schedule, the staff roster and availability share one **Planning** tab and sit
-behind a tab strip — they're three views of the same week.
+A few things worth knowing:
+
+- **The checklist keeps its controls in reach.** A progress line follows you
+  down a sixty-item list, and *Mark complete* sits in a bar pinned to the
+  bottom of the screen rather than below the last item.
+- **Numbers line up.** Counts, times and dates use tabular figures, so a
+  column of them can be read down.
+- **Empty progress bars aren't drawn.** A building at 0/25 says "0/25"; it
+  doesn't also get a grey bar that means nothing.
+- Text inputs are 16px, the threshold below which iOS Safari zooms the page
+  when you tap a field — so it never does. Buttons use
+  `touch-action: manipulation` to drop the double-tap-to-zoom delay, and the
+  layout respects the notch and home indicator via safe-area insets.
+- Icons are one inline SVG set drawn on a single grid — no icon font, no CDN,
+  no emoji, so nothing renders differently on somebody's phone.
+- The bottom tab bar stays at six tabs at most, which is why the building
+  schedule, the staff roster and availability share one **Planning** tab and
+  sit behind a tab strip — they're three views of the same week.
+
+Dark mode follows the phone's own setting, on every screen.
 
 ## How the tracking works
 

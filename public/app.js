@@ -74,11 +74,11 @@ const typeTag = (id) => (id === 'check' ? 'C' : 'F');
     Lost property used to be its own kind; it's folded into Note now. */
 const REPORT_KINDS = {
   maintenance: {
-    label: 'Maintenance', emoji: '🔧', pill: 'open',
+    label: 'Maintenance', pill: 'late',
     placeholder: 'Broken cistern in the left cubicle…',
   },
   note: {
-    label: 'Note', emoji: '📝', pill: 'note',
+    label: 'Note', pill: 'idle',
     placeholder: 'Lost property, or anything else worth flagging…',
   },
 };
@@ -150,18 +150,25 @@ const initials = (name) => String(name)
   .join('')
   .toUpperCase() || '?';
 
-/** Stable hue per person, so the same face is the same colour everywhere. */
-function hueFor(name) {
+/**
+ * Stable tone per person, out of five flat, low-chroma pairs.
+ *
+ * The point of colouring initials at all is telling two cleaners apart in a
+ * dense grid at a glance. A hue per person did that and also turned every
+ * screen into a rainbow; five muted tones do the same job and still read as
+ * one set.
+ */
+const toneFor = (name) => {
   let h = 0;
-  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return h;
-}
+  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 997;
+  return h % 5;
+};
 
 const avatar = (name, size = '') =>
-  `<span class="avatar ${size}" style="--h:${hueFor(name)}" title="${esc(name)}"
+  `<span class="avatar ${size}" data-tone="${toneFor(name)}" title="${esc(name)}"
      >${esc(initials(name))}</span>`;
 
-const avatarStack = (people, size = 'xs') =>
+const avatarStack = (people, size = 'sm') =>
   `<span class="avatar-stack">${people.map((p) => avatar(p.name ?? p, size)).join('')}</span>`;
 
 let toastTimer;
@@ -241,9 +248,10 @@ function signOut() {
 
 /* --------------------------------------------------------------- chrome */
 
-// Hand-drawn, self-contained (no icon font/CDN) - just enough detail to read
-// at 22px in the bottom tab bar. Unused on desktop, where the nav stays
-// text-only pills.
+// One self-contained icon set (no font, no CDN), drawn on a 24px grid so the
+// weights match at every size the app uses them. Replaces the emoji and the
+// ▸ ▲ ✕ text glyphs, which rendered differently on every phone and read as
+// decoration rather than controls.
 const ICONS = {
   home: '<path d="M3 11 12 4l9 7"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/>'
@@ -254,11 +262,30 @@ const ICONS = {
   list: '<path d="M9 6h10M9 12h10M9 18h10"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
   people: '<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/>'
     + '<circle cx="17" cy="9" r="2.3"/><path d="M15.7 14.2c2.4.2 4.3 2 4.3 4.8"/>',
+
+  // Points right when closed; CSS rotates it when aria-expanded flips, so no
+  // code has to swap one arrow glyph for another.
+  chevron: '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  up: '<path d="M12 19V6"/><path d="m6 11.5 6-6 6 6"/>',
+  down: '<path d="M12 5v13"/><path d="m6 12.5 6 6 6-6"/>',
+  back: '<path d="M19 12H5"/><path d="m11 6-6 6 6 6"/>',
+  camera: '<path d="M4.5 8.5h3l1.5-2.5h6L16.5 8.5h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13.5" r="3.2"/>',
+  printer: '<path d="M7 9V4h10v5"/><rect x="3.5" y="9" width="17" height="7" rx="1.5"/><path d="M7 14h10v6H7z"/>',
+  download: '<path d="M12 4v11"/><path d="m7.5 11 4.5 4.5 4.5-4.5"/><path d="M4.5 19.5h15"/>',
+  warning: '<path d="M12 4.5 21 19.5H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 4.5 4.5"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 5.5h-9a2 2 0 0 0-2 2v9"/>',
+  trash: '<path d="M4.5 7h15"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12.5h9L17.5 7"/>',
 };
 
-const icon = (key) => `<span class="navicon" aria-hidden="true">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-    stroke-linecap="round" stroke-linejoin="round">${ICONS[key]}</svg></span>`;
+/** An inline icon. `cls` takes `lg` for the 20px size. */
+const svgIcon = (key, cls = '') =>
+  `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[key]}</svg>`;
+
+const icon = (key) => `<span class="navicon">${svgIcon(key)}</span>`;
 
 // Building schedule, staff roster and availability are three views of the same
 // week, so they share one nav entry and sit behind tabs. Six bottom-bar tabs
@@ -304,7 +331,7 @@ function chrome({ title, back = false, section = '', wide = false }) {
     role.className = `who-role ${state.user.role}`;
     const av = $('#whoAvatar');
     av.textContent = initials(state.user.name);
-    av.style.setProperty('--h', hueFor(state.user.name));
+    av.dataset.tone = toneFor(state.user.name);
   }
 
   // Impossible to forget that PIN-less sign-in is switched on.
@@ -405,13 +432,15 @@ function dayNav(day) {
   const isToday = day === state.config.today;
   return `<div class="periodnav">
     <span class="pn-side pn-left">
-      <button class="ghost" data-day="${esc(addDays(day, -1))}">‹ Prev</button>
+      <button class="ghost" data-day="${esc(addDays(day, -1))}" aria-label="Previous day"
+        >${svgIcon('back')}</button>
     </span>
-    <strong class="period-title">${esc(dayLabel(day))}
-      <span class="tiny muted" style="font-weight:400">${esc(auDate(day))}</span></strong>
+    <span class="period-title">${esc(dayLabel(day))}
+      <span class="period-sub num">${esc(auDate(day))}</span></span>
     <span class="pn-side pn-right">
       ${isToday ? '' : '<button class="ghost" data-day="today">Today</button>'}
-      <button class="ghost" data-day="${esc(addDays(day, 1))}">Next ›</button>
+      <button class="ghost" data-day="${esc(addDays(day, 1))}" aria-label="Next day"
+        >${svgIcon('chevron')}</button>
     </span>
   </div>`;
 }
@@ -428,15 +457,21 @@ function wireDayNav(root, rerender) {
 
 /** Week-picker strip, shared by the schedule, roster and availability grids. */
 function weekNav(from) {
+  const thisWeek = startOfWeek(state.config.today);
   return `<div class="periodnav noprint">
     <span class="pn-side pn-left">
-      <button class="ghost" data-week="${esc(addDays(from, -7))}">‹ Prev</button>
+      <button class="ghost" data-week="${esc(addDays(from, -7))}" aria-label="Previous week"
+        >${svgIcon('back')}</button>
     </span>
-    <strong class="period-title">
-      ${esc(dayOfMonth(from))} – ${esc(dayOfMonth(addDays(from, 6)))}</strong>
+    <span class="period-title">
+      ${esc(dayOfMonth(from))} – ${esc(dayOfMonth(addDays(from, 6)))}
+      <span class="period-sub">${from === thisWeek ? 'This week'
+        : `week commencing ${esc(auDate(from))}`}</span></span>
     <span class="pn-side pn-right">
-      <button class="ghost" data-week="${esc(startOfWeek(state.config.today))}">This week</button>
-      <button class="ghost" data-week="${esc(addDays(from, 7))}">Next ›</button>
+      ${from === thisWeek ? ''
+        : `<button class="ghost" data-week="${esc(thisWeek)}">This week</button>`}
+      <button class="ghost" data-week="${esc(addDays(from, 7))}" aria-label="Next week"
+        >${svgIcon('chevron')}</button>
     </span>
   </div>`;
 }
@@ -493,7 +528,7 @@ function ask({
         ${body ? `<p class="dialog-body">${body}</p>` : ''}
         ${checkbox ? `<label class="check-row" data-extra>
             <input type="checkbox">
-            <span class="grow">${checkbox}</span>
+            <span class="grow small">${checkbox}</span>
           </label>` : ''}
         <button class="${danger ? 'destroy' : 'primary'} wide" data-ok>${esc(confirmText)}</button>
         <button class="wide" data-cancel>${esc(cancelText)}</button>
@@ -571,8 +606,9 @@ function installHintHTML() {
     <span class="grow small">${isIOS
       ? 'Add this to your Home Screen: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.'
       : 'Install this on your phone for one-tap access, full screen, no address bar.'}</span>
-    ${isIOS ? '' : '<button class="ghost" id="installbtn" hidden>Install</button>'}
-    <button class="ghost" id="installclose" aria-label="Dismiss" title="Dismiss">✕</button>
+    ${isIOS ? '' : '<button id="installbtn" hidden>Install</button>'}
+    <button class="ghost" id="installclose" aria-label="Dismiss" title="Dismiss"
+      >${svgIcon('close')}</button>
   </div>`;
 }
 
@@ -615,12 +651,12 @@ async function renderPeoplePicker() {
     ${people.map((p) => `<button class="person" data-uid="${p.id}">
       ${avatar(p.name, 'lg')}
       <span class="grow">
-        <span class="pname" style="display:block">${esc(p.name)}</span>
+        <span class="pname">${esc(p.name)}</span>
         <span class="prole">${esc(p.role)}</span>
       </span>
-      <span class="muted" aria-hidden="true">›</span>
-    </button>`).join('') || '<p class="empty">Nobody has been added yet.</p>'}
-    <div class="pad"><button class="wide ghost" id="usepin">Use a PIN instead</button></div>
+      <span class="muted">${svgIcon('chevron')}</span>
+    </button>`).join('') || '<div class="empty">Nobody has been added yet.</div>'}
+    <div class="pad"><button class="wide" id="usepin">Use a PIN instead</button></div>
   </div>
   <p class="err center" id="err"></p>
   ${installHintHTML()}`;
@@ -658,12 +694,12 @@ function renderPinPad() {
       <p class="err" id="err"></p>
       <div class="pinpad">
         ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button data-k="${n}">${n}</button>`).join('')}
-        <button data-k="del">⌫</button>
+        <button data-k="del" aria-label="Delete">${svgIcon('back', 'lg')}</button>
         <button data-k="0">0</button>
-        <button class="primary" data-k="go">→</button>
+        <button class="primary" data-k="go" aria-label="Sign in">${svgIcon('chevron', 'lg')}</button>
       </div>
       ${state.config.quickSignin
-        ? '<button class="wide ghost" id="uselist">← Pick from the list instead</button>'
+        ? '<button class="wide" id="uselist">Pick from the list instead</button>'
         : ''}
     </div>
   </div>
@@ -768,45 +804,43 @@ async function renderOverview() {
   const fullCount = runSheet.filter((b) => b.cleanType === 'full').length;
 
   app.innerHTML = `
-    <div class="card"><div class="pad">${dayNav(day)}</div></div>
+    <div class="card"><div class="pad tight">${dayNav(day)}</div></div>
 
     <div class="card">
       <div class="stats">
-        <div class="stat"><b>${pct}%</b><span>of today's tasks</span></div>
-        <div class="stat"><b>${totals.signed}/${runSheet.length}</b>
-          <span>buildings signed off</span></div>
-        <div class="stat"><b style="color:var(--${outstanding ? 'warn' : 'done'})">${outstanding}</b>
-          <span>still to do</span></div>
-        <div class="stat"><b style="color:var(--${totals.issues ? 'warn' : 'muted'})">${totals.issues}</b>
-          <span>open issues</span></div>
+        <div class="stat"><b class="num">${pct}%</b><span>of today's tasks</span></div>
+        <div class="stat"><b class="num">${totals.signed}/${runSheet.length}</b>
+          <span>signed off</span></div>
+        <div class="stat ${outstanding ? 'is-warn' : 'is-done'}">
+          <b class="num">${outstanding}</b><span>still to do</span></div>
+        <div class="stat ${totals.issues ? 'is-warn' : ''}">
+          <b class="num">${totals.issues}</b><span>open issues</span></div>
       </div>
-      <div class="pad" style="padding-top:12px">
-        <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
-        <div class="tiny muted center" style="margin-top:6px">
-          ${runSheet.length
-            ? `${totals.done} of ${totals.total} tasks across
-               ${runSheet.length} building${runSheet.length === 1 ? '' : 's'} scheduled
-               ${dayLabel(day) === 'Today' ? 'today' : 'that day'}
-               — ${fullCount} full clean${fullCount === 1 ? '' : 's'},
-               ${runSheet.length - fullCount} check${runSheet.length - fullCount === 1 ? '' : 's'}`
-            : `Nothing scheduled — ${buildings.length} buildings in the park`}</div>
-      </div>
+      <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
+      <div class="pad tight tiny muted center">
+        ${runSheet.length
+          ? `${totals.done} of ${totals.total} tasks across
+             ${runSheet.length} building${runSheet.length === 1 ? '' : 's'}
+             — ${fullCount} full clean${fullCount === 1 ? '' : 's'},
+             ${runSheet.length - fullCount} check${runSheet.length - fullCount === 1 ? '' : 's'}`
+          : `Nothing scheduled — ${buildings.length} buildings in the park`}</div>
     </div>
 
     ${unassigned.length ? `<div class="card">
-      <div class="pad small" style="background:var(--warn-bg);color:var(--warn)">
+      <div class="banner warn">
         <strong>Nobody assigned to
         ${unassigned.map((b) => esc(b.name)).join(', ')}.</strong>
-        Open <strong>Planning</strong> to put a cleaner on ${unassigned.length > 1 ? 'them' : 'it'}.
+        Open Planning to put a cleaner on ${unassigned.length > 1 ? 'them' : 'it'}.
       </div></div>` : ''}
 
     <div class="card">
-      <h2>Run sheet — ${runSheet.length ? `${outstanding} of ${runSheet.length} left`
-        : 'nothing scheduled'}</h2>
+      <h2><span class="grow">Run sheet</span>
+        <span class="num">${runSheet.length ? `${outstanding} of ${runSheet.length} left`
+          : 'nothing scheduled'}</span></h2>
       ${runSheet.length
-        ? `<div class="tilegrid">${runSheet.map(overviewTile).join('')}</div>`
+        ? runSheet.map(overviewTile).join('')
         : `<div class="empty"><b>Nothing scheduled</b>
-           Open <strong>Planning</strong> to plan the week.</div>`}
+           Open Planning to plan the week.</div>`}
     </div>
 
     ${rest.length ? `<div class="card">
@@ -817,7 +851,7 @@ async function renderOverview() {
         ? `<div class="crow-list">${rest.map(compactRow).join('')}</div>` : ''}
     </div>` : ''}
 
-    ${stale.length ? `<div class="card"><div class="pad small muted">
+    ${stale.length ? `<div class="card"><div class="pad tight small muted">
       Not cleaned in a week or more:
       <strong>${stale.map((b) => esc(b.name)).join(', ')}</strong>.
     </div></div>` : ''}`;
@@ -859,7 +893,7 @@ function overviewTile(b) {
   const meta = [
     b.assignees.length
       ? `for ${b.assignees.map((a) => esc(firstName(a.name))).join(', ')}`
-      : b.scheduled ? '<span style="color:var(--warn)">unassigned</span>' : null,
+      : b.scheduled ? '<span class="pill late">unassigned</span>' : null,
     b.crew.length ? `worked by ${b.crew.map((c) => esc(firstName(c))).join(', ')}` : null,
     b.last_at ? `last ${esc(time(b.last_at))}` : null,
     b.open_issues ? `${b.open_issues} open issue${b.open_issues > 1 ? 's' : ''}` : null,
@@ -875,21 +909,19 @@ function overviewTile(b) {
   return `<button class="tile${edge}"
       ${canDrillIn() ? `data-b="${b.id}" data-type="${esc(b.cleanType)}"` : 'disabled'}>
     <div class="spread">
-      <span class="row" style="gap:8px;min-width:0">
-        ${b.scheduled ? `<span class="prio">${b.priority}</span>` : ''}
+      <span class="row grow">
+        ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
+        ${typePill(b.cleanType)}
         ${b.assignees.length ? avatarStack(b.assignees) : ''}
       </span>
-      ${status}
+      <span class="row tight nowrap">${status}
+        <span class="tile-count num">${b.done}/${b.total}</span></span>
     </div>
-    <div class="row" style="gap:6px;margin:6px 0 0">${typePill(b.cleanType)}</div>
-    ${b.done ? `<div class="meter ${pct === 100 ? 'full' : ''}" style="margin-top:6px">
+    ${b.done ? `<div class="meter ${pct === 100 ? 'full' : ''} gap-top-sm">
       <i style="width:${pct}%"></i></div>` : ''}
-    <div class="spread small muted" style="margin-top:6px">
-      <span class="grow">${meta || 'not scheduled'}</span>
-      <span>${b.done}/${b.total}</span>
-    </div>
-    <div class="tiny muted" style="margin-top:2px">
+    <div class="tile-meta">${meta || 'not scheduled'}</div>
+    <div class="tiny muted">
       ${b.grp && b.grp !== b.name ? `${esc(b.grp)} · ` : ''}${
         esc(sinceLabel(b.lastCleaned, state.config.today))}${
         b.note ? ` · ${esc(b.note)}` : ''}</div>
@@ -910,7 +942,7 @@ function compactRow(b) {
         b.open_issues > 1 ? 's' : ''}"></span>` : ''}
     </div>
     <div class="tiny muted">${esc(sinceLabel(b.lastCleaned, state.config.today))}${
-      b.done ? ` · ${b.done}/${b.total} done` : ''}</div>
+      b.done ? ` · <span class="num">${b.done}/${b.total}</span> done` : ''}</div>
   </button>`;
 }
 
@@ -986,9 +1018,9 @@ function wireGroupToggle(el, key, onToggle) {
     const collapsed = state.collapsedGroups.has(key);
     if (collapsed) state.collapsedGroups.delete(key); else state.collapsedGroups.add(key);
     const nowCollapsed = !collapsed;
+    // The chevron is one SVG that CSS rotates off aria-expanded, so there is
+    // no second source of truth to keep in step.
     el.setAttribute('aria-expanded', String(!nowCollapsed));
-    const chev = el.querySelector('.chev');
-    if (chev) chev.textContent = nowCollapsed ? '▸' : '▾';
     onToggle(nowCollapsed);
   };
   el.onclick = toggle;
@@ -1006,9 +1038,10 @@ function wireGroupToggle(el, key, onToggle) {
  */
 function sectionToggle(key, label, count) {
   const open = state.openSections.has(key);
-  return `<button class="card-toggle spread" data-opensec="${esc(key)}" aria-expanded="${open}">
-    <span class="grow">${esc(label)} <span class="muted" style="font-weight:500">· ${count}</span></span>
-    <span class="chev">${open ? '▾' : '▸'}</span>
+  return `<button class="card-toggle" data-opensec="${esc(key)}" aria-expanded="${open}">
+    ${svgIcon('chevron', 'chev')}
+    <span class="grow">${esc(label)}</span>
+    <span class="muted small num">${count}</span>
   </button>`;
 }
 
@@ -1033,7 +1066,8 @@ async function renderCleanerHome() {
     api(`/roster?from=${today}&days=1`).catch(() => ({ shifts: [] })),
   ]);
   if (!live()) return;
-  chrome({ title: `Hi ${firstName(state.user.name)}`, section: '' });
+  // "Today, Tue 12 Aug" is a fact they can act on; a greeting is not.
+  chrome({ title: 'Today', section: '' });
 
   const mine = buildings.filter((b) =>
     b.assignees.some((a) => a.id === state.user.id));
@@ -1044,17 +1078,24 @@ async function renderCleanerHome() {
   const myShifts = (roster.shifts ?? []).filter((s) => s.user_id === state.user.id);
 
   app.innerHTML = `
-    ${myShifts.length ? `<div class="card"><div class="pad small">
-      <strong>You're on today</strong> ${myShifts.map((s) =>
-        `${esc(timeRange(s.start_time, s.end_time))}${s.duty ? ` · ${esc(s.duty)}` : ''}`)
-        .join(' and ')}
-      ${myShifts.some((s) => s.note)
-        ? `<div class="tiny muted" style="margin-top:3px">${
-          myShifts.filter((s) => s.note).map((s) => esc(s.note)).join(' · ')}</div>` : ''}
-    </div></div>` : ''}
+    <div class="card">
+      <div class="pad tight spread">
+        <span><strong>${esc(dayLabel(today))}</strong>
+          <span class="muted small num"> ${esc(auDate(today))}</span></span>
+        ${mine.length ? `<span class="num small muted">${doneCount}/${mine.length} done</span>` : ''}
+      </div>
+      ${myShifts.length ? `<div class="banner info">
+        <strong>You're on ${myShifts.map((s) =>
+          esc(timeRange(s.start_time, s.end_time))).join(' and ')}</strong>${
+          myShifts.filter((s) => s.duty).map((s) => ` · ${esc(s.duty)}`).join('')}
+        ${myShifts.some((s) => s.note)
+          ? `<div class="tiny">${
+            myShifts.filter((s) => s.note).map((s) => esc(s.note)).join(' · ')}</div>` : ''}
+      </div>` : ''}
+    </div>
 
     ${mine.length ? `<div class="card">
-      <h2>Your buildings today — ${doneCount}/${mine.length} done</h2>
+      <h2>Your buildings</h2>
       ${mine.map((b) => jobTile(b, true)).join('')}
     </div>` : `<div class="card"><div class="empty">
       <b>Nothing assigned to you today</b>
@@ -1099,20 +1140,18 @@ function jobTile(b, isMine = false) {
   return `<button class="tile${b.completed_at ? ' finished' : ''}"
       data-b="${b.id}" data-type="${esc(b.cleanType)}">
     <div class="spread">
-      <span class="row" style="gap:8px;min-width:0">
-        ${b.scheduled ? `<span class="prio">${b.priority}</span>` : ''}
+      <span class="row grow">
+        ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
         ${others.length ? avatarStack(others) : ''}
       </span>
-      ${status}
+      <span class="row tight nowrap">${status}
+        <span class="tile-count num">${b.done}/${b.total}</span></span>
     </div>
-    <div class="row" style="gap:6px;margin:6px 0">${typePill(b.cleanType)}
-      <span class="tiny muted">${b.total} item${b.total === 1 ? '' : 's'}</span></div>
-    <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
-    <div class="spread small muted" style="margin-top:6px">
-      <span class="grow">${who}${b.note ? `${who ? ' · ' : ''}${esc(b.note)}` : ''}</span>
-      <span>${b.done}/${b.total}</span>
-    </div>
+    ${b.done ? `<div class="meter ${pct === 100 ? 'full' : ''} gap-top-sm">
+      <i style="width:${pct}%"></i></div>` : ''}
+    <div class="tile-meta">${typePill(b.cleanType)}
+      <span class="grow">${who}${b.note ? `${who ? ' · ' : ''}${esc(b.note)}` : ''}</span></div>
   </button>`;
 }
 
@@ -1152,7 +1191,7 @@ async function renderSchedule() {
           ${scheduled ? `<span class="typetag t-${type}"
             title="${esc(typeLabel(type))}">${typeTag(type)}</span>` : ''}
           ${c.assignees?.length ? avatarStack(c.assignees) : ''}
-          ${c.completedAt ? '<span class="tickmark">✓</span>' : ''}
+          ${c.completedAt ? `<span class="tickmark">${svgIcon('check')}</span>` : ''}
         </div>
         ${c.assignees?.length
           ? `<div class="names">${c.assignees.map((a) => esc(firstName(a.name))).join(', ')}</div>`
@@ -1190,11 +1229,11 @@ async function renderSchedule() {
               const folded = g.label && state.collapsedGroups.has(g.key);
               const head = g.label ? `<tr class="grouphead-row">
                 <th colspan="${1 + data.days.length}">
-                  <div class="grouphead spread" data-grouptoggle="${esc(g.key)}"
+                  <div class="grouphead" data-grouptoggle="${esc(g.key)}"
                     role="button" tabindex="0" aria-expanded="${!folded}">
-                    <span class="grow">${esc(g.label)}
-                      <span class="muted" style="font-weight:400">· ${g.buildings.length}</span></span>
-                    <span class="chev">${folded ? '▸' : '▾'}</span>
+                    ${svgIcon('chevron', 'chev')}
+                    <span class="grow">${esc(g.label)}</span>
+                    <span class="num">${g.buildings.length}</span>
                   </div>
                 </th></tr>` : '';
               return head + g.buildings.map((b) => {
@@ -1213,8 +1252,8 @@ async function renderSchedule() {
       <div class="legend">
         <span><i class="sw t-full"></i>Full Clean</span>
         <span><i class="sw t-check"></i>Check</span>
-        <span><i style="background:var(--done-bg);box-shadow:inset 0 0 0 1px var(--done)"></i>Signed off</span>
-        <span><i style="background:var(--warn)"></i>Nobody assigned</span>
+        <span><i ></i>Signed off</span>
+        <span><i ></i>Nobody assigned</span>
       </div>
     </div>
 
@@ -1277,7 +1316,7 @@ async function openScheduleEditor(data, buildingId, day) {
         <div class="seg" id="typeSeg">
           ${CLEAN_TYPES().map((t) => `<button type="button" class="seg-btn"
             data-type="${esc(t.id)}" aria-pressed="${t.id === cleanType}">${esc(t.label)}
-            <span class="tiny muted" style="display:block">${
+            <span class="tiny muted">${
               building.sizes?.[t.id] ?? 0} items</span></button>`).join('')}
         </div></div>
 
@@ -1286,7 +1325,7 @@ async function openScheduleEditor(data, buildingId, day) {
           value="${scheduled ? cell.priority : nextPriority(data, day)}"></label>
 
       <div>
-        <span class="small muted" style="display:block;margin-bottom:6px;font-weight:600">
+        <span class="small muted" class="eyebrow block gap-top">
           Who is cleaning it</span>
         <div class="check-list">
           ${[...state.cleaners]
@@ -1295,9 +1334,9 @@ async function openScheduleEditor(data, buildingId, day) {
               const window = availabilityOn(c, day);
               const note = window
                 ? (timeRange(window.from, window.to)
-                  ? `<span class="tiny muted" style="display:block">available ${
+                  ? `<span class="tiny muted">available ${
                     esc(timeRange(window.from, window.to))}</span>` : '')
-                : `<span class="tiny" style="display:block;color:var(--warn)">
+                : `<span class="tiny" class="tiny">
                     unavailable on ${esc(DAY_FULL[weekdayIndex(day)])}</span>`;
               return `<label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
                 <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
@@ -1308,7 +1347,7 @@ async function openScheduleEditor(data, buildingId, day) {
             }).join('')
             || '<p class="small muted">No cleaners yet — add them under People.</p>'}
         </div>
-        <p class="tiny muted" style="margin:7px 0 0">
+        <p class="tiny muted">
           More than one person can be put on the same building. People who aren't available
           that day are listed last, but you can still pick them.</p>
       </div>
@@ -1380,7 +1419,7 @@ async function openScheduleEditor(data, buildingId, day) {
       danger: true,
       checkbox: workDone
         ? `Also wipe that day's ticks, photos and sign-off
-           <span class="tiny muted" style="display:block">Only for the
+           <span class="tiny muted">Only for the
              ${esc(typeLabel(cell.cleanType ?? 'full'))} checklist. Goes back to 0 done.</span>`
         : null,
     });
@@ -1433,36 +1472,43 @@ async function renderBuilding(id, wantType) {
   app.innerHTML = `
     <div class="card">
       <div class="pad">
-        ${state.user.role !== 'cleaner' ? `${dayNav(day)}<div style="height:10px"></div>` : ''}
+        ${state.user.role !== 'cleaner' ? `${dayNav(day)}<div class="gap-top"></div>` : ''}
         <div class="seg" id="typeSeg">
           ${CLEAN_TYPES().map((t) => `<button type="button" class="seg-btn"
             data-type="${esc(t.id)}" aria-pressed="${t.id === type}">${esc(t.label)}
-            <span class="tiny muted" style="display:block">${data.sizes[t.id]} items</span>
+            <span class="tiny num">${data.sizes[t.id]} items</span>
           </button>`).join('')}
         </div>
-        ${mismatch ? `<div class="banner warn" style="margin-top:10px;border-radius:var(--r-sm)">
-          <strong>The office scheduled a ${esc(typeLabel(data.scheduledType))} here.</strong>
-          You're looking at the ${esc(typeLabel(type))} checklist.
-        </div>` : ''}
-        ${data.scheduleNote ? `<p class="small" style="margin:10px 0 0">
-          <strong>Note from the office:</strong> ${esc(data.scheduleNote)}</p>` : ''}
-        <div class="spread" style="margin-top:12px">
-          <strong id="count"></strong>
-          <span class="small muted">${esc(dayLabel(day))}</span>
-        </div>
-        <div class="meter" id="meter"><i></i></div>
-        <p class="small" id="signoff" style="color:var(--done);margin:10px 0 0"></p>
       </div>
+      ${mismatch ? `<div class="banner warn">
+        <strong>The office scheduled a ${esc(typeLabel(data.scheduledType))} here.</strong>
+        You're on the ${esc(typeLabel(type))} checklist.
+      </div>` : ''}
+      ${data.scheduleNote ? `<div class="banner info">
+        <strong>From the office:</strong> ${esc(data.scheduleNote)}</div>` : ''}
+      <p class="pad tight small" id="signoff" hidden></p>
+    </div>
+
+    <!-- Follows you down the list, so "how far am I" never needs a scroll up. -->
+    <div class="progresshead">
+      <div class="progresshead-inner">
+        <span class="count num grow" id="count"></span>
+        <span class="small muted nowrap">${esc(dayLabel(day))}</span>
+      </div>
+      <div class="meter" id="meter"><i></i></div>
     </div>
 
     <div id="areas">${data.areas.map((a) => areaCard(a, locked)).join('')}</div>
 
     <div class="card" id="issues" hidden><h2>Open issues here</h2><div id="issuelist"></div></div>
 
-    ${locked ? '<p class="small muted center">Read-only — only cleaners can tick items.</p>' : `
-      <div class="stack">
-        <button class="wide" id="report">Report a problem or leave a note</button>
-        <button class="wide primary" id="complete"></button>
+    ${locked ? '<p class="note center">Read-only — only cleaners can tick items.</p>' : `
+      <!-- The action that ends the job stays in reach instead of sitting
+           below sixty items. -->
+      <div class="actionbar">
+        <button class="primary" id="complete"></button>
+        <button id="report" title="Report a problem or leave a note"
+          >${svgIcon('warning')} Report</button>
       </div>`}`;
 
   paintBuilding(data, locked);
@@ -1562,8 +1608,8 @@ const counts = (data) => {
 /* --------------------------------------------------- photos on an item */
 
 const PHOTO_BADGE = {
-  required: '<span class="pill late shot-badge">📷 Photo required</span>',
-  optional: '<span class="pill idle shot-badge">📷 Photo</span>',
+  required: `<span class="pill late shot-badge">${svgIcon('camera')} Photo required</span>`,
+  optional: `<span class="pill idle shot-badge">${svgIcon('camera')} Photo</span>`,
 };
 
 function photoStrip(task, locked) {
@@ -1583,29 +1629,30 @@ function photoStrip(task, locked) {
     ${task.photos.map((p) => `<span class="shot" data-photo-id="${p.id}">
       <img alt="${esc(task.item)}" hidden data-photo="${esc(p.key)}">
       ${locked ? '' : `<button class="shot-x" data-drop="${p.id}"
-        aria-label="Remove photo" title="Remove photo">✕</button>`}
+        aria-label="Remove photo" title="Remove photo">${svgIcon('close')}</button>`}
     </span>`).join('')}
     ${locked ? '' : `<button class="shot-add" data-add="${task.id}">
-      <span aria-hidden="true">＋</span> ${task.photos.length ? 'Add another' : 'Add photo'}
+      ${svgIcon('camera')} ${task.photos.length ? 'Add another' : 'Add photo'}
     </button>`}
   </div>`;
 }
 
 function areaCard(area, locked) {
   const done = area.tasks.filter((t) => t.done).length;
+  const complete = done === area.tasks.length && area.tasks.length > 0;
   return `<div class="card">
-    <div class="area-head">
-      <span>${esc(area.name)}</span>
-      <span class="small muted" data-areacount="${area.id}">${done}/${area.tasks.length}</span>
+    <div class="area-head${complete ? ' is-complete' : ''}" data-areahead="${area.id}">
+      <span class="grow">${esc(area.name)}</span>
+      <span class="area-count" data-areacount="${area.id}">${done}/${area.tasks.length}</span>
     </div>
     ${area.tasks.map((t) => `
       <div class="taskwrap" data-tw="${t.id}">
         <button class="task${t.done ? ' is-done' : ''}" data-t="${t.id}"
           data-done="${t.done ? 1 : 0}">
-          <span class="box">✓</span>
+          <span class="box">${svgIcon('check')}</span>
           <span class="grow">
             <span class="item">${esc(t.item)}</span>
-            <span class="desc" style="display:block">${esc(t.description)}</span>
+            <span class="desc">${esc(t.description)}</span>
             <span class="who">${t.done && t.by ? `${esc(t.by)} · ${esc(time(t.at))}` : ''}</span>
           </span>
         </button>
@@ -1710,16 +1757,21 @@ function paintBuilding(data, locked) {
   meter.classList.toggle('full', pct === 100);
   meter.firstElementChild.style.width = `${pct}%`;
 
-  $('#signoff').textContent = data.completed
-    ? `✓ ${typeLabel(data.cleanType)} signed off by ${data.completed.completed_by} at `
-      + `${time(data.completed.completed_at)}`
-    : '';
+  const signoff = $('#signoff');
+  signoff.hidden = !data.completed;
+  if (data.completed) {
+    signoff.innerHTML = `<span class="pill done">${svgIcon('check')} Signed off</span>
+      <span class="muted"> ${esc(typeLabel(data.cleanType))} by
+      ${esc(data.completed.completed_by)} at ${esc(time(data.completed.completed_at))}</span>`;
+  }
 
   for (const area of data.areas) {
     const cell = app.querySelector(`[data-areacount="${area.id}"]`);
-    if (cell) {
-      cell.textContent = `${area.tasks.filter((t) => t.done).length}/${area.tasks.length}`;
-    }
+    if (!cell) continue;
+    const areaDone = area.tasks.filter((t) => t.done).length;
+    cell.textContent = `${areaDone}/${area.tasks.length}`;
+    cell.closest('.area-head')
+      ?.classList.toggle('is-complete', areaDone === area.tasks.length && area.tasks.length > 0);
   }
 
   const issues = $('#issues');
@@ -1733,7 +1785,7 @@ function paintBuilding(data, locked) {
   if (!locked) {
     $('#complete').textContent = data.completed
       ? `Reopen this ${typeLabel(data.cleanType).toLowerCase()}`
-      : `Done — mark this ${typeLabel(data.cleanType).toLowerCase()} complete`;
+      : `Mark ${typeLabel(data.cleanType).toLowerCase()} complete`;
   }
 }
 
@@ -1903,7 +1955,7 @@ async function openQuickReport() {
   const sheet = openSheet(`
     <div class="sheet-head"><strong>Quick report</strong></div>
     <div class="pad stack">
-      <p class="small muted" style="margin:0">Which building is this about?</p>
+      <p class="small muted">Which building is this about?</p>
       <label class="field"><span>Building</span>
         <select id="qbid">
           <option value="">Choose…</option>
@@ -1956,12 +2008,12 @@ async function renderIssues(status = 'open') {
   const canResolve = state.user.role !== 'cleaner';
 
   app.innerHTML = `
-    <div class="spread wrap" style="margin-bottom:14px">
-      <div class="tabs" style="margin:0">
+    <div class="spread wrap">
+      <div class="tabs">
         <button data-s="open" aria-current="${status === 'open'}">Open</button>
         <button data-s="resolved" aria-current="${status === 'resolved'}">Resolved</button>
       </div>
-      <button class="ghost" id="newreport">+ New report</button>
+      <button id="newreport">${svgIcon('plus')} New report</button>
     </div>
     <div class="card">
       ${items.length ? items.map((i) => {
@@ -1973,13 +2025,13 @@ async function renderIssues(status = 'open') {
             <strong>${esc(i.building)}${where ? ` — ${esc(where)}` : ''}</strong>
             <span class="pill ${meta.pill}">${meta.emoji} ${esc(meta.label)}</span>
           </div>
-          <div style="margin:4px 0">${esc(i.detail)}</div>
+          <div>${esc(i.detail)}</div>
           ${i.photo_key ? `<img class="thumb" hidden alt="Reported problem"
              data-photo="${esc(i.photo_key)}">` : ''}
           <div class="tiny muted">Reported by ${esc(i.reported_by)} on ${esc(auDate(i.day))}
             ${i.resolved_at ? ` · resolved by ${esc(i.resolved_by)}` : ''}</div>
-          ${canResolve ? `<div style="margin-top:8px">
-            <button class="ghost" data-r="${i.id}" data-reopen="${status === 'resolved'}">
+          ${canResolve ? `<div class="gap-top-sm">
+            <button class="sm" data-r="${i.id}" data-reopen="${status === 'resolved'}">
               ${status === 'resolved' ? 'Reopen' : 'Mark resolved'}</button></div>` : ''}
         </div>`;
       }).join('')
@@ -2035,7 +2087,7 @@ async function renderHistory() {
         </div>`).join('')
         : '<div class="empty">No activity on this day.</div>'}
     </div>
-    <button class="wide" id="csv">Download CSV for this day</button>`;
+    <button class="wide" id="csv">${svgIcon('download')} Download CSV for this day</button>`;
 
   wireDayNav(app, renderHistory);
   $('#csv').onclick = () => download(`/report?from=${day}&to=${day}`, `cleaning-${auDate(day)}.csv`);
@@ -2120,7 +2172,7 @@ function editAvailability(person, onDone) {
       <p class="dialog-body">Which days do they work, and between what times?
         Leave the times blank for a day with no set hours.</p>
       <div class="avlist">${availabilityRows(person.availability)}</div>
-      <div class="row wrap" style="gap:6px">
+      <div class="row wrap tight">
         <button class="ghost" data-preset="weekdays">Mon–Fri 8–4</button>
         <button class="ghost" data-preset="copy">Copy first day down</button>
         <button class="ghost" data-preset="clear">Clear all</button>
@@ -2231,13 +2283,13 @@ async function renderAvailability() {
             <option value="available" ${f.status === 'available' ? 'selected' : ''}>Available</option>
             <option value="unavailable" ${f.status === 'unavailable' ? 'selected' : ''}>Unavailable</option>
           </select></label>
-        <label class="field"><span>Free between</span>
-          <span class="row" style="gap:6px">
+        <label class="field span2"><span>Free between</span>
+          <span class="row tight">
             <input type="time" id="ffrom" value="${esc(f.from)}" aria-label="Available from">
             <input type="time" id="fto" value="${esc(f.to)}" aria-label="Available to">
           </span></label>
         <div class="field"><span>&nbsp;</span>
-          <button class="ghost wide" id="fclear">Clear filters</button></div>
+          <button class="wide" id="fclear">Clear filters</button></div>
       </div>
     </div>
 
@@ -2258,11 +2310,15 @@ async function renderAvailability() {
               </th>
               ${p.availability.map((entry, i) => {
                 const rostered = p.rostered[i];
+                // A shift booked on a day off is exactly what this screen
+                // exists to surface, so it is called out here too.
+                const clash = rostered && !entry;
                 return `<td class="${dim(p, i) ? 'dimmed' : ''}">
                   <div class="avcell ${entry ? 'yes' : 'no'}">
                     ${esc(availabilityText(entry))}
-                    ${rostered ? `<span class="tiny muted" style="display:block">
-                      ${rostered} shift${rostered === 1 ? '' : 's'}</span>` : ''}
+                    ${rostered ? `<span class="tiny ${clash ? 'clash' : 'muted'}">
+                      ${rostered} shift${rostered === 1 ? '' : 's'}${
+                        clash ? ' — clash' : ''}</span>` : ''}
                   </div></td>`;
               }).join('')}
             </tr>`).join('') || `<tr><td colspan="8">
@@ -2273,7 +2329,7 @@ async function renderAvailability() {
       <div class="legend">
         <span><i class="sw yes"></i>Available</span>
         <span><i class="sw no"></i>Unavailable</span>
-        <span class="tiny">Tap a name to change their availability</span>
+        <span>Tap a name to change their availability</span>
       </div>
     </div>`;
 
@@ -2345,10 +2401,14 @@ async function renderRoster() {
         s.confirmed ? 'ok' : ''}">
           <b>${esc(timeRange(s.start_time, s.end_time))}</b>
           ${s.duty ? `<span class="tiny">${esc(s.duty)}</span>` : ''}
-          ${s.flags.length ? '<span class="tiny warnmark">⚠</span>' : ''}
-          ${s.confirmed ? '<span class="tiny tick">✓</span>' : ''}
+          <span class="shift-marks">
+            ${s.flags.length ? `<span class="warnmark">${svgIcon('warning')}</span>` : ''}
+            ${s.confirmed ? `<span class="tick">${svgIcon('check')}</span>` : ''}
+          </span>
         </span>`).join('')
-      : `<span class="offtext">${entry ? (canEdit ? '+' : '—') : 'OFF'}</span>`;
+      : entry
+        ? `<span class="offtext add">${canEdit ? '+' : '—'}</span>`
+        : '<span class="offtext">OFF</span>';
 
     return `<td class="${day === data.today ? 'today-col' : ''}">
       <button class="${classes}" data-shift="${person.id}|${day}"
@@ -2390,13 +2450,13 @@ async function renderRoster() {
         </table>
       </div>
       <p class="printonly print-foot">
-        ✓ confirmed · ⚠ clashes with availability · OFF not available</p>
+        Ticked = confirmed · flagged = clashes with availability · OFF = not available</p>
     </div>
 
-    <div class="row wrap noprint" style="gap:8px">
-      <button class="ghost" id="print">Print / save as PDF</button>
-      ${canEdit ? `<button class="ghost" id="csv">Download CSV</button>
-      <button class="ghost" id="copyweek">Copy last week into this one</button>` : ''}
+    <div class="row wrap noprint">
+      <button id="print">${svgIcon('printer')} Print / save as PDF</button>
+      ${canEdit ? `<button id="csv">${svgIcon('download')} Download CSV</button>
+      <button id="copyweek">${svgIcon('copy')} Copy last week into this one</button>` : ''}
     </div>
 
     <p class="tiny muted center noprint">
@@ -2469,10 +2529,10 @@ function openShiftEditor(data, userId, day) {
                 ${s.confirmed ? '<span class="pill done">Confirmed</span>'
                   : '<span class="pill idle">Not confirmed</span>'}
                 ${s.flags.map((fl) => `<span class="pill late" title="${esc(FLAG_TEXT[fl])}"
-                  >⚠ ${esc(fl)}</span>`).join('')}
-                ${s.note ? `<span class="tiny muted" style="display:block">${esc(s.note)}</span>` : ''}
+                  >${svgIcon('warning')} ${esc(fl)}</span>`).join('')}
+                ${s.note ? `<span class="tiny muted">${esc(s.note)}</span>` : ''}
               </span>
-              <span class="row" style="gap:6px">
+              <span class="row tight">
                 <button class="ghost" data-editshift="${s.id}">Edit</button>
                 <button class="ghost danger" data-delshift="${s.id}">Delete</button>
               </span>
@@ -2494,7 +2554,7 @@ function openShiftEditor(data, userId, day) {
           <label class="check-row ${shift?.confirmed ? 'on' : ''}" data-conf>
             <input type="checkbox" ${shift?.confirmed ? 'checked' : ''}>
             <span class="grow">Shift confirmed with them
-              <span class="tiny muted" style="display:block">Unconfirmed shifts still show on
+              <span class="tiny muted">Unconfirmed shifts still show on
                 the roster, marked as such.</span></span>
           </label>
           <p class="err" id="err"></p>
@@ -2589,7 +2649,7 @@ function openShiftEditor(data, userId, day) {
 
 /** The Full Clean / Check tab strip, shared by both admin checklist screens. */
 function typeTabs(current) {
-  return `<div class="seg typeseg">${CLEAN_TYPES().map((t) => `
+  return `<div class="seg">${CLEAN_TYPES().map((t) => `
     <button type="button" class="seg-btn" data-settype="${esc(t.id)}"
       aria-pressed="${t.id === current}">${esc(t.label)}</button>`).join('')}</div>`;
 }
@@ -2621,13 +2681,13 @@ async function renderChecklistAdmin() {
       .join(' ').toLowerCase();
     return `<button class="list-item brow" data-open="${b.id}" data-search="${esc(search)}"
         data-group="${esc(groupKey)}" ${folded ? 'hidden' : ''}
-        style="${b.active ? '' : 'opacity:.5'}">
+        data-off="${b.active ? 0 : 1}">
       <div class="spread wrap">
         <strong class="grow">${esc(b.name)}
           ${b.active ? '' : '<span class="pill idle">hidden</span>'}</strong>
-        <span class="muted" aria-hidden="true">›</span>
+        <span class="muted">${svgIcon('chevron')}</span>
       </div>
-      <div class="small muted" style="margin-top:4px">
+      <div class="small muted">
         ${areas.length} area${areas.length === 1 ? '' : 's'} · ${tasks} item${tasks === 1 ? '' : 's'}
         on the ${esc(typeLabel(type))}
         <span class="tiny">· ${data.otherCounts[b.id] ?? 0} on the
@@ -2672,14 +2732,14 @@ async function renderChecklistAdmin() {
     </div>
 
     <div class="card">
-      <div class="pad" style="padding-bottom:0">${typeTabs(type)}</div>
-      <div class="pad" style="padding-bottom:0">
+      <div class="pad">${typeTabs(type)}</div>
+      <div class="pad">
         <input id="search" placeholder="Search buildings, areas or items…" autocomplete="off">
       </div>
-      <h2 style="border:none;padding-bottom:0">
+      <h2>
         ${esc(typeLabel(type))} — ${data.buildings.filter((b) => b.active).length} buildings</h2>
-      ${empties.length ? `<div class="pad" style="padding-top:0">
-        <div class="banner warn" style="border-radius:var(--r-sm)">
+      ${empties.length ? `<div class="pad">
+        <div class="banner warn">
           <strong>${empties.length} building${empties.length === 1 ? ' has' : 's have'} no
           ${esc(typeLabel(type))} checklist:</strong>
           ${empties.slice(0, 6).map((b) => esc(b.name)).join(', ')}${
@@ -2689,24 +2749,24 @@ async function renderChecklistAdmin() {
         </div></div>` : ''}
       ${groups.map((g) => {
         const folded = g.label && state.collapsedGroups.has(g.key);
-        const head = g.label ? `<button class="grouphead spread" data-grouptoggle="${esc(g.key)}"
+        const head = g.label ? `<button class="grouphead" data-grouptoggle="${esc(g.key)}"
             aria-expanded="${!folded}">
-          <span class="grow">${esc(g.label)}
-            <span class="muted" style="font-weight:400">· ${g.buildings.length}</span></span>
-          <span class="chev">${folded ? '▸' : '▾'}</span>
+          ${svgIcon('chevron', 'chev')}
+          <span class="grow">${esc(g.label)}</span>
+          <span class="num">${g.buildings.length}</span>
         </button>` : '';
         return head + g.buildings.map((b) => buildingRow(b, g.key, folded)).join('');
       }).join('')}
-      <div class="pad row wrap" style="gap:8px">
-        <button class="primary grow" id="addb">Add a building</button>
-        <button class="ghost" id="orderb">Reorder buildings</button>
+      <div class="pad row wrap">
+        <button class="primary" id="addb">${svgIcon('plus')} Add a building</button>
+        <button id="orderb">Reorder buildings</button>
       </div>
     </div>
 
     <div class="card danger">
       <h2>Restore from the checklist file</h2>
       <div class="pad">
-        <p class="small muted" style="margin:0 0 10px">Throws away edits made here and
+        <p class="small muted">Throws away edits made here and
           rebuilds <strong>both</strong> checklists from <code>data/checklist.json</code>.
           Cleaning history is not affected.</p>
         <button class="wide danger" id="restore">Restore from file</button>
@@ -2784,8 +2844,9 @@ async function renderBuildingEditor(buildingId) {
   const totalItems = areas.filter((a) => a.active).reduce((n, a) => n + a.tasks, 0);
 
   const PHOTO_LABEL = {
-    none: '', optional: '<span class="pill idle">📷 photo</span>',
-    required: '<span class="pill late">📷 required</span>',
+    none: '',
+    optional: `<span class="pill idle">${svgIcon('camera')} photo</span>`,
+    required: `<span class="pill late">${svgIcon('camera')} required</span>`,
   };
 
   const areaCardHtml = (area) => {
@@ -2797,37 +2858,38 @@ async function renderBuildingEditor(buildingId) {
           <strong>${esc(area.name)}</strong>
           ${area.clean_type === 'both' ? '<span class="pill open">on both checklists</span>' : ''}
           ${area.active ? '' : '<span class="pill idle">hidden</span>'}
-          <span class="muted" style="font-weight:500"> · ${area.tasks} item${
+          <span class="muted"> · ${area.tasks} item${
             area.tasks === 1 ? '' : 's'}</span>
         </span>
-        <span class="chev">${unfolded ? '▾' : '▸'}</span>
+        ${svgIcon('chevron', 'chev')}
       </button>
       ${unfolded ? `
         ${detail.tasks.map((t, i) => `<div class="list-item itemrow"
-            style="${t.active ? '' : 'opacity:.5'}">
+            data-off="${t.active ? 0 : 1}">
           <div class="spread wrap">
             <span class="grow">
               <strong>${esc(t.item)}</strong>
               ${PHOTO_LABEL[t.photo_mode] ?? ''}
               ${t.active ? '' : '<span class="pill idle">hidden</span>'}
-              <span class="small muted" style="display:block">${esc(t.description)}</span>
+              <span class="small muted">${esc(t.description)}</span>
               ${t.history ? `<span class="tiny muted">${t.history} record${
                 t.history === 1 ? '' : 's'}</span>` : ''}
             </span>
-            <span class="row" style="gap:4px">
-              <button class="ghost tiny-btn" data-move="${t.id}" data-dir="-1"
-                ${i === 0 ? 'disabled' : ''} aria-label="Move up" title="Move up">▲</button>
-              <button class="ghost tiny-btn" data-move="${t.id}" data-dir="1"
+            <span class="row tight">
+              <button class="iconbtn" data-move="${t.id}" data-dir="-1"
+                ${i === 0 ? 'disabled' : ''} aria-label="Move up" title="Move up"
+                >${svgIcon('up')}</button>
+              <button class="iconbtn" data-move="${t.id}" data-dir="1"
                 ${i === detail.tasks.length - 1 ? 'disabled' : ''}
-                aria-label="Move down" title="Move down">▼</button>
-              <button class="ghost" data-edititem="${t.id}" data-area="${area.id}">Edit</button>
+                aria-label="Move down" title="Move down">${svgIcon('down')}</button>
+              <button class="sm" data-edititem="${t.id}" data-area="${area.id}">Edit</button>
             </span>
           </div>
         </div>`).join('') || '<div class="empty">No items yet.</div>'}
-        <div class="pad row wrap" style="gap:8px">
-          <button class="primary grow" data-additem="${area.id}">Add an item</button>
-          <button class="ghost" data-editarea="${area.id}">Rename or hide</button>
-          <button class="ghost" data-orderitems="${area.id}">Reorder</button>
+        <div class="pad row wrap">
+          <button class="primary" data-additem="${area.id}">${svgIcon('plus')} Add an item</button>
+          <button data-editarea="${area.id}">Rename or hide</button>
+          <button data-orderitems="${area.id}">Reorder</button>
         </div>` : ''}
     </div>`;
   };
@@ -2835,14 +2897,14 @@ async function renderBuildingEditor(buildingId) {
   app.innerHTML = `
     <div class="card">
       <div class="pad">${typeTabs(type)}</div>
-      <div class="pad spread wrap" style="padding-top:0">
+      <div class="pad spread wrap">
         <div>
           <strong>${esc(building.name)}</strong>
           <div class="small muted">${building.grp ? `${esc(building.grp)} · ` : ''}${
             areas.filter((a) => a.active).length} area${areas.length === 1 ? '' : 's'} ·
             ${totalItems} item${totalItems === 1 ? '' : 's'} on the ${esc(typeLabel(type))}</div>
         </div>
-        <button class="ghost" id="editb">Edit building</button>
+        <button id="editb">Edit building</button>
       </div>
     </div>
 
@@ -2854,12 +2916,12 @@ async function renderBuildingEditor(buildingId) {
         </div></div>`}
 
     <div class="card">
-      <div class="pad row wrap" style="gap:8px">
-        <button class="primary grow" id="addarea">Add an area</button>
-        ${areas.length > 1 ? '<button class="ghost" id="orderareas">Reorder areas</button>' : ''}
-        <button class="ghost" id="copyover">Copy from the ${esc(typeLabel(otherType(type)))}</button>
+      <div class="pad row wrap">
+        <button class="primary" id="addarea">${svgIcon('plus')} Add an area</button>
+        ${areas.length > 1 ? '<button id="orderareas">Reorder areas</button>' : ''}
+        <button id="copyover">${svgIcon('copy')} Copy from the ${esc(typeLabel(otherType(type)))}</button>
       </div>
-      <p class="tiny muted pad" style="padding-top:0">
+      <p class="tiny muted pad">
         Hiding an item or area takes it off future checklists and keeps every record of it
         having been cleaned. Deleting throws those records away.</p>
     </div>
@@ -2867,7 +2929,7 @@ async function renderBuildingEditor(buildingId) {
     <div class="card danger">
       <h2>Delete this building</h2>
       <div class="pad">
-        <p class="small muted" style="margin:0 0 10px">Removes <strong>${esc(building.name)}</strong>,
+        <p class="small muted">Removes <strong>${esc(building.name)}</strong>,
           both of its checklists, every tick, every photo, its schedule and its reports.
           <strong>There is no undo.</strong> To take it off the schedule but keep its history,
           use <strong>Edit building</strong> and turn it off instead.</p>
@@ -3022,12 +3084,12 @@ function openReorder({ title, hint, items, kind, parentId, cleanType, onDone }) 
     rows.innerHTML = order.map((item, i) => `<div class="reorder-row">
       <span class="grow">
         <strong>${esc(item.label)}</strong>
-        ${item.sub ? `<span class="tiny muted" style="display:block">${esc(item.sub)}</span>` : ''}
+        ${item.sub ? `<span class="tiny muted">${esc(item.sub)}</span>` : ''}
       </span>
-      <button class="ghost tiny-btn" data-up="${i}" ${i === 0 ? 'disabled' : ''}
-        aria-label="Move up">▲</button>
-      <button class="ghost tiny-btn" data-down="${i}" ${i === order.length - 1 ? 'disabled' : ''}
-        aria-label="Move down">▼</button>
+      <button class="iconbtn" data-up="${i}" ${i === 0 ? 'disabled' : ''}
+        aria-label="Move up">${svgIcon('up')}</button>
+      <button class="iconbtn" data-down="${i}" ${i === order.length - 1 ? 'disabled' : ''}
+        aria-label="Move down">${svgIcon('down')}</button>
     </div>`).join('');
 
     rows.querySelectorAll('[data-up]').forEach((b) => {
@@ -3076,7 +3138,7 @@ function editBuilding(b, onDone) {
       ${b ? `<label class="check-row ${b.active ? 'on' : ''}" data-act>
           <input type="checkbox" ${b.active ? 'checked' : ''}>
           <span class="grow">Show on checklists and the schedule
-            <span class="tiny muted" style="display:block">Turning this off hides it
+            <span class="tiny muted">Turning this off hides it
               without touching its history.</span></span>
         </label>` : ''}
       <p class="err" id="err"></p>
@@ -3122,13 +3184,13 @@ function editArea(a, onDone) {
             <button type="button" class="seg-btn" data-atype="${esc(t.id)}"
               aria-pressed="${t.id === current}">${esc(t.label)}</button>`).join('')}
         </div>
-        <p class="tiny muted" style="margin:6px 0 0">"Both" is for anything done on every
+        <p class="tiny muted">"Both" is for anything done on every
           visit — edit it once and it stays the same on each checklist.</p>
       </div>
       ${a?.id ? `<label class="check-row ${a.active ? 'on' : ''}" data-act>
           <input type="checkbox" ${a.active ? 'checked' : ''}>
           <span class="grow">Show on the checklist
-            <span class="tiny muted" style="display:block">Hiding keeps every record of it
+            <span class="tiny muted">Hiding keeps every record of it
               having been cleaned.</span></span>
         </label>` : ''}
       <p class="err" id="err"></p>
@@ -3218,7 +3280,7 @@ function editTask(t, onDone) {
             <label class="check-row ${id === mode ? 'on' : ''}" data-photo="${id}">
               <input type="radio" name="photomode" ${id === mode ? 'checked' : ''}>
               <span class="grow">${esc(label)}
-                <span class="tiny muted" style="display:block">${esc(hint)}</span></span>
+                <span class="tiny muted">${esc(hint)}</span></span>
             </label>`).join('')}
         </div>
       </div>
@@ -3226,7 +3288,7 @@ function editTask(t, onDone) {
       ${t?.id ? `<label class="check-row ${t.active ? 'on' : ''}" data-act>
           <input type="checkbox" ${t.active ? 'checked' : ''}>
           <span class="grow">Show on the checklist
-            <span class="tiny muted" style="display:block">Hiding keeps every record of it
+            <span class="tiny muted">Hiding keeps every record of it
               having been cleaned — this is the usual way to retire an item.</span></span>
         </label>` : ''}
       <p class="err" id="err"></p>
@@ -3339,40 +3401,39 @@ async function renderAdmin() {
 
       <div class="card">
         <h2>Everyone — ${users.filter((u) => u.active).length} active</h2>
-        ${users.map((u) => `<div class="list-item people-row" style="${u.active ? '' : 'opacity:.5'}"
+        ${users.map((u) => `<div class="list-item people-row" data-off="${u.active ? 0 : 1}"
             data-id="${u.id}" data-name="${esc(u.name)}" data-role="${esc(u.role)}"
             data-active="${u.active}">
-          <div class="row" style="gap:10px">
+          <div class="row loose">
             ${avatar(u.name)}
             <span class="grow">
-              <strong style="display:block">${esc(u.name)}</strong>
-              <span class="tiny muted">${esc(u.role)}${u.active ? '' : ' · disabled'}
-                · ${esc(availabilitySummary(u.availability))}</span>
+              <strong>${esc(u.name)}</strong>
+              <span class="tiny muted">${esc(u.role)}${u.active ? '' : ' · disabled'}</span>
             </span>
           </div>
-          <div class="row wrap" style="gap:6px;margin-top:10px">
-            <button class="ghost" data-days>Availability</button>
-            <button class="ghost" data-pin>New PIN</button>
-            <button class="ghost" data-tog>${u.active ? 'Disable' : 'Enable'}</button>
-            <button class="ghost danger" data-del
+          <div class="people-avail">${esc(availabilitySummary(u.availability))}</div>
+          <div class="actions">
+            <button data-days>Availability</button>
+            <button data-pin>New PIN</button>
+            <button data-tog>${u.active ? 'Disable' : 'Enable'}</button>
+            <button class="danger" data-del
               ${u.id === state.user.id ? 'disabled title="You cannot delete yourself"' : ''}
               >Delete</button>
           </div>
         </div>`).join('')}
-        <p class="tiny muted pad">
+        <p class="note pad">
           PINs are stored hashed — they can be replaced, never read back.
-          Availability feeds the roster; see <strong>Planning → Availability</strong>
+          Availability feeds the roster; see <strong>Planning, then Availability,</strong>
           for everyone at once.</p>
       </div>
     </div>
 
     <div class="card">
       <h2>Sign-in</h2>
-      <label class="switch-row" style="cursor:pointer">
-        <input type="checkbox" id="quick" ${state.config.quickSignin ? 'checked' : ''}
-          style="width:20px;height:20px;min-height:20px;flex:none;accent-color:var(--accent)">
+      <label class="switch-row">
+        <input type="checkbox" id="quick" ${state.config.quickSignin ? 'checked' : ''}>
         <span class="grow">
-          <strong style="display:block;font-size:14.5px">Test mode — tap a name to sign in</strong>
+          <strong>Test mode — tap a name to sign in</strong>
           <span class="small muted">Skips the PIN entirely. Handy while you set things up.
             <strong>Anyone with the link can sign in as anyone, including you.</strong>
             Turn it off before the cleaners start using it for real.</span>
@@ -3383,21 +3444,21 @@ async function renderAdmin() {
     <div class="card">
       <h2>Maintenance alerts</h2>
       <div class="pad stack narrow">
-        <p class="small muted" style="margin:0">Push a free phone notification the moment a
+        <p class="small muted">Push a free phone notification the moment a
           cleaner reports a maintenance issue or a note. Uses
           <strong>ntfy.sh</strong> — no account, no cost, but the topic name below is the
           <em>only</em> thing keeping your alerts private, so don't share it anywhere public.</p>
         <label class="field"><span>Topic</span>
           <input id="ntfyTopic" value="${esc(notif.topic)}" autocomplete="off"
             placeholder="not set — alerts are off" spellcheck="false"></label>
-        <div class="row" style="gap:8px">
+        <div class="row">
           <button class="ghost" id="ntfyGen">Generate a private topic</button>
           <button class="primary" id="ntfySave">Save</button>
         </div>
         <p class="err" id="ntfyErr"></p>
         ${notif.topic ? `<button class="ghost wide" id="ntfyTest">Send a test notification</button>`
           : ''}
-        <div class="banner info" style="margin:4px 0 0">
+        <div class="banner info">
           <strong>To receive alerts:</strong> install the free <strong>ntfy</strong> app
           (search "ntfy" on the App Store or Google Play), tap <strong>+</strong>, and
           subscribe to <code>${esc(notif.topic || 'your-topic-here')}</code> — exactly as
@@ -3409,14 +3470,14 @@ async function renderAdmin() {
     <div class="card danger">
       <h2>Danger zone</h2>
       <div class="pad stack">
-        <p class="small muted" style="margin:0">
+        <p class="small muted">
           Clears every cleaning record, schedule, roster, sign-off, photo and maintenance
           report so you can start fresh after testing. Your buildings and checklists are
           <strong>not</strong> touched. Tables are never deleted.</p>
         <label class="check-row" id="peoplerow">
           <input type="checkbox" id="wipepeople">
           <span class="grow">Also remove everyone except me
-            <span class="tiny muted" style="display:block">You stay signed in as admin.</span></span>
+            <span class="tiny muted">You stay signed in as admin.</span></span>
         </label>
         <label class="field"><span>Type <code class="phrase">clear database</code> to confirm</span>
           <input id="confirm" placeholder="clear database" autocapitalize="none"
