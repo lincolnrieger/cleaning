@@ -1103,8 +1103,7 @@ async function renderCleanerHome() {
       </div>
       ${myShifts.length ? `<div class="banner info">
         <strong>You're on ${myShifts.map((s) =>
-          esc(timeRange(s.start_time, s.end_time))).join(' and ')}</strong>${
-          myShifts.filter((s) => s.duty).map((s) => ` · ${esc(s.duty)}`).join('')}
+          esc(timeRange(s.start_time, s.end_time))).join(' and ')}</strong>
         ${myShifts.some((s) => s.note)
           ? `<div class="tiny">${
             myShifts.filter((s) => s.note).map((s) => esc(s.note)).join(' · ')}</div>` : ''}
@@ -1358,8 +1357,7 @@ async function openScheduleEditor(data, buildingId, day) {
                 ? `<span class="tiny warntext">
                     unavailable on ${esc(DAY_FULL[weekdayIndex(day)])}</span>`
                 : `<span class="tiny muted">${rank === 2 ? 'would rather work it' : 'available'}${
-                    hours ? ` · ${esc(hours)}` : ''}${
-                    c.prefNote ? ` · ${esc(c.prefNote)}` : ''}</span>`;
+                    hours ? ` · ${esc(hours)}` : ''}</span>`;
               return `<label class="check-row ${picked.has(c.id) ? 'on' : ''}" data-pick="${c.id}">
                 <input type="checkbox" ${picked.has(c.id) ? 'checked' : ''}>
                 ${avatar(c.name)}
@@ -2208,7 +2206,6 @@ function availabilitySummary(person) {
     // is noise.
     preferred.length && preferred.length < on.length ? `prefers ${preferred.join(', ')}` : '',
     person.idealHours ? `ideally ${person.idealHours}h a week` : '',
-    person.prefNote,
   ].filter(Boolean).join(' · ');
 }
 
@@ -2223,7 +2220,6 @@ function editAvailability(person, onDone) {
         them first when you're picking someone.</p>
       <div class="avlist">${availabilityRows(person.availability)}</div>
       <div class="row wrap tight">
-        <button data-preset="weekdays">Mon–Fri 8–4</button>
         <button data-preset="copy">Copy first day down</button>
         <button data-preset="clear">Clear all</button>
       </div>
@@ -2233,10 +2229,6 @@ function editAvailability(person, onDone) {
           value="${esc(person.idealHours ?? '')}" placeholder="e.g. 25">
         <span class="field-hint">Shown against what they're actually rostered, so you can
           see at a glance who is short and who is over.</span></label>
-
-      <label class="field"><span>Rostering notes (optional)</span>
-        <input id="avnote" maxlength="300" value="${esc(person.prefNote ?? '')}"
-          placeholder="Prefers mornings · school run at 3pm · no Saturdays in term"></label>
 
       <p class="err" id="err"></p>
       <button class="primary wide" id="save">Save availability</button>
@@ -2261,9 +2253,7 @@ function editAvailability(person, onDone) {
   sheet.querySelectorAll('[data-preset]').forEach((b) => {
     b.onclick = () => {
       const kind = b.dataset.preset;
-      if (kind === 'weekdays') {
-        rows().forEach((row, i) => setRow(row, i < 5, i < 5 ? '08:00' : '', i < 5 ? '16:00' : ''));
-      } else if (kind === 'clear') {
+      if (kind === 'clear') {
         rows().forEach((row) => setRow(row, false));
       } else {
         const first = rows()[0];
@@ -2289,7 +2279,6 @@ function editAvailability(person, onDone) {
           userId: person.id,
           days: readAvailabilityRows(sheet),
           idealHours: sheet.querySelector('#avhours').value,
-          note: sheet.querySelector('#avnote').value,
         },
       });
       closeSheet();
@@ -2384,8 +2373,6 @@ async function renderAvailability() {
                 <small>${esc(p.role)}${hoursLabel(p)
                   ? ` · <span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
                   : ''}</small>
-                ${p.prefNote ? `<small class="prefnote" title="${esc(p.prefNote)}"
-                  >${esc(p.prefNote)}</small>` : ''}
               </th>
               ${p.availability.map((entry, i) => {
                 const rostered = p.rostered[i];
@@ -2485,7 +2472,7 @@ async function renderRoster() {
       ? shifts.map((s) => `<span class="shift ${s.flags.length ? 'clash' : ''} ${
         s.confirmed ? 'ok' : ''}">
           <b>${esc(timeRange(s.start_time, s.end_time))}</b>
-          ${s.duty ? `<span class="tiny">${esc(s.duty)}</span>` : ''}
+          ${s.note ? `<span class="tiny" title="${esc(s.note)}">${esc(s.note)}</span>` : ''}
           <span class="shift-marks">
             ${s.flags.length ? `<span class="warnmark">${svgIcon('warning')}</span>` : ''}
             ${s.confirmed ? `<span class="tick">${svgIcon('check')}</span>` : ''}
@@ -2517,7 +2504,7 @@ async function renderRoster() {
       </div></div>` : ''}
 
     <div class="card" id="printarea">
-      <h1 class="printonly print-title">STAFF ROSTER — WEEK COMMENCING ${esc(auDate(from))}</h1>
+      <h1 class="printonly print-title">Cleaning Schedule - Week Commencing ${esc(auDate(from))}</h1>
       <div class="grid-wrap">
         <table class="sched roster">
           <thead><tr>
@@ -2530,9 +2517,7 @@ async function renderRoster() {
               <th class="rowhead">${esc(p.name)}
                 <small>${hoursLabel(p)
                   ? `<span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
-                  : esc(p.role)}</small>
-                ${p.prefNote ? `<small class="prefnote noprint" title="${esc(p.prefNote)}"
-                  >${esc(p.prefNote)}</small>` : ''}</th>
+                  : esc(p.role)}</small></th>
               ${data.days.map((d) => cell(p, d)).join('')}
             </tr>`).join('') || `<tr><td colspan="8">
               <div class="empty"><b>Nobody rostered this week</b>
@@ -2613,15 +2598,12 @@ function openShiftEditor(data, userId, day) {
           entry?.preferred ? 'Prefers this day · ' : ''}${esc(availabilityText(entry))}</span>
       </div>
       <div class="pad stack">
-        ${hoursLabel(person) || person.prefNote ? `<p class="note">
-          ${hoursLabel(person) ? `<strong class="num">${esc(hoursLabel(person))}</strong>
-            rostered this week.` : ''}
-          ${person.prefNote ? esc(person.prefNote) : ''}</p>` : ''}
+        ${hoursLabel(person) ? `<p class="note">
+          <strong class="num">${esc(hoursLabel(person))}</strong> rostered this week.</p>` : ''}
         ${existing.length && !shift && !forceForm ? `<div class="stack">
           ${existing.map((s) => `<div class="list-item shiftrow">
             <div class="spread wrap">
               <span class="grow"><strong>${esc(timeRange(s.start_time, s.end_time))}</strong>
-                ${s.duty ? `<span class="small muted"> · ${esc(s.duty)}</span>` : ''}
                 ${s.confirmed ? '<span class="pill done">Confirmed</span>'
                   : '<span class="pill idle">Not confirmed</span>'}
                 ${s.flags.map((fl) => `<span class="pill late" title="${esc(FLAG_TEXT[fl])}"
@@ -2641,9 +2623,6 @@ function openShiftEditor(data, userId, day) {
             <input type="time" id="sfrom" value="${esc(shift?.start_time ?? suggested.from)}"></label>
           <label class="field"><span>Finish</span>
             <input type="time" id="sto" value="${esc(shift?.end_time ?? suggested.to)}"></label>
-          <label class="field"><span>Duties or role (optional)</span>
-            <input id="sduty" maxlength="80" value="${esc(shift?.duty ?? '')}"
-              placeholder="Basecamps and bell tents"></label>
           <label class="field"><span>Notes (optional)</span>
             <input id="snote" maxlength="200" value="${esc(shift?.note ?? '')}"
               placeholder="Finishing early — dentist"></label>
@@ -2697,7 +2676,6 @@ function openShiftEditor(data, userId, day) {
         day,
         start: sheet.querySelector('#sfrom').value,
         end: sheet.querySelector('#sto').value,
-        duty: sheet.querySelector('#sduty').value,
         note: sheet.querySelector('#snote').value,
         confirmed: conf.checked,
       };

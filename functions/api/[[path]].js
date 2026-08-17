@@ -151,7 +151,7 @@ function toMinutes(t) {
 const MAX_IDEAL_HOURS = 80;
 
 /**
- * Reads whatever is stored into { days, idealHours, note }.
+ * Reads whatever is stored into { days, idealHours }.
  *
  * `days` is 7 entries, Monday first: null (doesn't work that day) or
  * { from, to, preferred } - a pair of HH:MM times, or two empty strings
@@ -167,7 +167,7 @@ const MAX_IDEAL_HOURS = 80;
  */
 function parseAvailability(raw) {
   const open = () => Array.from({ length: 7 }, () => ({ from: '', to: '', preferred: false }));
-  const wrap = (days) => ({ days, idealHours: null, note: '' });
+  const wrap = (days) => ({ days, idealHours: null });
 
   if (!raw) return wrap(open());
 
@@ -197,7 +197,6 @@ function parseAvailability(raw) {
     return {
       days: arr.map(readDay),
       idealHours: Number.isFinite(hours) && hours > 0 ? Math.min(hours, MAX_IDEAL_HOURS) : null,
-      note: typeof stored?.note === 'string' ? stored.note : '',
     };
   } catch {
     return wrap(open());
@@ -208,7 +207,7 @@ function parseAvailability(raw) {
 const availabilityDays = (raw) => parseAvailability(raw).days;
 
 /** Validates what the admin submitted and returns the string to store. */
-function validateAvailability({ days, idealHours, note }) {
+function validateAvailability({ days, idealHours }) {
   if (!Array.isArray(days) || days.length !== 7) {
     throw new HttpError(400, 'Availability needs an entry for all seven days.');
   }
@@ -237,7 +236,7 @@ function validateAvailability({ days, idealHours, note }) {
     hours = Math.round(hours * 2) / 2; // half-hours are as fine as anyone needs
   }
 
-  return JSON.stringify({ days: out, idealHours: hours, note: clean(note, 300) });
+  return JSON.stringify({ days: out, idealHours: hours });
 }
 
 const availabilityFor = (person, day) => availabilityDays(person.availability)[weekdayIndex(day)];
@@ -670,8 +669,8 @@ const routes = {
     ).all();
     return json({
       cleaners: results.map((c) => {
-        const { days, idealHours, note } = parseAvailability(c.availability);
-        return { ...c, availability: days, idealHours, prefNote: note };
+        const { days, idealHours } = parseAvailability(c.availability);
+        return { ...c, availability: days, idealHours };
       }),
     });
   },
@@ -1287,8 +1286,8 @@ const routes = {
     ).all();
     return json({
       users: results.map((u) => {
-        const { days, idealHours, note } = parseAvailability(u.availability);
-        return { ...u, availability: days, idealHours, prefNote: note };
+        const { days, idealHours } = parseAvailability(u.availability);
+        return { ...u, availability: days, idealHours };
       }),
     });
   },
@@ -1390,9 +1389,9 @@ const routes = {
     // Cleaners' hours are managed by the office/admin, not by cleaners
     // themselves - so this always requires an elevated role, self or not.
     require(user, 'office', 'admin');
-    const { userId, days, idealHours, note } = await req.json();
+    const { userId, days, idealHours } = await req.json();
     const target = userId ? Number(userId) : user.id;
-    const stored = validateAvailability({ days, idealHours, note });
+    const stored = validateAvailability({ days, idealHours });
 
     const res = await env.DB.prepare('UPDATE users SET availability = ? WHERE id = ?')
       .bind(stored, target).run();
@@ -1436,14 +1435,13 @@ const routes = {
       days,
       today: localDay(env),
       staff: people.results.map((p) => {
-        const { days: avail, idealHours, note } = parseAvailability(p.availability);
+        const { days: avail, idealHours } = parseAvailability(p.availability);
         return {
           id: p.id,
           name: p.name,
           role: p.role,
           availability: avail,
           idealHours,
-          prefNote: note,
           rostered: days.map((d) => counts.get(`${p.id}:${d}`) ?? 0),
           rosteredHours: Math.round(((minutes.get(p.id) ?? 0) / 60) * 10) / 10,
         };
@@ -1462,7 +1460,7 @@ const routes = {
 
     const [shifts, people] = await Promise.all([
       env.DB.prepare(
-        `SELECT id, user_id, user_name, day, start_time, end_time, duty, note, confirmed
+        `SELECT id, user_id, user_name, day, start_time, end_time, note, confirmed
          FROM roster WHERE day BETWEEN ? AND ? ORDER BY day, start_time, user_name`,
       ).bind(days[0], days[days.length - 1]).all(),
       env.DB.prepare(
@@ -1477,14 +1475,13 @@ const routes = {
     }
 
     const staff = people.results.map((p) => {
-      const { days: avail, idealHours, note } = parseAvailability(p.availability);
+      const { days: avail, idealHours } = parseAvailability(p.availability);
       return {
         id: p.id,
         name: p.name,
         role: p.role,
         availability: avail,
         idealHours,
-        prefNote: note,
         rosteredHours: Math.round(((workedMinutes.get(p.id) ?? 0) / 60) * 10) / 10,
       };
     });
@@ -1547,7 +1544,6 @@ const routes = {
       throw new HttpError(409, conflicts.map((c) => c.message).join(' '), { conflicts });
     }
 
-    const duty = clean(body.duty, 80);
     const note = clean(body.note, 200);
     const confirmed = body.confirmed ? 1 : 0;
     const ts = now();
@@ -1555,18 +1551,18 @@ const routes = {
     if (id) {
       const res = await env.DB.prepare(
         `UPDATE roster SET user_id = ?, user_name = ?, day = ?, start_time = ?, end_time = ?,
-           duty = ?, note = ?, confirmed = ?, updated_at = ? WHERE id = ?`,
-      ).bind(person.id, person.name, day, from, to, duty, note, confirmed, ts, id).run();
+           note = ?, confirmed = ?, updated_at = ? WHERE id = ?`,
+      ).bind(person.id, person.name, day, from, to, note, confirmed, ts, id).run();
       if (!res.meta.changes) throw new HttpError(404, 'That shift no longer exists.');
       return json({ ok: true, id, conflicts });
     }
 
     const res = await env.DB.prepare(
       `INSERT INTO roster
-         (user_id, user_name, day, start_time, end_time, duty, note, confirmed,
+         (user_id, user_name, day, start_time, end_time, note, confirmed,
           created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(person.id, person.name, day, from, to, duty, note, confirmed, user.name, ts, ts).run();
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(person.id, person.name, day, from, to, note, confirmed, user.name, ts, ts).run();
 
     return json({ ok: true, id: res.meta.last_row_id, conflicts });
   },
@@ -1592,7 +1588,7 @@ const routes = {
     const fromEnd = addDays(from, 6);
     const [{ results: source }, existing] = await Promise.all([
       env.DB.prepare(
-        `SELECT user_id, user_name, day, start_time, end_time, duty, note
+        `SELECT user_id, user_name, day, start_time, end_time, note
          FROM roster WHERE day BETWEEN ? AND ?`,
       ).bind(from, fromEnd).all(),
       env.DB.prepare(
@@ -1615,12 +1611,12 @@ const routes = {
     // not this week's, and the office should tick each one off deliberately.
     await env.DB.batch(source.map((s) => env.DB.prepare(
       `INSERT INTO roster
-         (user_id, user_name, day, start_time, end_time, duty, note, confirmed,
+         (user_id, user_name, day, start_time, end_time, note, confirmed,
           created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
     ).bind(
       s.user_id, s.user_name, addDays(s.day, offset), s.start_time, s.end_time,
-      s.duty, s.note, user.name, ts, ts,
+      s.note, user.name, ts, ts,
     )));
 
     return json({ ok: true, copied: source.length });
@@ -1633,15 +1629,15 @@ const routes = {
     const to = addDays(from, 6);
 
     const { results } = await env.DB.prepare(
-      `SELECT day, user_name, start_time, end_time, duty, note, confirmed
+      `SELECT day, user_name, start_time, end_time, note, confirmed
        FROM roster WHERE day BETWEEN ? AND ? ORDER BY day, start_time, user_name`,
     ).bind(from, to).all();
 
     const auDay = (d) => (d ? d.split('-').reverse().join('-') : '');
-    const header = 'Date,Day,Staff,Start,Finish,Duties,Notes,Confirmed\n';
+    const header = 'Date,Day,Staff,Start,Finish,Notes,Confirmed\n';
     const csv = results.map((r) => [
       auDay(r.day), DAY_NAMES[weekdayIndex(r.day)], r.user_name,
-      r.start_time, r.end_time, r.duty, r.note, r.confirmed ? 'Yes' : 'No',
+      r.start_time, r.end_time, r.note, r.confirmed ? 'Yes' : 'No',
     ].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
 
     return new Response(header + csv, {
