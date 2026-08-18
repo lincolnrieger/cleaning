@@ -231,7 +231,9 @@ Availability answers *can they*. Two more fields on the same sheet answer
 - **Ideal hours a week** — a target, e.g. 25. The availability grid and the
   roster then show **"22h of 25h"** against each person for the week you're
   looking at, and turn amber once they're over it. No adding shifts up by
-  hand to see who's short and who's had too much.
+  hand to see who's short and who's had too much. **Office and admin only** —
+  a cleaner opening the roster sees the shifts and nobody's hours, and the
+  figures aren't in the response their browser receives either.
 Both are optional, and neither can stop you doing anything — they sort and
 annotate. Availability is still the only thing that raises a conflict.
 
@@ -241,15 +243,15 @@ annotate. Availability is still the only thing that raises a conflict.
 
 **Planning → Staff roster** is the week: staff down the side, days across the
 top. Tap any square to add a shift with a start time, finish time and an
-optional note, and to mark it **confirmed**.
+optional note.
 
 - The start and finish default to that person's availability for that day, so
   a normal shift is two taps.
 - A person can have **more than one shift a day** — tapping a square that
   already has shifts lists them, with edit and delete on each.
-- **Copy last week into this one** brings the whole previous week across. They
-  arrive **unconfirmed** on purpose: last week's agreement isn't this week's.
-  It only works into an empty week, so it can't quietly duplicate anything.
+- **Copy last week into this one** brings the whole previous week across,
+  ready to adjust. It only works into an empty week, so it can't quietly
+  duplicate anything.
 
 ### Availability conflicts are warned, never silent
 
@@ -278,8 +280,8 @@ It's a clean A4 landscape sheet:
 | Dana | 10am–6pm | OFF | 8am–4pm | 8am–4pm | 10am–4pm | 9am–1pm | OFF |
 
 Navigation, buttons, filters and the app header are all removed, days someone
-isn't available read **OFF**, confirmed shifts carry a ✓ and clashes a ⚠, and
-a staff member's row never splits across pages.
+isn't available read **OFF**, clashes carry a ⚠, and a staff member's row
+never splits across pages.
 
 **For a PDF**, use the same button and choose *Save as PDF* as the printer —
 every browser and phone has it, and it produces the same layout. There's also

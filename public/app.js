@@ -2349,14 +2349,12 @@ async function renderRoster() {
       .filter(Boolean).join(' ');
 
     const inner = shifts.length
-      ? shifts.map((s) => `<span class="shift ${s.flags.length ? 'clash' : ''} ${
-        s.confirmed ? 'ok' : ''}">
+      ? shifts.map((s) => `<span class="shift ${s.flags.length ? 'clash' : ''}">
           <b>${esc(timeRange(s.start_time, s.end_time))}</b>
           ${s.note ? `<span class="tiny" title="${esc(s.note)}">${esc(s.note)}</span>` : ''}
-          <span class="shift-marks">
-            ${s.flags.length ? `<span class="warnmark">${svgIcon('warning')}</span>` : ''}
-            ${s.confirmed ? `<span class="tick">${svgIcon('check')}</span>` : ''}
-          </span>
+          ${s.flags.length
+            ? `<span class="shift-marks"><span class="warnmark">${svgIcon('warning')}</span></span>`
+            : ''}
         </span>`).join('')
       : entry
         ? `<span class="offtext add">${canEdit ? '+' : '—'}</span>${entry.preferred
@@ -2395,7 +2393,7 @@ async function renderRoster() {
           <tbody>
             ${staff.map((p) => `<tr>
               <th class="rowhead">${esc(p.name)}
-                <small>${hoursLabel(p)
+                <small>${canEdit && hoursLabel(p)
                   ? `<span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
                   : esc(p.role)}</small></th>
               ${data.days.map((d) => cell(p, d)).join('')}
@@ -2406,7 +2404,7 @@ async function renderRoster() {
         </table>
       </div>
       <p class="printonly print-foot">
-        Ticked = confirmed · flagged = clashes with availability · OFF = not available</p>
+        Flagged = clashes with availability · OFF = not available</p>
     </div>
 
     <div class="row wrap noprint">
@@ -2432,7 +2430,7 @@ async function renderRoster() {
     const go = await ask({
       title: 'Copy last week?',
       body: `Every shift from the week of <strong>${esc(auDate(addDays(from, -7)))}</strong>
-        is copied into this one, unconfirmed so you can check each before it counts.
+        is copied into this one, ready to adjust.
         This only works while this week is empty.`,
       confirmText: 'Copy them across',
     });
@@ -2484,8 +2482,6 @@ function openShiftEditor(data, userId, day) {
           ${existing.map((s) => `<div class="list-item shiftrow">
             <div class="spread wrap">
               <span class="grow"><strong>${esc(timeRange(s.start_time, s.end_time))}</strong>
-                ${s.confirmed ? '<span class="pill done">Confirmed</span>'
-                  : '<span class="pill idle">Not confirmed</span>'}
                 ${s.flags.map((fl) => `<span class="pill late" title="${esc(FLAG_TEXT[fl])}"
                   >${svgIcon('warning')} ${esc(fl)}</span>`).join('')}
                 ${s.note ? `<span class="tiny muted">${esc(s.note)}</span>` : ''}
@@ -2506,12 +2502,6 @@ function openShiftEditor(data, userId, day) {
           <label class="field"><span>Notes (optional)</span>
             <input id="snote" maxlength="200" value="${esc(shift?.note ?? '')}"
               placeholder="Finishing early — dentist"></label>
-          <label class="check-row ${shift?.confirmed ? 'on' : ''}" data-conf>
-            <input type="checkbox" ${shift?.confirmed ? 'checked' : ''}>
-            <span class="grow">Shift confirmed with them
-              <span class="tiny muted">Unconfirmed shifts still show on
-                the roster, marked as such.</span></span>
-          </label>
           <p class="err" id="err"></p>
           <button class="primary wide" id="save">${shift ? 'Save shift' : 'Add shift'}</button>
           ${shift ? `<button class="wide danger" data-delshift="${shift.id}">Delete shift</button>` : ''}
@@ -2544,9 +2534,6 @@ function openShiftEditor(data, userId, day) {
       };
     });
 
-    const conf = sheet.querySelector('[data-conf] input');
-    if (conf) conf.onchange = () => conf.closest('.check-row').classList.toggle('on', conf.checked);
-
     sheet.querySelector('#save')?.addEventListener('click', async (ev) => {
       const btn = ev.currentTarget;
       btn.disabled = true;
@@ -2557,7 +2544,6 @@ function openShiftEditor(data, userId, day) {
         start: sheet.querySelector('#sfrom').value,
         end: sheet.querySelector('#sto').value,
         note: sheet.querySelector('#snote').value,
-        confirmed: conf.checked,
       };
 
       try {

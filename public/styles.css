@@ -922,7 +922,12 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 
 table.sched { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
 
-table.sched { table-layout: fixed; }
+/* Fixed layout so the seven day columns are equal instead of being sized by
+   whatever happens to be written in them. The min-width is what makes the
+   wrapper actually scroll on a phone: without it the table is squeezed to
+   390px, "8am-4pm" overflows its 37px column, and the times end up printed
+   across the name beside them. */
+table.sched { table-layout: fixed; min-width: 660px; }
 
 table.sched th, table.sched td {
   border-right: 1px solid var(--line-2);
@@ -1118,7 +1123,6 @@ table.avail td.dimmed { opacity: .28; }
 .shift-marks { display: flex; gap: 3px; align-items: center; }
 .shift-marks .ico { width: 12px; height: 12px; vertical-align: 0; }
 .shift .warnmark { color: var(--warn); }
-.shift .tick { color: var(--done); }
 .offtext { color: var(--faint); font-size: 11px; font-weight: 620; letter-spacing: .04em; }
 .offtext.add { opacity: .45; font-size: 15px; font-weight: 400; }
 .cell:hover .offtext.add { opacity: 1; color: var(--accent); }
@@ -1408,7 +1412,9 @@ code.phrase {
   #printarea { border: none; background: #fff; margin: 0; padding: 0; }
   .grid-wrap { overflow: visible !important; }
 
-  table.sched { width: 100%; font-size: 9pt; }
+  /* The min-width that makes the grid scroll on a phone would push it off the
+     side of the page here; paper has a fixed width and no scrollbar. */
+  table.sched { width: 100%; min-width: 0; font-size: 9pt; }
   table.sched th, table.sched td { border-color: #999 !important; padding: 4pt 3pt; }
   table.sched thead th { background: #eee !important; color: #000; position: static !important; }
   table.sched th.rowhead { position: static !important; background: #fff !important; width: 20%; font-size: 9.5pt; }
@@ -1418,7 +1424,7 @@ code.phrase {
   .cell.rcell { min-height: 0; background: #fff !important; box-shadow: none; border: none; padding: 2pt; }
   .shift b { font-size: 9.5pt; color: #000; }
   .shift .tiny { color: #444; }
-  .shift .tick, .shift .warnmark { color: #000; }
+  .shift .warnmark { color: #000; }
   .offtext { color: #666; font-size: 8.5pt; }
 
   /* The "+" and the preference star are on-screen affordances - there is
