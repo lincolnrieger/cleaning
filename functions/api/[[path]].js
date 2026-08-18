@@ -1365,7 +1365,7 @@ const routes = {
 
     const [shifts, people] = await Promise.all([
       env.DB.prepare(
-        `SELECT id, user_id, user_name, day, start_time, end_time, note, confirmed
+        `SELECT id, user_id, user_name, day, start_time, end_time, note
          FROM roster WHERE day BETWEEN ? AND ? ORDER BY day, start_time, user_name`,
       ).bind(days[0], days[days.length - 1]).all(),
       env.DB.prepare(
@@ -1379,6 +1379,11 @@ const routes = {
       workedMinutes.set(r.user_id, (workedMinutes.get(r.user_id) ?? 0) + (span > 0 ? span : 0));
     }
 
+    // Hours against a target are a management figure, not something a cleaner
+    // should be reading off a colleague's row - so they are left out of the
+    // response entirely rather than merely hidden by the front end.
+    const canSeeHours = user.role !== 'cleaner';
+
     const staff = people.results.map((p) => {
       const { days: avail, idealHours } = parseAvailability(p.availability);
       return {
@@ -1386,8 +1391,10 @@ const routes = {
         name: p.name,
         role: p.role,
         availability: avail,
-        idealHours,
-        rosteredHours: Math.round(((workedMinutes.get(p.id) ?? 0) / 60) * 10) / 10,
+        ...(canSeeHours ? {
+          idealHours,
+          rosteredHours: Math.round(((workedMinutes.get(p.id) ?? 0) / 60) * 10) / 10,
+        } : {}),
       };
     });
     const byId = new Map(staff.map((p) => [p.id, p]));
@@ -1409,7 +1416,7 @@ const routes = {
         && toMinutes(s.start_time) < toMinutes(o.end_time)
         && toMinutes(s.end_time) > toMinutes(o.start_time));
       if (clash) flags.push('overlap');
-      return { ...s, confirmed: Boolean(s.confirmed), flags };
+      return { ...s, flags };
     });
 
     return json({
@@ -1450,24 +1457,24 @@ const routes = {
     }
 
     const note = clean(body.note, 200);
-    const confirmed = body.confirmed ? 1 : 0;
+
     const ts = now();
 
     if (id) {
       const res = await env.DB.prepare(
         `UPDATE roster SET user_id = ?, user_name = ?, day = ?, start_time = ?, end_time = ?,
-           note = ?, confirmed = ?, updated_at = ? WHERE id = ?`,
-      ).bind(person.id, person.name, day, from, to, note, confirmed, ts, id).run();
+           note = ?, updated_at = ? WHERE id = ?`,
+      ).bind(person.id, person.name, day, from, to, note, ts, id).run();
       if (!res.meta.changes) throw new HttpError(404, 'That shift no longer exists.');
       return json({ ok: true, id, conflicts });
     }
 
     const res = await env.DB.prepare(
       `INSERT INTO roster
-         (user_id, user_name, day, start_time, end_time, note, confirmed,
+         (user_id, user_name, day, start_time, end_time, note,
           created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(person.id, person.name, day, from, to, note, confirmed, user.name, ts, ts).run();
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(person.id, person.name, day, from, to, note, user.name, ts, ts).run();
 
     return json({ ok: true, id: res.meta.last_row_id, conflicts });
   },
@@ -1512,13 +1519,11 @@ const routes = {
     );
     const ts = now();
 
-    // Copied shifts arrive unconfirmed on purpose: last week's agreement is
-    // not this week's, and the office should tick each one off deliberately.
     await env.DB.batch(source.map((s) => env.DB.prepare(
       `INSERT INTO roster
-         (user_id, user_name, day, start_time, end_time, note, confirmed,
+         (user_id, user_name, day, start_time, end_time, note,
           created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       s.user_id, s.user_name, addDays(s.day, offset), s.start_time, s.end_time,
       s.note, user.name, ts, ts,
@@ -1534,15 +1539,15 @@ const routes = {
     const to = addDays(from, 6);
 
     const { results } = await env.DB.prepare(
-      `SELECT day, user_name, start_time, end_time, note, confirmed
+      `SELECT day, user_name, start_time, end_time, note
        FROM roster WHERE day BETWEEN ? AND ? ORDER BY day, start_time, user_name`,
     ).bind(from, to).all();
 
     const auDay = (d) => (d ? d.split('-').reverse().join('-') : '');
-    const header = 'Date,Day,Staff,Start,Finish,Notes,Confirmed\n';
+    const header = 'Date,Day,Staff,Start,Finish,Notes\n';
     const csv = results.map((r) => [
       auDay(r.day), DAY_NAMES[weekdayIndex(r.day)], r.user_name,
-      r.start_time, r.end_time, r.note, r.confirmed ? 'Yes' : 'No',
+      r.start_time, r.end_time, r.note,
     ].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
 
     return new Response(header + csv, {
