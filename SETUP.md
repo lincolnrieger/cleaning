@@ -124,7 +124,7 @@ three options:
 **Photo required is a warning, not a lock.** A cleaner can still sign off a
 building with a photo missing — a flat phone battery shouldn't strand a
 finished building — but it takes a second, deliberate confirmation and the
-activity log records that it was signed off short.
+record shows that it was signed off short.
 
 ### Housekeeping
 
@@ -226,7 +226,7 @@ To go back to the file after editing in the app, use **Restore from file** at
 the bottom of the Checklists screen — it asks you to type "restore".
 
 **Removing a task doesn't delete history.** It stops appearing on checklists,
-but the record of every time it was cleaned stays in the activity log and CSV
+but the record of every time it was cleaned stays in the CSV
 exports. Put it back and it returns with its history intact.
 
 ## Sharing it with your team
