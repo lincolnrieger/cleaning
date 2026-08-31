@@ -2,7 +2,8 @@
 // Single Cloudflare Pages Function handling every /api/* route.
 
 import {
-  ensureReady, contacts, CLEAN_TYPES, CLEAN_TYPE_LABELS, isCleanType, PHOTO_MODES,
+  ensureReady, applyChecklistFile, checklistVersion,
+  contacts, CLEAN_TYPES, CLEAN_TYPE_LABELS, isCleanType, PHOTO_MODES,
 } from './_setup.js';
 
 const TOKEN_TTL_HOURS = 14; // covers a long shift, expires before the next day
@@ -1599,6 +1600,10 @@ const routes = {
       items,
       otherCounts,
       source: await getSetting(env, 'checklist_source', 'file'),
+      // True when data/checklist.json says something other than what was last
+      // written. Without this, a file edit that the app is ignoring looks
+      // exactly like a file edit that didn't deploy.
+      fileDiffers: await getSetting(env, 'checklist_version', '') !== await checklistVersion(),
     });
   },
 
@@ -1882,7 +1887,7 @@ const routes = {
     return json({ ok: true, ordered: wanted.length });
   },
 
-  /** Hands the checklist back to data/checklist.json on the next request. */
+  /** Hands the checklist back to data/checklist.json, and applies it now. */
   'POST /admin/checklist/restore': async (req, env, { user }) => {
     require(user, 'admin');
     const { confirm } = await req.json();
@@ -1890,8 +1895,11 @@ const routes = {
       throw new HttpError(400, 'Type "restore" to confirm.');
     }
     await setSetting(env, 'checklist_source', 'file');
-    await setSetting(env, 'checklist_version', '');
-    return json({ ok: true });
+    // Written here rather than left for the next cold start: the admin is
+    // watching this screen, and the whole point of the button is that the
+    // list they are looking at changes.
+    const counts = await applyChecklistFile(env.DB);
+    return json({ ok: true, ...counts });
   },
 
   'POST /settings': async (req, env, { user }) => {
