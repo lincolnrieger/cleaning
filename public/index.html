@@ -43,10 +43,11 @@
   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
   <span class="fab-label">Report</span>
 </button>
-<!-- If app.js never runs - a script error, or a bad response cached by an old
-     service worker - the page would otherwise sit on "Loading…" for ever with
-     nothing to act on. This says so instead, and offers the one fix that
-     works: throw the cached copy away and fetch it again. -->
+<!-- If the app never takes over this page - a script error, a bad response
+     cached by an old service worker, or a server still setting itself up after
+     an update - it would otherwise sit on "Loading…" for ever with nothing to
+     act on. This works out which of those it is, says so, and offers the two
+     fixes: try again, or throw the cached copy away and fetch it fresh. -->
 <script>
   // Registered here rather than from app.js so that a broken app.js can still
   // be repaired by a later deploy: this always runs, so a new worker always
@@ -56,18 +57,32 @@
   }
 
   window.addEventListener('error', (e) => { window.__bootError = e.message; });
+  // An await that rejects never reaches window.onerror, and the app's very
+  // first await - fetching the config - is exactly that kind of failure.
+  window.addEventListener('unhandledrejection', (e) => {
+    window.__bootError = window.__bootError || e.reason?.message || String(e.reason ?? '');
+  });
+
+  const alive = () => document.getElementById('booting')?.isConnected
+    && document.getElementById('booting');
+
+  // Three seconds in, say something. The first request after an update can
+  // take a moment, and a page that sits on one word looks broken.
+  const settling = setTimeout(() => { const el = alive(); if (el) el.textContent = 'Starting up…'; }, 3000);
+
   setTimeout(async () => {
-    const el = document.getElementById('booting');
-    if (!el || !el.isConnected) return; // the app took over, as it should
-    let detail = window.__bootError || '';
-    if (!detail) {
-      try {
-        const res = await fetch('/app.js', { cache: 'no-store' });
-        if (!res.ok) detail = `The app failed to load (${res.status}).`;
-      } catch { detail = 'No connection to the site.'; }
-    }
-    el.innerHTML = `<strong>The app didn't start.</strong><br>${
-      detail ? `${detail}<br>` : ''}<button id="bootreset">Reload the app</button>`;
+    clearTimeout(settling);
+    const el = alive();
+    if (!el) return; // the app took over, as it should
+
+    // Show the panel and its two ways out straight away, then fill in the
+    // reason as the checks below come back - a screen that says nothing while
+    // it works out what is wrong is the problem we are fixing.
+    el.innerHTML = '<strong>The app hasn\'t started yet.</strong><br>'
+      + '<span id="bootwhy">Still waiting on the server…</span><br>'
+      + '<button id="bootretry">Try again</button> '
+      + '<button id="bootreset">Reset and reload</button>';
+    document.getElementById('bootretry').onclick = () => location.reload();
     document.getElementById('bootreset').onclick = async () => {
       try {
         const keys = await caches.keys();
@@ -77,7 +92,47 @@
       } catch { /* nothing cached to clear */ }
       location.reload();
     };
-  }, 8000);
+
+    const why = (text) => {
+      const node = document.getElementById('bootwhy');
+      if (node) node.textContent = text;
+    };
+    // A probe that hangs tells us nothing, so cap each one.
+    const get = (path, ms) => {
+      const stop = new AbortController();
+      const timer = setTimeout(() => stop.abort(), ms);
+      return fetch(path, { cache: 'no-store', signal: stop.signal })
+        .finally(() => clearTimeout(timer));
+    };
+
+    // Which of the three is it: a broken app file, a server that refuses, or
+    // a server that is merely slow? Say which, rather than leaving anyone to
+    // guess from a blank screen.
+    if (window.__bootError) return why(`The app reported: ${window.__bootError}`);
+
+    try {
+      const res = await get('/app.js', 8000);
+      if (!res.ok) return why(`The app file failed to load (${res.status}).`);
+    } catch {
+      return why('No connection to the site.');
+    }
+
+    const started = Date.now();
+    try {
+      const res = await get('/api/config', 25000);
+      const took = Math.round((Date.now() - started) / 1000);
+      if (res.ok) {
+        why(`The server took ${took}s to answer. It sets itself up after an `
+          + 'update, so give it a moment and try again.');
+      } else {
+        const body = await res.json().catch(() => ({}));
+        why(`The server said: ${body.error || `error ${res.status}`}`);
+      }
+    } catch {
+      why('The server did not answer. It may still be setting itself up after '
+        + 'an update — try again in a minute.');
+    }
+  }, 15000);
 </script>
 <script src="/app.js"></script>
 </body>

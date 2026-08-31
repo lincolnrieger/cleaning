@@ -547,7 +547,7 @@ async function syncChecklist(db) {
   }
 }
 
-async function migrate(env) {
+async function migrate(env, waitUntil) {
   const db = env.DB;
   if (!db) {
     throw new Error(
@@ -585,8 +585,14 @@ async function migrate(env) {
   // Only rewrite the checklist when its content actually changed.
   const version = await sha256Hex(JSON.stringify(plan()));
   if (source !== 'app' && await readSetting(db, 'checklist_version') !== version) {
-    await syncChecklist(db);
-    await writeSetting(db, 'checklist_version', version);
+    // A reworked checklist is hundreds of statements, and the first request
+    // after that deploy was paying for all of them before it answered - long
+    // enough that the page gave up and said the app hadn't started. The
+    // tables above must exist before anything is served; this doesn't, so it
+    // runs behind the response. The version is only written once it lands, so
+    // a failure just means the next request tries again.
+    const job = syncChecklist(db).then(() => writeSetting(db, 'checklist_version', version));
+    if (waitUntil) waitUntil(job); else await job;
   }
 
   // Old rate-limit rows serve no purpose once their lockout has expired, and
@@ -611,9 +617,9 @@ async function migrate(env) {
 // Cached per isolate: the work above happens once, not once per request.
 let pending = null;
 
-export function ensureReady(env) {
+export function ensureReady(env, waitUntil) {
   if (!pending) {
-    pending = migrate(env).catch((err) => {
+    pending = migrate(env, waitUntil).catch((err) => {
       pending = null; // let the next request retry rather than wedging the site
       throw err;
     });

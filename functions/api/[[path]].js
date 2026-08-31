@@ -2030,9 +2030,10 @@ export async function onRequest(context) {
   if (!handler) return fail(404, `No such endpoint: ${key}`);
 
   try {
-    // Creates the tables and syncs the checklist on the first request after a
-    // deploy; a no-op on every request after that.
-    signingKey = await ensureReady(env);
+    // Creates the tables on the first request after a deploy; a no-op on
+    // every request after that. Rewriting the checklist from the file is
+    // handed to waitUntil, so a big edit never sits in front of a page load.
+    signingKey = await ensureReady(env, waitUntil);
   } catch (err) {
     console.error('setup', err);
     return fail(503, err.message);
