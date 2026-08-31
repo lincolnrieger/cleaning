@@ -56,18 +56,23 @@ Every building has **two** checklists, and each is edited separately:
 - **Check** — the shorter walk-through: is it still clean, is it stocked, is
   anything broken.
 
-Most buildings walk the same areas either way, so the two lists are the same
+Every building walks the same areas either way, so the two lists are the same
 and each entry is stored once, **on both checklists** — edit it in one place
-and it stays in step. Where a building genuinely has a shorter or different
-check (the bell tents, the chalets, Seeonee), its Check list says so.
+and it stays in step. The Check is the same round, done faster. If a building
+ever needs a genuinely different quick pass, give it its own `check` list in
+`data/checklist.json` and only that list changes.
 
 ### What's on a checklist
 
-**Broad areas, not individual jobs.** St George is *Bathrooms* and *Shelter*.
-The Manor is *Stairwell and second floor*, *Toilets*, *Downstairs*,
-*Corridors*, *Kitchen*, *Lower bathrooms*. What to do inside each one is on
-the paper checklist the cleaners already carry; the app records that the area
-was done, by whom, and when.
+**Broad areas, not individual jobs.** Stags is *Bathroom* and *Kitchen*. The
+Manor is *Dorms*, *Corridor / Downstairs*, *Kitchen*, *Lower Bathrooms*,
+*Upper Bathrooms*. What belongs inside each area — toilets, surfaces,
+refilling dispensers — is the note printed under it, so the cleaner can see
+what it covers without it becoming five more boxes to tick. The app records
+that the area was done, by whom, and when.
+
+Seeonee lists its four rooms as four areas for the same reason: when only the
+Acacia Room needs doing, the cleaner ticks that room and leaves the rest.
 
 The *Every visit* block — litter, consumables, lost property, damage, secure —
 is appended to every building, on both checklists.
@@ -76,7 +81,7 @@ is appended to every building, on both checklists.
 
 The point is that the choice is normally already made:
 
-1. The office schedules **Hooper Bunkhouse → Check** for Tuesday.
+1. The office schedules **Bunkhouse → Check** for Tuesday.
 2. Tuesday, the cleaner opens the app; the job tile says **Check**.
 3. They tap it once and get the Check checklist. No menu, no decision.
 
@@ -499,17 +504,22 @@ on one.
 
 ```json
 {
-  "name": "St George",
-  "group": "Basecamp",
-  "full": [["Bathrooms"], ["Shelter"]],
-  "check": [["Bathrooms"], ["Shelter"]]
+  "name": "Stags",
+  "group": "Stags",
+  "full": [
+    ["Bathroom", "Toilet, surfaces and refilling dispensers"],
+    ["Kitchen", "Bins and surfaces"]
+  ],
+  "check": [
+    ["Bathroom", "Toilet, surfaces and refilling dispensers"],
+    ["Kitchen", "Bins and surfaces"]
+  ]
 }
 ```
 
-**These are areas, not jobs.** What to do inside *Bathrooms* belongs on the
-paper checklist the cleaners carry — putting it here would give them forty
-boxes to tick for one room, which is the thing this file deliberately doesn't
-do.
+**These are areas, not jobs.** What is inside *Bathroom* goes in the note
+beside it, not in a list of its own — a box per job would give a cleaner forty
+of them for one room, which is the thing this file deliberately doesn't do.
 
 Edit it on GitHub and commit — the site redeploys and updates itself, see the
 end of [SETUP.md](SETUP.md). Removing something deactivates it rather than

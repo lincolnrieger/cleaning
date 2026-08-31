@@ -823,14 +823,13 @@ async function renderOverview() {
         <div class="stat ${totals.issues ? 'is-warn' : ''}">
           <b class="num">${totals.issues}</b><span>open ${plural(totals.issues, 'issue')}</span></div>
       </div>` : ''}
-      <div class="pad tight small muted center">
-        ${runSheet.length
-          ? `${totals.done} of ${totals.total} tasks —
-             ${fullCount} full ${plural(fullCount, 'clean')},
-             ${runSheet.length - fullCount} ${plural(runSheet.length - fullCount, 'check')}`
-          : `${buildings.length} buildings in the park${
-            totals.issues ? ` · ${totals.issues} open ${plural(totals.issues, 'issue')}` : ''}`}
-      </div>
+      ${runSheet.length ? `<div class="pad tight small muted center">
+        ${totals.done} of ${totals.total} tasks —
+        ${fullCount} full ${plural(fullCount, 'clean')},
+        ${runSheet.length - fullCount} ${plural(runSheet.length - fullCount, 'check')}
+      </div>` : totals.issues ? `<div class="pad tight small muted center">
+        ${totals.issues} open ${plural(totals.issues, 'issue')}
+      </div>` : ''}
     </div>
 
     <div class="card">
@@ -1471,8 +1470,7 @@ async function renderBuilding(id, wantType) {
            The office can add areas under Checklists.</div>`}
     </div>
     ${data.items.length ? `<p class="tiny muted center">
-      Tick each area as you finish it. What's inside each one is on the paper
-      checklist you carry.</p>` : ''}
+      Tick each area as you finish it — what it covers is listed under it.</p>` : ''}
 
     <div class="card" id="issues" hidden><h2>Open issues here</h2><div id="issuelist"></div></div>
 
@@ -2753,8 +2751,8 @@ async function renderChecklistAdmin() {
 /**
  * One building's checklist on one page: the areas it is ticked off in, in
  * order, and the controls to add, edit, reorder and remove them. The list is
- * short by design - the jobs inside each area are on the paper checklist the
- * cleaners carry, not in here.
+ * short by design - what an area covers is the note under it, not a box of
+ * its own.
  */
 async function renderBuildingEditor(buildingId) {
   const live = screen('#/buildings/');
