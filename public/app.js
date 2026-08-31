@@ -259,7 +259,7 @@ const ICONS = {
     + '<path d="M8 3v4M16 3v4"/>',
   clipboard: '<rect x="5.5" y="4.5" width="13" height="16" rx="2"/>'
     + '<path d="M9 4.5V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v.5"/><path d="M8.5 11h7M8.5 15h7"/>',
-  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.2 2"/>',
+  phone: '<path d="M7.5 3.5h9a1.5 1.5 0 0 1 1.5 1.5v14a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z"/><path d="M10.5 17.5h3"/>',
   list: '<path d="M9 6h10M9 12h10M9 18h10"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
   people: '<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/>'
     + '<circle cx="17" cy="9" r="2.3"/><path d="M15.7 14.2c2.4.2 4.3 2 4.3 4.8"/>',
@@ -302,13 +302,11 @@ const NAV = {
     ['', 'Overview', 'home'],
     ['schedule', 'Planning', 'calendar'],
     ['issues', 'Reports', 'clipboard'],
-    ['history', 'Activity', 'clock'],
   ],
   admin: [
     ['', 'Overview', 'home'],
     ['schedule', 'Planning', 'calendar'],
     ['issues', 'Reports', 'clipboard'],
-    ['history', 'Activity', 'clock'],
     ['buildings', 'Checklists', 'list'],
     ['admin', 'People', 'people'],
   ],
@@ -803,28 +801,36 @@ async function renderOverview() {
   const outstanding = runSheet.filter((b) => !b.completed_at).length;
   const stale = rest.filter((b) => staleDays(b, day) >= 7);
   const fullCount = runSheet.filter((b) => b.cleanType === 'full').length;
+  const signedPct = runSheet.length ? Math.round((totals.signed / runSheet.length) * 100) : 0;
+  const plural = (n, word) => `${word}${n === 1 ? '' : 's'}`;
 
   app.innerHTML = `
     <div class="card"><div class="pad tight">${dayNav(day)}</div></div>
 
     <div class="card">
-      <div class="stats">
-        <div class="stat"><b class="num">${pct}%</b><span>of today's tasks</span></div>
-        <div class="stat"><b class="num">${totals.signed}/${runSheet.length}</b>
-          <span>signed off</span></div>
-        <div class="stat ${outstanding ? 'is-warn' : 'is-done'}">
-          <b class="num">${outstanding}</b><span>still to do</span></div>
-        <div class="stat ${totals.issues ? 'is-warn' : ''}">
-          <b class="num">${totals.issues}</b><span>open issues</span></div>
+      <div class="pad">
+        <p class="headline">${runSheet.length
+          ? `<b class="num">${totals.signed} of ${runSheet.length}</b>
+             ${plural(runSheet.length, 'building')} signed off`
+          : '<b>Nothing scheduled</b>'}</p>
+        ${runSheet.length ? `<div class="meter lg ${signedPct === 100 ? 'full' : ''}">
+          <i style="width:${signedPct}%"></i></div>` : ''}
       </div>
-      <div class="meter ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>
-      <div class="pad tight tiny muted center">
+      ${runSheet.length ? `<div class="stats">
+        <div class="stat ${outstanding ? 'is-warn' : 'is-done'}">
+          <b class="num">${outstanding}</b><span>still to clean</span></div>
+        <div class="stat"><b class="num">${pct}%</b><span>of tasks ticked</span></div>
+        <div class="stat ${totals.issues ? 'is-warn' : ''}">
+          <b class="num">${totals.issues}</b><span>open ${plural(totals.issues, 'issue')}</span></div>
+      </div>` : ''}
+      <div class="pad tight small muted center">
         ${runSheet.length
-          ? `${totals.done} of ${totals.total} tasks across
-             ${runSheet.length} building${runSheet.length === 1 ? '' : 's'}
-             — ${fullCount} full clean${fullCount === 1 ? '' : 's'},
-             ${runSheet.length - fullCount} check${runSheet.length - fullCount === 1 ? '' : 's'}`
-          : `Nothing scheduled — ${buildings.length} buildings in the park`}</div>
+          ? `${totals.done} of ${totals.total} tasks —
+             ${fullCount} full ${plural(fullCount, 'clean')},
+             ${runSheet.length - fullCount} ${plural(runSheet.length - fullCount, 'check')}`
+          : `${buildings.length} buildings in the park${
+            totals.issues ? ` · ${totals.issues} open ${plural(totals.issues, 'issue')}` : ''}`}
+      </div>
     </div>
 
     <div class="card">
@@ -848,7 +854,11 @@ async function renderOverview() {
     ${stale.length ? `<div class="card"><div class="pad tight small muted">
       Not cleaned in a week or more:
       <strong>${stale.map((b) => esc(b.name)).join(', ')}</strong>.
-    </div></div>` : ''}`;
+    </div></div>` : ''}
+
+    <button class="wide ghost" id="csv">${svgIcon('download')} Download this day as CSV</button>`;
+
+  $('#csv').onclick = () => download(`/report?from=${day}&to=${day}`, `cleaning-${auDate(day)}.csv`);
 
   wireTiles();
   wireDayNav(app, renderOverview);
@@ -873,7 +883,8 @@ const typePill = (id, extra = '') =>
 function overviewTile(b) {
   const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
   const status = b.completed_at
-    ? `<span class="pill done">Signed off ${esc(time(b.completed_at))}</span>`
+    ? `<span class="pill done">Signed off<span class="hide-narrow"> ${
+      esc(time(b.completed_at))}</span></span>`
     : b.done
       ? '<span class="pill open">In progress</span>'
       : b.scheduled
@@ -891,6 +902,9 @@ function overviewTile(b) {
     alsoDone.length
       ? alsoDone.map((s) => `${esc(typeLabel(s.cleanType))} done ${esc(time(s.at))}`).join(', ')
       : null,
+    b.grp && b.grp !== b.name ? esc(b.grp) : null,
+    b.completed_at ? null : esc(sinceLabel(b.lastCleaned, state.config.today)),
+    b.note ? esc(b.note) : null,
   ].filter(Boolean).join(' · ');
 
   // Only the green 'done' edge earns its place - the status pill already
@@ -899,22 +913,19 @@ function overviewTile(b) {
 
   return `<button class="tile${edge}"
       ${canDrillIn() ? `data-b="${b.id}" data-type="${esc(b.cleanType)}"` : 'disabled'}>
-    <div class="spread">
-      <span class="row grow">
+    <span class="tile-main">
+      <span class="tile-title">
         ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
-        ${typePill(b.cleanType)}
       </span>
-      <span class="row tight nowrap">${status}
-        <span class="tile-count num">${b.done}/${b.total}</span></span>
-    </div>
-    ${b.done ? `<div class="meter ${pct === 100 ? 'full' : ''} gap-top-sm">
-      <i style="width:${pct}%"></i></div>` : ''}
-    <div class="tile-meta">${meta || 'not scheduled'}</div>
-    <div class="tiny muted">
-      ${b.grp && b.grp !== b.name ? `${esc(b.grp)} · ` : ''}${
-        esc(sinceLabel(b.lastCleaned, state.config.today))}${
-        b.note ? ` · ${esc(b.note)}` : ''}</div>
+      <span class="tile-meta">${typePill(b.cleanType)}
+        <span class="grow">${meta}</span></span>
+    </span>
+    <span class="tile-end">${status}
+      <span class="tile-count num">${b.done}/${b.total}<span class="hide-narrow"> tasks</span></span></span>
+    ${canDrillIn() ? svgIcon('chevron', 'lg tile-chev') : ''}
+    ${b.done ? `<span class="meter ${pct === 100 ? 'full' : ''}">
+      <i style="width:${pct}%"></i></span>` : ''}
   </button>`;
 }
 
@@ -926,13 +937,13 @@ function overviewTile(b) {
  */
 function compactRow(b) {
   return `<button class="crow" ${canDrillIn() ? `data-b="${b.id}"` : 'disabled'}>
-    <div class="crow-top">
+    <span class="crow-top">
       <span class="crow-name">${esc(b.name)}</span>
       ${b.open_issues ? `<span class="crow-dot" title="${b.open_issues} open issue${
         b.open_issues > 1 ? 's' : ''}"></span>` : ''}
-    </div>
-    <div class="tiny muted">${esc(sinceLabel(b.lastCleaned, state.config.today))}${
-      b.done ? ` · <span class="num">${b.done}/${b.total}</span> done` : ''}</div>
+    </span>
+    <span class="crow-sub">${esc(sinceLabel(b.lastCleaned, state.config.today))}${
+      b.done ? ` · <span class="num">${b.done}/${b.total}</span> done` : ''}</span>
   </button>`;
 }
 
@@ -1067,13 +1078,24 @@ async function renderCleanerHome() {
   const doneCount = todays.filter((b) => b.completed_at).length;
   const myShifts = (roster.shifts ?? []).filter((s) => s.user_id === state.user.id);
 
+  const left = todays.length - doneCount;
+  const pct = todays.length ? Math.round((doneCount / todays.length) * 100) : 0;
+  const phones = [
+    ['Office', state.config.officePhone],
+    ['Maintenance', state.config.maintenancePhone],
+  ].filter(([, n]) => n);
+
   app.innerHTML = `
     <div class="card">
-      <div class="pad tight spread">
-        <span><strong>${esc(dayLabel(today))}</strong>
-          <span class="muted small num"> ${esc(auDate(today))}</span></span>
-        ${todays.length
-          ? `<span class="num small muted">${doneCount}/${todays.length} done</span>` : ''}
+      <div class="pad">
+        <p class="daystamp"><strong>${esc(dayLabel(today))}</strong>
+          <span class="num">${esc(auDate(today))}</span></p>
+        <p class="headline">${todays.length
+          ? `<b class="num">${left}</b> ${left === 1 ? 'building' : 'buildings'} left to clean`
+          : '<b>Nothing scheduled</b>'}</p>
+        ${todays.length ? `<div class="meter lg ${pct === 100 ? 'full' : ''}">
+          <i style="width:${pct}%"></i></div>
+          <p class="tiny muted gap-top-sm">${doneCount} of ${todays.length} done today</p>` : ''}
       </div>
       ${myShifts.length ? `<div class="banner info">
         <strong>You're on ${myShifts.map((s) =>
@@ -1086,7 +1108,7 @@ async function renderCleanerHome() {
 
     ${todays.length ? `<div class="card">
       <h2><span class="grow">To clean today</span>
-        <span class="num">${todays.length - doneCount} left</span></h2>
+        <span class="num">${left} left</span></h2>
       ${todays.map((b) => jobTile(b)).join('')}
     </div>` : `<div class="card"><div class="empty">
       <b>Nothing scheduled today</b>
@@ -1099,9 +1121,13 @@ async function renderCleanerHome() {
         ? `<div class="crow-list">${rest.map(compactRow).join('')}</div>` : ''}
     </div>` : ''}
 
-    <p class="tiny muted center">
-      Office ${esc(state.config.officePhone)} · Maintenance ${esc(state.config.maintenancePhone)}
-    </p>`;
+    ${phones.length ? `<div class="card">
+      <h2>Need a hand?</h2>
+      <div class="pad callrow">
+        ${phones.map(([label, n]) => `<a class="btn wide" href="tel:${esc(n.replace(/\s/g, ''))}"
+          >${svgIcon('phone')} ${esc(label)} <span class="num muted">${esc(n)}</span></a>`).join('')}
+      </div>
+    </div>` : ''}`;
 
   wireTiles();
   wireSectionToggles(app, renderCleanerHome);
@@ -1123,18 +1149,20 @@ function jobTile(b) {
 
   return `<button class="tile${b.completed_at ? ' finished' : ''}"
       data-b="${b.id}" data-type="${esc(b.cleanType)}">
-    <div class="spread">
-      <span class="row grow">
+    <span class="tile-main">
+      <span class="tile-title">
         ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
       </span>
-      <span class="row tight nowrap">${status}
-        <span class="tile-count num">${b.done}/${b.total}</span></span>
-    </div>
-    ${b.done ? `<div class="meter ${pct === 100 ? 'full' : ''} gap-top-sm">
-      <i style="width:${pct}%"></i></div>` : ''}
-    <div class="tile-meta">${typePill(b.cleanType)}
-      <span class="grow">${who}${b.note ? `${who ? ' · ' : ''}${esc(b.note)}` : ''}</span></div>
+      <span class="tile-meta">${typePill(b.cleanType)}
+        <span class="grow">${who}${
+          b.note ? `${who ? ' · ' : ''}${esc(b.note)}` : ''}</span></span>
+    </span>
+    <span class="tile-end">${status}
+      <span class="tile-count num">${b.done}/${b.total}<span class="hide-narrow"> tasks</span></span></span>
+    ${svgIcon('chevron', 'lg tile-chev')}
+    ${b.done ? `<span class="meter ${pct === 100 ? 'full' : ''}">
+      <i style="width:${pct}%"></i></span>` : ''}
   </button>`;
 }
 
@@ -1963,38 +1991,6 @@ async function renderIssues(status = 'open') {
       }
     };
   });
-}
-
-/* ---------------------------------------------------- view: activity log */
-
-const VERB = {
-  done: 'ticked', undone: 'un-ticked', completed: 'signed off',
-  reopened: 'reopened', issue: 'reported', note: 'left a note', scheduled: 'scheduled',
-  photo: 'photographed', photo_removed: 'removed a photo from',
-};
-
-async function renderHistory() {
-  const live = screen('#/history');
-  const day = viewDay();
-  const { activity } = await api(`/activity?day=${day}`);
-  if (!live()) return;
-  chrome({ title: 'Activity', section: 'history' });
-
-  app.innerHTML = `
-    <div class="card"><div class="pad">${dayNav(day)}</div></div>
-    <div class="card">
-      ${activity.length ? activity.map((a) => `
-        <div class="list-item small">
-          <div><strong>${esc(a.user_name)}</strong> ${esc(VERB[a.kind] || a.kind)}
-            — ${esc(a.detail)}</div>
-          <div class="tiny muted">${esc(a.building)} · ${esc(time(a.created_at))}</div>
-        </div>`).join('')
-        : '<div class="empty">No activity on this day.</div>'}
-    </div>
-    <button class="wide" id="csv">${svgIcon('download')} Download CSV for this day</button>`;
-
-  wireDayNav(app, renderHistory);
-  $('#csv').onclick = () => download(`/report?from=${day}&to=${day}`, `cleaning-${auDate(day)}.csv`);
 }
 
 /** Fetches with the auth header, then hands the blob to the browser. */
@@ -3520,7 +3516,6 @@ async function render() {
       return await renderAvailability();
     }
     if (head === 'issues') return await renderIssues();
-    if (head === 'history') return await renderHistory();
     if (head === 'admin') return await renderAdmin();
     if (head === 'buildings') return arg
       ? await renderBuildingEditor(Number(arg))

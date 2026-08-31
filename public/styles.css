@@ -99,7 +99,7 @@ html { -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
-  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
@@ -174,7 +174,7 @@ header.bar {
 header.bar h1 {
   flex: 1;
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 640;
   letter-spacing: -0.012em;
   white-space: nowrap;
@@ -289,9 +289,9 @@ nav.nav button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 40px;
+  min-height: 46px;
   padding: 0 var(--s3);
-  font-size: 13.5px;
+  font-size: 15px;
   font-weight: 560;
   border: none;
   border-bottom: 2px solid transparent;
@@ -337,18 +337,17 @@ main.wide { max-width: 1320px; }
   align-items: center;
   gap: var(--s3);
   margin: 0;
-  padding: 11px var(--s4);
-  font-size: 13px;
+  padding: 12px var(--s4);
+  font-size: 15px;
   font-weight: 680;
-  letter-spacing: .01em;
-  text-transform: uppercase;
-  color: var(--muted);
+  letter-spacing: -0.01em;
+  color: var(--ink);
   background: var(--sunken);
   border-bottom: 1px solid var(--line);
 }
 
-.card-head .grow { text-transform: none; letter-spacing: 0; }
-.card > h2 .num, .card-head .num { text-transform: none; letter-spacing: 0; font-weight: 600; }
+.card-head .grow { letter-spacing: 0; }
+.card > h2 .num, .card-head .num { font-size: 13.5px; font-weight: 600; color: var(--muted); }
 .card-head button { min-height: 30px; padding: 0 10px; font-size: 12.5px; }
 
 .card.danger { border-color: color-mix(in srgb, var(--danger) 32%, var(--line)); }
@@ -360,15 +359,15 @@ main.wide { max-width: 1320px; }
   align-items: center;
   gap: var(--s3);
   width: 100%;
-  padding: 11px var(--s4);
+  padding: 13px var(--s4);
   border: none;
   border-radius: 0;
   background: var(--sunken);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 620;
   text-align: left;
-  min-height: 46px;
+  min-height: 52px;
 }
 
 .card-toggle:hover { background: var(--hover); }
@@ -388,8 +387,8 @@ main.wide { max-width: 1320px; }
 .wrap { flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
 .muted { color: var(--muted); }
-.small { font-size: 13px; }
-.tiny { font-size: 11.5px; line-height: 1.4; }
+.small { font-size: 14px; }
+.tiny { font-size: 12.5px; line-height: 1.45; }
 .center { text-align: center; }
 .nowrap { white-space: nowrap; }
 .block { display: block; }
@@ -416,15 +415,16 @@ button, .btn {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 38px;
-  padding: 0 14px;
+  min-height: var(--tap);
+  padding: 0 var(--s4);
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--card);
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
-  font-weight: 560;
+  font-size: 15.5px;
+  font-weight: 600;
+  text-decoration: none;
   cursor: pointer;
   transition: background .12s, border-color .12s;
 }
@@ -460,7 +460,7 @@ button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--dan
 button.danger:hover { background: var(--danger-wash); }
 
 button.wide { width: 100%; }
-button.sm { min-height: 32px; padding: 0 10px; font-size: 13px; }
+button.sm { min-height: 34px; padding: 0 12px; font-size: 13.5px; font-weight: 560; }
 
 /* Square icon-only control - reorder arrows, remove-photo. */
 button.iconbtn {
@@ -594,14 +594,14 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 }
 
 .tabs button {
-  min-height: 38px;
+  min-height: 42px;
   padding: 0 2px 0;
   border: none;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   background: none;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 570;
 }
 
@@ -664,9 +664,9 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: 12.5px;
   font-weight: 650;
   white-space: nowrap;
   background: var(--line-2);
@@ -688,24 +688,26 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
   flex: none;
   display: inline-grid;
   place-items: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 5px;
-  border-radius: 4px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 5px;
   background: var(--line-2);
   color: var(--ink-2);
-  font-size: 11.5px;
+  font-size: 13px;
   font-weight: 700;
 }
 
 .meter {
-  height: 4px;
+  display: block;
+  height: 5px;
   border-radius: 99px;
   background: var(--line-2);
   overflow: hidden;
 }
 
 .meter > i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+.meter.lg { height: 10px; }
 .meter.full > i { background: var(--done); }
 
 /* ------------------------------------------------------------- lists */
@@ -713,10 +715,10 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 .list-item { padding: var(--s3) var(--s4); border-top: 1px solid var(--line-2); }
 .list-item:first-child { border-top: none; }
 
-.empty { padding: var(--s6) var(--s5); text-align: center; color: var(--muted); font-size: 13.5px; }
-.empty b { display: block; color: var(--ink-2); font-size: 15px; margin-bottom: 4px; font-weight: 640; }
+.empty { padding: var(--s6) var(--s5); text-align: center; color: var(--muted); font-size: 14.5px; }
+.empty b { display: block; color: var(--ink-2); font-size: 17px; margin-bottom: 5px; font-weight: 660; }
 
-.banner { padding: var(--s3) var(--s4); font-size: 13px; line-height: 1.5; }
+.banner { padding: var(--s3) var(--s4); font-size: 14.5px; line-height: 1.5; }
 .banner.warn { background: var(--warn-wash); color: var(--warn); }
 .banner.info { background: var(--accent-wash); color: var(--accent); }
 .banner strong { font-weight: 680; }
@@ -724,12 +726,17 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 
 /* ------------------------------------------------------- job / building rows */
 
-/* Overview and a cleaner's home list. A row, not a tile: name and status on
-   one line, everything qualifying it on a second, and the numbers hard right
-   so a column of them can be read down. */
+/* Overview and a cleaner's home list. These are the things you actually tap,
+   so they are sized like buttons rather than table rows: the name big enough
+   to read at arm's length, the status and count in their own right-hand
+   column, and a chevron so it is obvious the row opens something. */
 .tile {
-  display: block;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s3);
   width: 100%;
+  min-height: 68px;
   padding: var(--s3) var(--s4);
   border: none;
   border-top: 1px solid var(--line-2);
@@ -743,19 +750,54 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 .tile:hover { background: var(--hover); }
 .tile[disabled] { opacity: 1; cursor: default; }
 .tile[disabled]:hover { background: none; }
-.tile .name { font-size: 15px; font-weight: 640; letter-spacing: -0.01em; color: var(--ink); }
+
+.tile-main { flex: 1; min-width: 0; }
+.tile-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); }
+.tile .name { font-size: 17px; font-weight: 660; letter-spacing: -0.01em; color: var(--ink); }
+
+.tile-end {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.tile-chev { flex: none; color: var(--faint); }
+
+/* On a phone the right-hand column has to give the building name room, so the
+   trimmings go: "14/22" under "In progress" is unambiguous on its own, and the
+   sign-off time is repeated on the detail line underneath. */
+@media (max-width: 560px) {
+  .hide-narrow { display: none; }
+  .tile { padding: var(--s3) var(--s3); gap: var(--s2); }
+  .tile .name { font-size: 16.5px; }
+}
 
 /* One quiet green rule down the edge of anything finished. */
-.tile.finished { box-shadow: inset 2px 0 0 var(--done); }
-.tile-meta { display: flex; align-items: baseline; gap: 6px; margin-top: 3px; font-size: 12.5px; color: var(--muted); }
-.tile-count { font-size: 12.5px; font-weight: 650; color: var(--ink-2); }
-.tile .meter { margin-top: 7px; }
+.tile.finished { box-shadow: inset 3px 0 0 var(--done); }
+.tile-meta > .grow { min-width: 14ch; }
 
-.crow-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.tile-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px var(--s2);
+  margin-top: 5px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.tile-count { font-size: 13px; font-weight: 650; color: var(--ink-2); }
+/* The bar is the row's last line, spanning it end to end - inside the text
+   column it stopped short of the count and read as an underline. */
+.tile > .meter { flex: 1 1 100%; margin-top: 9px; }
+
+.crow-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
 
 .crow {
   display: block;
-  padding: 10px var(--s3);
+  min-height: 56px;
+  padding: 11px var(--s3);
   border: none;
   border-top: 1px solid var(--line-2);
   border-radius: 0;
@@ -768,18 +810,44 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 .crow[disabled] { opacity: 1; cursor: default; }
 .crow[disabled]:hover { background: none; }
 .crow-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.crow-name { font-weight: 600; font-size: 13.5px; }
-.crow-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.crow-name { font-weight: 620; font-size: 15px; }
+.crow-sub { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); }
+.crow-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+
+/* ------------------------------------------------------------ home page */
+
+/* The one line that answers "how is today going" before anything else. */
+.headline {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 560;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--ink-2);
+}
+
+.headline b { font-weight: 700; color: var(--ink); }
+.headline + .meter { margin-top: var(--s3); }
+
+.daystamp { display: flex; align-items: baseline; gap: var(--s2); margin: 0 0 var(--s2); }
+.daystamp strong { font-size: 17px; font-weight: 680; letter-spacing: -0.01em; }
+.daystamp .num { font-size: 13.5px; color: var(--muted); }
+
+/* Tap-to-call, because a phone number you have to retype is not a shortcut. */
+.callrow { display: grid; gap: var(--s2); }
+.callrow .btn { justify-content: flex-start; gap: var(--s2); }
+.callrow .btn .num { margin-left: auto; font-weight: 550; }
+
+@media (min-width: 560px) { .callrow { grid-template-columns: 1fr 1fr; } }
 
 /* --------------------------------------------------------------- stats */
 
-/* Four figures, sized to be read at a glance without dominating the page.
-   The old 26px numerals looked like a dashboard demo. */
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); }
+/* Three figures, sized to be read at a glance rather than squinted at. */
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line-2); }
 .stat { padding: var(--s3) var(--s2); text-align: center; border-left: 1px solid var(--line-2); }
 .stat:first-child { border-left: none; }
-.stat b { display: block; font-size: 19px; font-weight: 680; line-height: 1.2; letter-spacing: -0.02em; }
-.stat span { display: block; margin-top: 2px; font-size: 11px; font-weight: 550; color: var(--muted); }
+.stat b { display: block; font-size: 28px; font-weight: 700; line-height: 1.15; letter-spacing: -0.025em; }
+.stat span { display: block; margin-top: 3px; font-size: 13px; font-weight: 550; color: var(--muted); }
 .stat.is-warn b { color: var(--warn); }
 .stat.is-done b { color: var(--done); }
 
@@ -789,9 +857,20 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 .periodnav .pn-side { display: flex; gap: 6px; }
 .periodnav .pn-left { justify-self: start; }
 .periodnav .pn-right { justify-self: end; }
-.periodnav .period-title { text-align: center; font-size: 14px; font-weight: 640; white-space: nowrap; }
-.periodnav .period-sub { display: block; font-size: 11.5px; font-weight: 450; color: var(--muted); }
-.periodnav button { min-height: 34px; padding: 0 10px; font-size: 13px; white-space: nowrap; }
+.periodnav .period-title { text-align: center; font-size: 17px; font-weight: 680; white-space: nowrap; }
+.periodnav .period-sub { display: block; font-size: 12.5px; font-weight: 450; color: var(--muted); }
+
+.periodnav button {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  border-color: var(--line);
+}
+
+.periodnav button.ghost { border-color: var(--line); background: var(--card); }
+.periodnav button.ghost:hover { background: var(--hover); }
 
 /* ------------------------------------------------- a building's checklist */
 
@@ -1210,24 +1289,28 @@ table.avail td.dimmed { opacity: .28; }
 
 /* -------------------------------------------------------------- overlays */
 
+/* Labelled, not a bare "+": a circle with a plus in it is a guess, and the
+   one thing this button does - report a problem - is worth saying out loud. */
 .fab {
   position: fixed;
   right: 20px;
   bottom: 20px;
   z-index: 18;
-  width: 48px;
-  height: 48px;
-  min-height: 48px;
-  padding: 0;
+  gap: var(--s2);
+  height: 52px;
+  min-height: 52px;
+  padding: 0 20px;
   border: none;
-  border-radius: 50%;
+  border-radius: 99px;
   background: var(--accent);
   color: var(--accent-ink);
+  font-size: 15.5px;
+  font-weight: 650;
   box-shadow: var(--lift);
 }
 
 .fab:hover { background: color-mix(in srgb, var(--accent) 86%, #000); }
-.fab .ico { width: 22px; height: 22px; stroke-width: 2.2; vertical-align: 0; }
+.fab .ico { width: 20px; height: 20px; stroke-width: 2.4; vertical-align: 0; }
 
 .toast {
   position: fixed;
@@ -1354,28 +1437,29 @@ code.phrase {
     flex-direction: column;
     justify-content: center;
     gap: 1px;
-    min-height: 50px;
-    padding: 4px 2px;
+    min-height: 54px;
+    padding: 5px 2px;
     border-bottom: none;
     border-radius: var(--r);
-    font-size: 10px;
+    font-size: 11.5px;
     font-weight: 620;
   }
 
   nav.nav button[aria-current="true"] { color: var(--accent); border-bottom-color: transparent; }
   nav.nav .navicon { display: block; }
-  nav.nav .navicon .ico { width: 21px; height: 21px; vertical-align: 0; }
+  nav.nav .navicon .ico { width: 23px; height: 23px; vertical-align: 0; }
   nav.nav .navlabel { white-space: nowrap; }
 
-  main { padding-bottom: calc(62px + env(safe-area-inset-bottom)); }
-  .toast { bottom: calc(70px + env(safe-area-inset-bottom)); }
-  .fab { bottom: calc(70px + env(safe-area-inset-bottom)); right: 14px; }
+  main { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
+  .toast { bottom: calc(74px + env(safe-area-inset-bottom)); }
+  .fab { bottom: calc(74px + env(safe-area-inset-bottom)); right: 14px; }
 
   /* The sticky action bar sits above the tab bar, not under it. */
   .actionbar { bottom: calc(56px + env(safe-area-inset-bottom)); padding-bottom: 10px; }
   main { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
 
-  .stat b { font-size: 17px; }
+  .stat b { font-size: 24px; }
+  .stat span { font-size: 12px; }
   .crow-list { grid-template-columns: 1fr; }
 }
 

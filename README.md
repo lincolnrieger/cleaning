@@ -27,7 +27,7 @@ browser, no software to install and no commands to run.
 | Record preferred days and ideal hours | — | ✅ | ✅ |
 | Open an individual building's detail | ✅ | read-only | ✅ |
 | Mark a maintenance issue resolved | — | ✅ | ✅ |
-| Activity log + CSV export | — | ✅ | ✅ |
+| Download a day's record as CSV | — | ✅ | ✅ |
 | Add people, set PINs, delete accounts | — | — | ✅ |
 | Edit buildings and their checklists | — | — | ✅ |
 
@@ -166,7 +166,7 @@ requires one shows a **📷 Photo required** badge on the cleaner's phone.
 **Signing off checks the required ones.** If any item that requires a photo
 hasn't got one, the sign-off stops and lists exactly which items. A cleaner
 can still sign off anyway — a dead phone camera shouldn't strand a finished
-building — but it's a deliberate second confirmation, and the activity log
+building — but it's a deliberate second confirmation, and the record
 records that it was signed off with photos missing.
 
 Photos on **maintenance reports** work as before and are separate from this.
@@ -396,9 +396,17 @@ A few things worth knowing:
   layout respects the notch and home indicator via safe-area insets.
 - Icons are one inline SVG set drawn on a single grid — no icon font, no CDN,
   no emoji, so nothing renders differently on somebody's phone.
-- The bottom tab bar stays at six tabs at most, which is why the building
+- The bottom tab bar stays at five tabs at most, which is why the building
   schedule, the staff roster and availability share one **Planning** tab and
   sit behind a tab strip — they're three views of the same week.
+- **The home screen answers one question first.** Both home screens open on a
+  single sentence — *3 buildings left to clean*, *1 of 4 buildings signed off*
+  — with a progress bar under it that measures that same sentence, and the
+  supporting figures below in type big enough to read at arm's length. The
+  building rows underneath are sized like buttons, not table rows: the name at
+  17px, the status and count in their own column, and a chevron so it's
+  obvious the row opens something.
+- **The report button says "Report".** A circle with a plus in it is a guess.
 
 Dark mode follows the phone's own setting, on every screen.
 
@@ -408,8 +416,8 @@ Dark mode follows the phone's own setting, on every screen.
   yesterday's ticks stay in the record. Days are computed in the camp's
   timezone, not UTC, so a late-evening clean doesn't land on tomorrow. (Set a
   `TIMEZONE` variable to change it from `Australia/Sydney`.)
-- **Every tick records who and when**, shown under the item and in the office's
-  activity log. So does every photo added or removed.
+- **Every tick records who and when**, shown under the item and in the day's
+  CSV record. So does every photo added or removed.
 - **Two cleaners can work the same room.** Each item is tracked independently,
   and each open checklist refreshes every 20 seconds, so they see each other's
   ticks appear with the other person's name against them.
