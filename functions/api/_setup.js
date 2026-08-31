@@ -463,6 +463,18 @@ async function writeSetting(db, key, value) {
   ).bind(key, String(value)).run();
 }
 
+const BATCH = 50;
+
+/**
+ * Runs statements in bites rather than one enormous call, so a reworked
+ * checklist doesn't ride on a single batch succeeding.
+ */
+async function runAll(db, statements) {
+  for (let i = 0; i < statements.length; i += BATCH) {
+    await db.batch(statements.slice(i, i + BATCH));
+  }
+}
+
 /**
  * Writes the checklist into the database.
  *
@@ -472,7 +484,7 @@ async function writeSetting(db, key, value) {
 async function syncChecklist(db) {
   const buildings = plan();
 
-  await db.batch(buildings.map((b) => db.prepare(
+  await runAll(db, buildings.map((b) => db.prepare(
     `INSERT INTO buildings (name, grp, sort_order, active) VALUES (?, ?, ?, 1)
      ON CONFLICT(name) DO UPDATE SET
        grp = excluded.grp, sort_order = excluded.sort_order, active = 1`,
@@ -528,23 +540,43 @@ async function syncChecklist(db) {
     }
   }
 
-  if (updates.length) await db.batch(updates);
-  if (inserts.length) await db.batch(inserts);
+  await runAll(db, updates);
+  await runAll(db, inserts);
 
   // Retire anything no longer in the checklist, rather than deleting it, so
   // the record of what was cleaned in the past never breaks.
   const stale = existing.filter((r) => !claimed.has(r.id)).map((r) => r.id);
-  if (stale.length) {
-    await db.batch(stale.map((id) =>
-      db.prepare('UPDATE tasks SET active = 0 WHERE id = ?').bind(id)));
-  }
+  await runAll(db, stale.map((id) =>
+    db.prepare('UPDATE tasks SET active = 0 WHERE id = ?').bind(id)));
 
   const liveBuildings = new Set(buildings.map((b) => b.name));
   const retired = buildingRows.filter((r) => !liveBuildings.has(r.name)).map((r) => r.id);
-  if (retired.length) {
-    await db.batch(retired.map((id) =>
-      db.prepare('UPDATE buildings SET active = 0 WHERE id = ?').bind(id)));
-  }
+  await runAll(db, retired.map((id) =>
+    db.prepare('UPDATE buildings SET active = 0 WHERE id = ?').bind(id)));
+
+  return {
+    buildings: buildings.length,
+    updated: updates.length,
+    added: inserts.length,
+    hidden: stale.length,
+  };
+}
+
+/** The version marker for what data/checklist.json currently says. */
+export const checklistVersion = () => sha256Hex(JSON.stringify(plan()));
+
+/**
+ * Rewrites the checklist from the file and records the version written.
+ *
+ * Exported because "Restore from file" has to do the work there and then: it
+ * used to flip a setting and leave the writing to whenever the next isolate
+ * happened to start up, so the screen refreshed onto the same old list and the
+ * button looked like it had done nothing.
+ */
+export async function applyChecklistFile(db) {
+  const counts = await syncChecklist(db);
+  await writeSetting(db, 'checklist_version', await checklistVersion());
+  return counts;
 }
 
 async function migrate(env, waitUntil) {
@@ -583,7 +615,7 @@ async function migrate(env, waitUntil) {
   const source = await readSetting(db, 'checklist_source', 'file');
 
   // Only rewrite the checklist when its content actually changed.
-  const version = await sha256Hex(JSON.stringify(plan()));
+  const version = await checklistVersion();
   if (source !== 'app' && await readSetting(db, 'checklist_version') !== version) {
     // A reworked checklist is hundreds of statements, and the first request
     // after that deploy was paying for all of them before it answered - long
@@ -591,7 +623,10 @@ async function migrate(env, waitUntil) {
     // tables above must exist before anything is served; this doesn't, so it
     // runs behind the response. The version is only written once it lands, so
     // a failure just means the next request tries again.
-    const job = syncChecklist(db).then(() => writeSetting(db, 'checklist_version', version));
+    // Logged rather than swallowed: behind the response, a rejection would
+    // otherwise be invisible, and a checklist that quietly never syncs is
+    // indistinguishable from one the file no longer owns.
+    const job = applyChecklistFile(db).catch((err) => console.error('checklist sync', err));
     if (waitUntil) waitUntil(job); else await job;
   }
 

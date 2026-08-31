@@ -147,8 +147,11 @@ over their work.
 **The first edit you make in the app takes over.** After that
 `data/checklist.json` stops being applied on deploy, so a later push can't
 quietly undo your work. The banner at the top of the page tells you which is
-in charge. **Restore from file** hands it back — anything you added that isn't
-in the file becomes hidden, and cleaning history is untouched either way.
+in charge, and says so plainly when the file has changed and is *not* being
+applied — the case that otherwise looks exactly like a deploy that didn't
+work. **Restore from file** hands it back and rewrites the checklists there
+and then: anything you added that isn't in the file becomes hidden, and
+cleaning history is untouched either way.
 
 So: use the file for bulk changes, use the screen for day-to-day tweaks, and
 don't expect both at once.
