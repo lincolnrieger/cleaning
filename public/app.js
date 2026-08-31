@@ -3501,11 +3501,12 @@ async function render() {
     return;
   }
 
-  if (!state.token || !state.user) return renderLogin();
-
   const [head, arg, extra] = location.hash.replace(/^#\/?/, '').split('/');
 
   try {
+    // Inside the try: a throw out here would be an unhandled rejection, which
+    // leaves the page on its boot screen with nothing said anywhere.
+    if (!state.token || !state.user) return await renderLogin();
     if (head === 'b' && arg) return await renderBuilding(Number(arg), extra);
     if (head === 'schedule') return await renderSchedule();
     if (head === 'roster') return await renderRoster();
