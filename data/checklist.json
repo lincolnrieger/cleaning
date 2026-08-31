@@ -12,73 +12,193 @@
     ["Damage", "Report maintenance, damage, graffiti or missing items - include photos", "photo"],
     ["Secure", "Leave tidy and secure: lights off, rooms locked where applicable"]
   ],
-  "_cleaningTypes_note": "Every building has two checklists: \"full\" is the Full Clean, \"check\" is the quicker Check. Most buildings walk the same areas either way, so the two lists are the same; where a building has a genuinely shorter check (the bell tents, the chalets, Seeonee), its \"check\" list says so.",
-  "_buildings_note": "Each building gets the areas listed here, plus \"Every visit\" at the end. Areas named on BOTH lists are stored once and appear on both.",
+  "_cleaningTypes_note": "Every building has two checklists: \"full\" is the Full Clean, \"check\" is the quicker Check. Every building walks the same areas either way, so the two lists are the same and each area is stored once - the Check is the same round, done faster.",
+  "_buildings_note": "Each building gets the areas listed here, plus \"Every visit\" at the end. An area is one tick; what is inside it is the note beside it. Seeonee lists its rooms separately so a cleaner doing only one room ticks only that room.",
   "buildings": [
     {
-      "name": "St George",
-      "group": "Basecamp",
+      "name": "Stags",
+      "group": "Stags",
       "full": [
-        ["Bathrooms"],
-        ["Shelter"]
+        ["Bathroom", "Toilet, surfaces and refilling dispensers"],
+        ["Kitchen", "Bins and surfaces"]
       ],
       "check": [
-        ["Bathrooms"],
-        ["Shelter"]
+        ["Bathroom", "Toilet, surfaces and refilling dispensers"],
+        ["Kitchen", "Bins and surfaces"]
       ]
     },
     {
-      "name": "Gilwell",
-      "group": "Basecamp",
+      "name": "Rymill Centre",
+      "group": "Rymill Centre",
       "full": [
-        ["Bathrooms"],
-        ["Shelter"]
+        ["Dorms", "Toilets and showers, bins, bunk beds, floors, surfaces and refilling dispensers"],
+        ["Group Room & Henry Rymill Room", "Surfaces, bins and refilling dispensers"],
+        ["Kitchen", "Appliances, surfaces, bins and refilling dispensers"],
+        ["Main Toilets", "Toilets, surfaces and refilling dispensers"]
       ],
       "check": [
-        ["Bathrooms"],
-        ["Shelter"]
+        ["Dorms", "Toilets and showers, bins, bunk beds, floors, surfaces and refilling dispensers"],
+        ["Group Room & Henry Rymill Room", "Surfaces, bins and refilling dispensers"],
+        ["Kitchen", "Appliances, surfaces, bins and refilling dispensers"],
+        ["Main Toilets", "Toilets, surfaces and refilling dispensers"]
       ]
     },
     {
-      "name": "Brownsea",
-      "group": "Basecamp",
+      "name": "Office Upstairs",
+      "group": "Offices",
       "full": [
-        ["Bathrooms"],
-        ["Shelter"],
-        ["Fridge", "Check it is empty and clean"],
-        ["Small bins", "Empty and replace liners inside the shelter, including the BBQ"],
-        ["BBQ", "Check if it needs cleaning and report to the office"]
+        ["Desk surfaces"],
+        ["Bins"],
+        ["Floors"],
+        ["Kitchenette"]
       ],
       "check": [
-        ["Bathrooms"],
-        ["Shelter"],
-        ["Fridge", "Check it is empty and clean"],
-        ["Small bins", "Empty and replace liners inside the shelter, including the BBQ"],
-        ["BBQ", "Check if it needs cleaning and report to the office"]
+        ["Desk surfaces"],
+        ["Bins"],
+        ["Floors"],
+        ["Kitchenette"]
       ]
     },
     {
-      "name": "Lone's Hut",
-      "group": "Basecamp",
+      "name": "Office / Reception Downstairs",
+      "group": "Offices",
       "full": [
-        ["Bathrooms"],
-        ["Shelter"]
+        ["Desk surfaces"],
+        ["Bins"],
+        ["Floors"],
+        ["Reception desk"],
+        ["Kitchenette"]
       ],
       "check": [
-        ["Bathrooms"],
-        ["Shelter"]
+        ["Desk surfaces"],
+        ["Bins"],
+        ["Floors"],
+        ["Reception desk"],
+        ["Kitchenette"]
       ]
     },
     {
-      "name": "Bert's Bog",
-      "group": "Basecamp",
+      "name": "Manor",
+      "group": "Manor",
       "full": [
-        ["Bathrooms"],
-        ["Shelter"]
+        ["Dorms", "Bins, bunk beds, floors, surfaces and refilling dispensers"],
+        ["Corridor / Downstairs", "Surfaces and cobwebs"],
+        ["Kitchen", "Appliances, surfaces, bins and refilling dispensers"],
+        ["Lower Bathrooms", "Toilets, showers, surfaces and refilling dispensers"],
+        ["Upper Bathrooms", "Toilets, surfaces and refilling dispensers"]
       ],
       "check": [
-        ["Bathrooms"],
-        ["Shelter"]
+        ["Dorms", "Bins, bunk beds, floors, surfaces and refilling dispensers"],
+        ["Corridor / Downstairs", "Surfaces and cobwebs"],
+        ["Kitchen", "Appliances, surfaces, bins and refilling dispensers"],
+        ["Lower Bathrooms", "Toilets, showers, surfaces and refilling dispensers"],
+        ["Upper Bathrooms", "Toilets, surfaces and refilling dispensers"]
+      ]
+    },
+    {
+      "name": "Lower Rymill",
+      "group": "Lower Rymill",
+      "full": [
+        ["Lower Toilets", "Toilet, surfaces and refilling dispensers"],
+        ["Bag Room", "Bins, surfaces, tables and chairs"],
+        ["Staff Room", "Bins and surfaces"],
+        ["Pem Fooks", "Bins, surfaces, tables and chairs"]
+      ],
+      "check": [
+        ["Lower Toilets", "Toilet, surfaces and refilling dispensers"],
+        ["Bag Room", "Bins, surfaces, tables and chairs"],
+        ["Staff Room", "Bins and surfaces"],
+        ["Pem Fooks", "Bins, surfaces, tables and chairs"]
+      ]
+    },
+    {
+      "name": "Chambers Chalet",
+      "group": "Chalets",
+      "full": [
+        ["Beds", "Strip, remake and check the mattress protectors"],
+        ["Appliances"],
+        ["Bins"],
+        ["Surfaces"],
+        ["Crockery / cutlery"],
+        ["Toilets"],
+        ["Showers"],
+        ["Welcome pack", "Restock and leave it out ready"]
+      ],
+      "check": [
+        ["Beds", "Strip, remake and check the mattress protectors"],
+        ["Appliances"],
+        ["Bins"],
+        ["Surfaces"],
+        ["Crockery / cutlery"],
+        ["Toilets"],
+        ["Showers"],
+        ["Welcome pack", "Restock and leave it out ready"]
+      ]
+    },
+    {
+      "name": "Stephens Chalet",
+      "group": "Chalets",
+      "full": [
+        ["Beds", "Strip, remake and check the mattress protectors"],
+        ["Appliances"],
+        ["Bins"],
+        ["Surfaces"],
+        ["Crockery / cutlery"],
+        ["Toilets"],
+        ["Showers"],
+        ["Welcome pack", "Restock and leave it out ready"]
+      ],
+      "check": [
+        ["Beds", "Strip, remake and check the mattress protectors"],
+        ["Appliances"],
+        ["Bins"],
+        ["Surfaces"],
+        ["Crockery / cutlery"],
+        ["Toilets"],
+        ["Showers"],
+        ["Welcome pack", "Restock and leave it out ready"]
+      ]
+    },
+    {
+      "name": "Hansons Chalet",
+      "group": "Chalets",
+      "full": [
+        ["Beds", "Strip, remake and check the mattress protectors"],
+        ["Appliances"],
+        ["Bins"],
+        ["Surfaces"],
+        ["Crockery / cutlery"],
+        ["Toilets"],
+        ["Showers"],
+        ["Welcome pack", "Restock and leave it out ready"]
+      ],
+      "check": [
+        ["Beds", "Strip, remake and check the mattress protectors"],
+        ["Appliances"],
+        ["Bins"],
+        ["Surfaces"],
+        ["Crockery / cutlery"],
+        ["Toilets"],
+        ["Showers"],
+        ["Welcome pack", "Restock and leave it out ready"]
+      ]
+    },
+    {
+      "name": "Bunkhouse",
+      "group": "Bunkhouse",
+      "full": [
+        ["Dorms", "Bins, bunk beds, floors, surfaces and refilling dispensers"],
+        ["Kitchen", "Appliances, surfaces, bins and refilling dispensers"],
+        ["Bathrooms", "Toilets, surfaces and refilling dispensers"],
+        ["Tank Room", "Surfaces"],
+        ["Group Room", "Surfaces"]
+      ],
+      "check": [
+        ["Dorms", "Bins, bunk beds, floors, surfaces and refilling dispensers"],
+        ["Kitchen", "Appliances, surfaces, bins and refilling dispensers"],
+        ["Bathrooms", "Toilets, surfaces and refilling dispensers"],
+        ["Tank Room", "Surfaces"],
+        ["Group Room", "Surfaces"]
       ]
     },
     {
@@ -86,15 +206,11 @@
       "group": "Bell Tents",
       "full": [
         ["Mattresses", "Wipe over and inspect for stains"],
-        ["Tables and chairs", "Wipe down and place inside the tent"],
-        ["Floors", "Sweep, vacuum and mop"]
+        ["Surfaces"]
       ],
       "check": [
-        ["Floors", "Check for dead bugs"],
-        ["Linen", "Check what is needed with Reception"],
-        ["BBQ and bins", "Check both"],
-        ["Air freshener", "Spray through"],
-        ["Poles", "Check for bugs and water around the poles"]
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Surfaces"]
       ]
     },
     {
@@ -102,15 +218,11 @@
       "group": "Bell Tents",
       "full": [
         ["Mattresses", "Wipe over and inspect for stains"],
-        ["Tables and chairs", "Wipe down and place inside the tent"],
-        ["Floors", "Sweep, vacuum and mop"]
+        ["Surfaces"]
       ],
       "check": [
-        ["Floors", "Check for dead bugs"],
-        ["Linen", "Check what is needed with Reception"],
-        ["BBQ and bins", "Check both"],
-        ["Air freshener", "Spray through"],
-        ["Poles", "Check for bugs and water around the poles"]
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Surfaces"]
       ]
     },
     {
@@ -118,15 +230,11 @@
       "group": "Bell Tents",
       "full": [
         ["Mattresses", "Wipe over and inspect for stains"],
-        ["Tables and chairs", "Wipe down and place inside the tent"],
-        ["Floors", "Sweep, vacuum and mop"]
+        ["Surfaces"]
       ],
       "check": [
-        ["Floors", "Check for dead bugs"],
-        ["Linen", "Check what is needed with Reception"],
-        ["BBQ and bins", "Check both"],
-        ["Air freshener", "Spray through"],
-        ["Poles", "Check for bugs and water around the poles"]
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Surfaces"]
       ]
     },
     {
@@ -134,15 +242,11 @@
       "group": "Bell Tents",
       "full": [
         ["Mattresses", "Wipe over and inspect for stains"],
-        ["Tables and chairs", "Wipe down and place inside the tent"],
-        ["Floors", "Sweep, vacuum and mop"]
+        ["Surfaces"]
       ],
       "check": [
-        ["Floors", "Check for dead bugs"],
-        ["Linen", "Check what is needed with Reception"],
-        ["BBQ and bins", "Check both"],
-        ["Air freshener", "Spray through"],
-        ["Poles", "Check for bugs and water around the poles"]
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Surfaces"]
       ]
     },
     {
@@ -150,194 +254,117 @@
       "group": "Bell Tents",
       "full": [
         ["Mattresses", "Wipe over and inspect for stains"],
-        ["Tables and chairs", "Wipe down and place inside the tent"],
-        ["Floors", "Sweep, vacuum and mop"],
-        ["Linen", "Replace the mattress protector and sheet"]
+        ["Surfaces"]
       ],
       "check": [
-        ["Floors", "Check for dead bugs"],
-        ["Linen", "Check what is needed with Reception"],
-        ["BBQ and bins", "Check both"],
-        ["Air freshener", "Spray through"],
-        ["Poles", "Check for bugs and water around the poles"]
-      ]
-    },
-    {
-      "name": "Bunkhouse",
-      "group": "Bunkhouse",
-      "full": [
-        ["Dorm rooms"],
-        ["Bathrooms"],
-        ["Corridors"],
-        ["Kitchen"],
-        ["Group room"],
-        ["Tank room"],
-        ["Wetland viewing room toilets"]
-      ],
-      "check": [
-        ["Dorm rooms"],
-        ["Bathrooms"],
-        ["Corridors"],
-        ["Kitchen"],
-        ["Group room"],
-        ["Tank room"],
-        ["Wetland viewing room toilets"]
-      ]
-    },
-    {
-      "name": "Chambers Chalet",
-      "group": "Chalets",
-      "full": [
-        ["Accommodation"],
-        ["Toilet and shower"],
-        ["Outdoor"]
-      ],
-      "check": [
-        ["Bugs and cobwebs", "Check throughout"],
-        ["Windows", "Open during summer"],
-        ["Linen", "Check what is needed with Reception"],
-        ["Air freshener", "Spray through"],
-        ["Toilet and shower", "Check"],
-        ["BBQ", "Check"]
-      ]
-    },
-    {
-      "name": "Stephens Chalet",
-      "group": "Chalets",
-      "full": [
-        ["Accommodation"],
-        ["Toilet and shower"],
-        ["Outdoor"]
-      ],
-      "check": [
-        ["Bugs and cobwebs", "Check throughout"],
-        ["Windows", "Open during summer"],
-        ["Linen", "Check what is needed with Reception"],
-        ["Air freshener", "Spray through"],
-        ["Toilet and shower", "Check"],
-        ["BBQ", "Check"]
-      ]
-    },
-    {
-      "name": "Hansons Chalet",
-      "group": "Chalets",
-      "full": [
-        ["Accommodation"],
-        ["Toilet and shower"],
-        ["Outdoor"]
-      ],
-      "check": [
-        ["Bugs and cobwebs", "Check throughout"],
-        ["Windows", "Open during summer"],
-        ["Linen", "Check what is needed with Reception"],
-        ["Air freshener", "Spray through"],
-        ["Toilet and shower", "Check"],
-        ["BBQ", "Check"]
-      ]
-    },
-    {
-      "name": "Lower Rymill",
-      "group": "Lower Rymill",
-      "full": [
-        ["Toilets"],
-        ["Bag room"],
-        ["Staff room"],
-        ["Pem Fooks"]
-      ],
-      "check": [
-        ["Toilets"],
-        ["Bag room"],
-        ["Staff room"],
-        ["Pem Fooks"]
-      ]
-    },
-    {
-      "name": "Manor",
-      "group": "Manor",
-      "full": [
-        ["Stairwell and second floor"],
-        ["Toilets"],
-        ["Downstairs"],
-        ["Corridors"],
-        ["Kitchen"],
-        ["Lower bathrooms"]
-      ],
-      "check": [
-        ["Stairwell and second floor"],
-        ["Toilets"],
-        ["Downstairs"],
-        ["Corridors"],
-        ["Kitchen"],
-        ["Lower bathrooms"]
-      ]
-    },
-    {
-      "name": "Office Upstairs",
-      "group": "Offices",
-      "full": [
-        ["Office"],
-        ["Kitchen"]
-      ],
-      "check": [
-        ["Office"],
-        ["Kitchen"]
-      ]
-    },
-    {
-      "name": "Office / Reception Downstairs",
-      "group": "Offices",
-      "full": [
-        ["Kitchen"],
-        ["Workspaces"],
-        ["Staff room"]
-      ],
-      "check": [
-        ["Kitchen"],
-        ["Workspaces"],
-        ["Staff room"]
-      ]
-    },
-    {
-      "name": "Rymill Centre",
-      "group": "Rymill Centre",
-      "full": [
-        ["Dorms and ensuites"],
-        ["Group room / Henry Rymill Room"],
-        ["Kitchen"],
-        ["Toilets off group room"]
-      ],
-      "check": [
-        ["Dorms and ensuites"],
-        ["Group room / Henry Rymill Room"],
-        ["Kitchen"],
-        ["Toilets off group room"]
+        ["Mattresses", "Wipe over and inspect for stains"],
+        ["Surfaces"]
       ]
     },
     {
       "name": "Seeonee",
       "group": "Seeonee",
       "full": [
-        ["Acacia Room / Banksia Room"],
-        ["Kitchen"],
-        ["Bathrooms"]
+        ["Acacia Room", "Surfaces, bins, windows and tables"],
+        ["Banksia Room", "Surfaces, bins, windows and tables"],
+        ["Kitchen", "Surfaces, appliances, crockery and cutlery, bins and dispensers"],
+        ["Bathrooms", "Toilets, showers, surfaces, bins and refilling dispensers"]
       ],
       "check": [
-        ["Toilet and shower", "Check"],
-        ["Floors and windows", "Check"],
-        ["Kitchen benches and bins", "Check"],
-        ["Fridge", "Check for leftover food"]
+        ["Acacia Room", "Surfaces, bins, windows and tables"],
+        ["Banksia Room", "Surfaces, bins, windows and tables"],
+        ["Kitchen", "Surfaces, appliances, crockery and cutlery, bins and dispensers"],
+        ["Bathrooms", "Toilets, showers, surfaces, bins and refilling dispensers"]
       ]
     },
     {
-      "name": "Stags",
-      "group": "Stags",
+      "name": "St George",
+      "group": "Basecamp",
       "full": [
-        ["Bathrooms"],
-        ["Kitchen area"]
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
       ],
       "check": [
-        ["Bathrooms"],
-        ["Kitchen area"]
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
+      ]
+    },
+    {
+      "name": "Gilwell",
+      "group": "Basecamp",
+      "full": [
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
+      ],
+      "check": [
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
+      ]
+    },
+    {
+      "name": "Brownsea",
+      "group": "Basecamp",
+      "full": [
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
+      ],
+      "check": [
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
+      ]
+    },
+    {
+      "name": "Lone's Hut",
+      "group": "Basecamp",
+      "full": [
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
+      ],
+      "check": [
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
+      ]
+    },
+    {
+      "name": "Bert's Bog",
+      "group": "Basecamp",
+      "full": [
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
+      ],
+      "check": [
+        ["Toilet"],
+        ["Surfaces"],
+        ["Showers"],
+        ["Appliances"],
+        ["Bins"]
       ]
     }
   ]

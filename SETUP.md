@@ -160,14 +160,14 @@ otherwise would.
 ## Step 7 — Check the two checklists
 
 A checklist here is the **broad areas** of a building, not the individual jobs
-inside them — St George is *Bathrooms* and *Shelter*, the Manor is its six
-areas. The detail stays on the paper checklists the cleaners already carry;
-the app records that the area was done, by whom, and when.
+inside them — Stags is *Bathroom* and *Kitchen*, the Manor is its five areas.
+What an area covers (toilets, surfaces, refilling dispensers) is the note
+printed under it, so it reads as one tick rather than five; the app records
+that the area was done, by whom, and when.
 
-Every building starts with a **Full Clean** and a **Check**. Most walk the
-same areas either way, so both lists are the same and each entry is marked
-**on both checklists** — edit it once. The bell tents, the chalets and Seeonee
-have a genuinely different check, and theirs says so.
+Every building starts with a **Full Clean** and a **Check**. Both walk the
+same areas, so the two lists are the same and each entry is marked **on both
+checklists** — edit it once. The Check is the same round, done faster.
 
 1. **Checklists** → open a building and read its list. Add, rename, hide,
    reorder or delete as needed.
