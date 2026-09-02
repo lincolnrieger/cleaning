@@ -264,9 +264,13 @@ Availability answers *can they*. Two more fields on the same sheet answer
 - **Ideal hours a week** — a target, e.g. 25. The availability grid and the
   roster then show **"22h of 25h"** against each person for the week you're
   looking at, and turn amber once they're over it. No adding shifts up by
-  hand to see who's short and who's had too much. **Office and admin only** —
-  a cleaner opening the roster sees the shifts and nobody's hours, and the
-  figures aren't in the response their browser receives either.
+  hand to see who's short and who's had too much. **Office and admin only.**
+
+**A cleaner sees who is on, not when.** Their own row shows their times and
+their note; everyone else's day shows simply **On**. Enough to know who is
+about for a handover, without a colleague's hours or the weekly totals — and
+none of it is in the response their browser receives, so it isn't merely
+hidden.
 Both are optional, and neither can stop you doing anything — they sort and
 annotate. Availability is still the only thing that raises a conflict.
 
@@ -419,6 +423,12 @@ A few things worth knowing:
 - **The checklist keeps its controls in reach.** A progress line follows you
   down the list, and *Mark complete* sits in a bar pinned to the bottom of the
   screen rather than below the last entry.
+- **Checking in today.** A scheduled job can be marked as one where guests
+  arrive that day. It shows as a pink flag beside the priority number — on the
+  planning grid, on the overview, on a cleaner's list and on the building's own
+  checklist — because it is the one thing that reorders a morning regardless of
+  what the numbers say. Every new job starts at priority 1; change it only
+  where the order genuinely matters.
 - **Numbers line up.** Counts, times and dates use tabular figures, so a
   column of them can be read down.
 - **Empty progress bars aren't drawn.** A building at 0/25 says "0/25"; it

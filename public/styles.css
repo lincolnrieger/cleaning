@@ -40,6 +40,11 @@
   --danger: #b32222;
   --danger-wash: #fbecec;
 
+  /* Guests arriving. Its own colour because it outranks the plan's own order,
+     and neither the warning amber nor the danger red says that. */
+  --checkin: #b0146b;
+  --checkin-wash: #fcebf3;
+
   --r: 6px;
   --r-lg: 10px;
 
@@ -84,6 +89,8 @@
     --warn-wash: #2a2113;
     --danger: #ef8b84;
     --danger-wash: #2e1819;
+    --checkin: #f78bbc;
+    --checkin-wash: #33162a;
 
     --lift: 0 10px 34px rgb(0 0 0 / .5);
   }
@@ -699,8 +706,35 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 
 /* The two checklists. One is the routine job, one is the quick pass, so the
    quick one is the tinted exception rather than both shouting. */
+.pill.checkin {
+  background: var(--checkin-wash);
+  color: var(--checkin);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--checkin) 28%, transparent);
+}
+
+.banner.checkin { background: var(--checkin-wash); color: var(--checkin); }
+
 .pill.type-full { background: var(--line-2); color: var(--ink-2); }
 .pill.type-check { background: var(--warn-wash); color: var(--warn); }
+
+/* On the plan the priority number itself turns pink, so a check-in reads at a
+   glance down a column of grey ones. */
+.prio.checkin {
+  background: var(--checkin-wash);
+  color: var(--checkin);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--checkin) 35%, transparent);
+}
+
+.checkmark {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--checkin);
+  color: var(--card);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
 
 .prio {
   flex: none;
@@ -1617,6 +1651,9 @@ code.phrase {
      which is often greyscale, the word does it instead. */
   .cell.on { background: #fff !important; border: none; box-shadow: none; min-height: 0; }
   .cell .typetag, .cell .plus, .cell .mini { display: none !important; }
+  /* Ink, not pink: the plan gets printed on a mono printer. */
+  .checkmark { background: #000 !important; color: #fff !important; font-size: 7.5pt; }
+  .prio.checkin { box-shadow: none !important; }
   .cell .prio {
     background: #000 !important; color: #fff !important;
     font-size: 8pt; min-width: 13pt; padding: 0 2pt;
