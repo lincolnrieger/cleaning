@@ -6,7 +6,13 @@ import {
   contacts, CLEAN_TYPES, CLEAN_TYPE_LABELS, isCleanType, PHOTO_MODES,
 } from './_setup.js';
 
-const TOKEN_TTL_HOURS = 14; // covers a long shift, expires before the next day
+// A cleaner signs in once on their own phone and shouldn't be asked again.
+// Ninety days with a refresh on the way past means anyone who opens the app
+// even occasionally never sees the PIN pad twice; a phone that stops being
+// used stops working by itself. Losing one is handled by switching the person
+// off under People, which currentUser honours on the very next request.
+const TOKEN_TTL_DAYS = 90;
+const REFRESH_AFTER_DAYS = 30;
 const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 const MAX_PHOTOS_PER_ITEM = 6;
 
@@ -55,6 +61,16 @@ async function hmac(_env, message) {
 
 // PINs are stored as a keyed hash, so a leaked database dump doesn't hand
 // over working PINs.
+/** What a signed-in client is allowed to know about a person. */
+const pick = (u) => ({ id: u.id, name: u.name, role: u.role });
+
+const firstName = (name) => String(name).split(/[\s(]/)[0];
+
+const newToken = (env, uid) => sign(env, {
+  uid,
+  exp: Date.now() + TOKEN_TTL_DAYS * 86400_000,
+});
+
 async function hashPin(env, pin) {
   return b64url.encode(await hmac(env, `pin:${pin}`));
 }
@@ -485,16 +501,24 @@ const routes = {
     if (!/^\d{4,8}$/.test(pin || '')) throw new HttpError(400, 'PIN must be 4-8 digits.');
 
     await env.DB.prepare(
-      'INSERT INTO users (name, role, pin_hash) VALUES (?, ?, ?)',
-    ).bind(who, 'admin', await hashPin(env, pin)).run();
+      'INSERT INTO users (name, role, pin_hash, pin_length) VALUES (?, ?, ?, ?)',
+    ).bind(who, 'admin', await hashPin(env, pin), pin.length).run();
     return json({ ok: true });
   },
 
   // Only reachable while test mode is on; it is what fills the tap-to-sign-in list.
+  /**
+   * The names on the sign-in screen. Open, because picking your name is the
+   * first half of signing in - the PIN is still what proves it is you.
+   *
+   * `pinLength` is here so the pad can draw the right number of slots and
+   * submit on the last digit instead of making everyone reach for a button.
+   * It narrows a guess from "four to eight digits" to one length, which the
+   * eight-tries-then-lockout guard on POST /login already covers.
+   */
   'GET /people': async (_req, env) => {
-    if (!await quickSigninOn(env)) throw new HttpError(403, 'Sign in with your PIN.');
     const { results } = await env.DB.prepare(
-      'SELECT id, name, role FROM users WHERE active = 1 ORDER BY role, name',
+      'SELECT id, name, role, pin_length AS pinLength FROM users WHERE active = 1 ORDER BY name',
     ).all();
     return json({ people: results });
   },
@@ -504,14 +528,30 @@ const routes = {
     const guard = await loginGuard(env, ip);
 
     const { pin, userId } = await req.json();
+    const hasPin = /^\d{4,8}$/.test(pin || '');
     let user = null;
+    let named = null;
 
     if (userId != null) {
-      if (!await quickSigninOn(env)) throw new HttpError(403, 'Sign in with your PIN.');
-      user = await env.DB.prepare(
-        'SELECT id, name, role FROM users WHERE id = ? AND active = 1',
+      named = await env.DB.prepare(
+        'SELECT id, name, role, pin_hash FROM users WHERE id = ? AND active = 1',
       ).bind(Number(userId)).first();
-    } else if (/^\d{4,8}$/.test(pin || '')) {
+
+      // Name plus PIN: the PIN is checked against the person who was picked,
+      // so a mistype can never sign somebody in as a colleague - which is the
+      // one failure that would quietly put the wrong name on a day's work.
+      if (named && hasPin) {
+        if (timingSafeEqual(named.pin_hash, await hashPin(env, pin))) user = named;
+      } else if (named && await quickSigninOn(env)) {
+        user = named;
+      } else if (!named) {
+        throw new HttpError(401, 'That person is no longer on the list.');
+      } else {
+        throw new HttpError(400, 'Enter your PIN.');
+      }
+    } else if (hasPin) {
+      // No name given: the old PIN-is-the-identity path, kept so a phone
+      // running a cached copy of the app can still sign in.
       user = await env.DB.prepare(
         'SELECT id, name, role FROM users WHERE pin_hash = ? AND active = 1',
       ).bind(await hashPin(env, pin)).first();
@@ -519,15 +559,22 @@ const routes = {
 
     if (!user) {
       await recordFail(env, ip, guard);
-      throw new HttpError(401, 'PIN not recognised.');
+      throw new HttpError(401, named
+        ? `That is not ${firstName(named.name)}'s PIN.`
+        : 'PIN not recognised.');
     }
 
     await env.DB.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(ip).run();
-    const token = await sign(env, {
-      uid: user.id,
-      exp: Date.now() + TOKEN_TTL_HOURS * 3600_000,
-    });
-    return json({ token, user });
+    return json({ token: await newToken(env, user.id), user: pick(user) });
+  },
+
+  /**
+   * A fresh token for a session already in good standing, so a phone in
+   * regular use never reaches its expiry and never asks for a PIN again.
+   */
+  'POST /session/refresh': async (_req, env, { user }) => {
+    require(user);
+    return json({ token: await newToken(env, user.id), user: pick(user) });
   },
 
   'GET /me': async (req, env, { user }) => json({ user: require(user) }),
@@ -1238,8 +1285,8 @@ const routes = {
       await env.DB.prepare('UPDATE users SET name = ?, role = ?, active = ? WHERE id = ?')
         .bind(who, role, active ? 1 : 0, Number(id)).run();
       if (pin) {
-        await env.DB.prepare('UPDATE users SET pin_hash = ? WHERE id = ?')
-          .bind(await hashPin(env, pin), Number(id)).run();
+        await env.DB.prepare('UPDATE users SET pin_hash = ?, pin_length = ? WHERE id = ?')
+          .bind(await hashPin(env, pin), pin.length, Number(id)).run();
       }
       // A renamed person should read correctly on next week's roster too.
       await env.DB.prepare('UPDATE roster SET user_name = ? WHERE user_id = ?')
@@ -1248,8 +1295,9 @@ const routes = {
     }
 
     if (!/^\d{4,8}$/.test(pin || '')) throw new HttpError(400, 'PIN must be 4-8 digits.');
-    await env.DB.prepare('INSERT INTO users (name, role, pin_hash) VALUES (?, ?, ?)')
-      .bind(who, role, await hashPin(env, pin)).run();
+    await env.DB.prepare(
+      'INSERT INTO users (name, role, pin_hash, pin_length) VALUES (?, ?, ?, ?)',
+    ).bind(who, role, await hashPin(env, pin), pin.length).run();
     return json({ ok: true });
   },
 

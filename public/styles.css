@@ -1245,11 +1245,98 @@ table.avail td.dimmed { opacity: .28; }
 
 /* ---------------------------------------------------------- login screen */
 
-.login { max-width: 360px; margin: 6vh auto; }
+.loginmark {
+  max-width: 560px;
+  margin: 6vh auto var(--s3);
+  text-align: center;
+  font-size: 15px;
+  font-weight: 680;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+}
+
+.login { max-width: 360px; margin: 0 auto; }
+.loginmark + .login { margin-top: 0; }
+.padgap { display: block; }
 .login h2 { justify-content: center; }
+.login.wide-login { max-width: 560px; }
+.pad.flush-bottom { padding-bottom: 0; }
+
+/* Half one: tap your name. Tiles rather than rows - a face-sized target with
+   the badge people already know from the roster, so finding yourself is
+   recognition rather than reading. */
+.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: var(--s2); }
+
+.persontile {
+  flex-direction: column;
+  gap: 6px;
+  min-height: 108px;
+  padding: var(--s3) var(--s2);
+  border-color: var(--line);
+  background: var(--card);
+  font-weight: 500;
+  text-align: center;
+}
+
+.persontile:hover { background: var(--hover); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.persontile .avatar.lg { width: 44px; height: 44px; font-size: 15px; border-radius: var(--r-lg); }
+.persontile .ptname { font-size: 15.5px; font-weight: 650; line-height: 1.2; }
+
+.persontile .ptfull {
+  font-size: 11.5px;
+  font-weight: 450;
+  color: var(--muted);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+/* One name is the whole tile; no point repeating it underneath. */
+.persontile .ptname + .ptfull:only-of-type { display: none; }
+
+/* Half two: the pad, with the name it belongs to at the top. */
+.pinhead {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  background: var(--sunken);
+  border-bottom: 1px solid var(--line);
+}
+
+.pinhead strong { display: block; font-size: 16.5px; font-weight: 680; letter-spacing: -0.01em; }
+.pinhead .small { display: block; }
+
 .pinpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s2); }
-.pinpad button { height: 56px; font-size: 19px; font-weight: 600; }
-.pindots { letter-spacing: 8px; font-size: 22px; min-height: 30px; color: var(--accent); }
+.pinpad button { height: 60px; font-size: 21px; font-weight: 600; }
+.pinpad button.ghost { border-color: transparent; background: none; color: var(--muted); }
+.pinpad button.wide { grid-column: span 3; height: 52px; font-size: 16px; }
+
+/* Fixed slots when the length is known: it says how many digits to expect and
+   turns the last one into the submit. */
+.pinslots {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  letter-spacing: 8px;
+  font-size: 22px;
+  color: var(--accent);
+}
+
+.pinslots > i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  transition: background .12s, border-color .12s;
+}
+
+.pinslots > i.on { background: var(--accent); border-color: var(--accent); }
+.pinslots.working { opacity: .5; }
 
 .person {
   display: flex;

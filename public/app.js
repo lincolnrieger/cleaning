@@ -242,6 +242,7 @@ function signOut() {
   state.token = '';
   state.user = null;
   localStorage.removeItem('bc.token');
+  localStorage.removeItem('bc.tokenAt');
   localStorage.removeItem('bc.user');
   location.hash = '';
   render();
@@ -633,46 +634,80 @@ async function renderLogin() {
   $('#testbar').hidden = !state.config.quickSignin;
   $('#testbar').textContent = 'Test mode — tap any name to sign in, no PIN needed.';
   if (state.config.needsBootstrap) return renderBootstrap();
-  if (state.config.quickSignin) return renderPeoplePicker();
-  return renderPinPad();
+  return renderPeoplePicker();
 }
 
-/** Test mode: a list of everyone, tap to sign in. */
+/**
+ * Half one of signing in: tap your name.
+ *
+ * Picking the person first is what lets the PIN be checked against them, so a
+ * fumbled digit can never sign somebody in as a colleague and put the wrong
+ * name on a morning's work. It also means the pad can greet them by name.
+ */
 async function renderPeoplePicker() {
   let people = [];
   try {
     people = (await api('/people')).people;
   } catch {
-    return renderPinPad(); // setting flipped off mid-session
+    return renderPinPad(); // no list to show; fall back to PIN alone
   }
+  if (!people.length) return renderPinPad();
 
-  app.innerHTML = `<div class="login card">
+  // Whoever used this phone last goes first. On a personal phone that is the
+  // owner, every time.
+  const lastUid = Number(localStorage.getItem('bc.lastUid') || 0);
+  people.sort((a, b) => (b.id === lastUid) - (a.id === lastUid));
+
+  app.innerHTML = `<p class="loginmark">Woodhouse Cleaning</p>
+  <div class="login card wide-login">
     <h2>Who are you?</h2>
-    ${people.map((p) => `<button class="person" data-uid="${p.id}">
-      ${avatar(p.name, 'lg')}
-      <span class="grow">
-        <span class="pname">${esc(p.name)}</span>
-        <span class="prole">${esc(p.role)}</span>
-      </span>
-      <span class="muted">${svgIcon('chevron')}</span>
-    </button>`).join('') || '<div class="empty">Nobody has been added yet.</div>'}
-    <div class="pad"><button class="wide" id="usepin">Use a PIN instead</button></div>
+    ${people.length > 10 ? `<div class="pad flush-bottom">
+      <input id="findme" placeholder="Start typing your name…" autocomplete="off">
+    </div>` : ''}
+    <div class="pad people-grid">
+      ${people.map((p) => `<button class="persontile" data-uid="${p.id}"
+          data-pin="${p.pinLength || 0}" data-name="${esc(p.name)}"
+          data-find="${esc(p.name.toLowerCase())}">
+        ${avatar(p.name, 'lg')}
+        <span class="ptname">${esc(firstName(p.name))}</span>
+        ${p.name === firstName(p.name) ? '' : `<span class="ptfull">${esc(p.name)}</span>`}
+      </button>`).join('')}
+    </div>
+    <p class="err center" id="err"></p>
   </div>
-  <p class="err center" id="err"></p>
   ${installHintHTML()}`;
+
+  const find = $('#findme');
+  if (find) {
+    find.oninput = () => {
+      const q = find.value.trim().toLowerCase();
+      app.querySelectorAll('[data-find]').forEach((b) => {
+        b.hidden = Boolean(q) && !b.dataset.find.includes(q);
+      });
+    };
+  }
 
   app.querySelectorAll('[data-uid]').forEach((b) => {
     b.onclick = async () => {
-      b.disabled = true;
-      try {
-        await signIn({ userId: Number(b.dataset.uid) });
-      } catch (e) {
-        $('#err').textContent = e.message;
-        b.disabled = false;
+      const person = {
+        id: Number(b.dataset.uid),
+        name: b.dataset.name,
+        pinLength: Number(b.dataset.pin),
+      };
+      // Test mode is the one case with nothing left to prove.
+      if (state.config.quickSignin) {
+        b.disabled = true;
+        try {
+          await signIn({ userId: person.id });
+        } catch (e) {
+          $('#err').textContent = e.message;
+          b.disabled = false;
+        }
+        return;
       }
+      renderPinPad(person);
     };
   });
-  $('#usepin').onclick = renderPinPad;
   wireInstallHint();
 }
 
@@ -681,64 +716,98 @@ async function signIn(body) {
   state.token = token;
   state.user = user;
   localStorage.setItem('bc.token', token);
+  localStorage.setItem('bc.tokenAt', String(Date.now()));
   localStorage.setItem('bc.user', JSON.stringify(user));
+  localStorage.setItem('bc.lastUid', String(user.id));
   await render();
 }
 
-function renderPinPad() {
-  app.innerHTML = `<div class="login card">
-    <h2>Woodhouse Cleaning</h2>
+/**
+ * Half two: the PIN, for the person just picked.
+ *
+ * Called with no `person` only when the list could not be fetched, where it
+ * falls back to the older behaviour of the PIN alone identifying who you are.
+ */
+function renderPinPad(person = null) {
+  // A known length means fixed slots and no button to reach for: the pad
+  // submits on the last digit. People whose PIN predates that column show the
+  // older growing dots and press Go.
+  const slots = person?.pinLength >= 4 ? person.pinLength : 0;
+
+  app.innerHTML = `<p class="loginmark">Woodhouse Cleaning</p>
+  <div class="login card">
+    ${person ? `<div class="pinhead">
+      ${avatar(person.name, 'lg')}
+      <span class="grow">
+        <strong>${esc(person.name)}</strong>
+        <span class="small muted">Enter your PIN</span>
+      </span>
+    </div>` : ''}
     <div class="pad stack center">
-      <p class="muted small">Enter your PIN</p>
-      <div class="pindots" id="dots"></div>
+      ${person ? '' : '<p class="muted">Enter your PIN</p>'}
+      <div class="pinslots" id="dots" data-slots="${slots}"></div>
       <p class="err" id="err"></p>
       <div class="pinpad">
         ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button data-k="${n}">${n}</button>`).join('')}
-        <button data-k="del" aria-label="Delete">${svgIcon('back', 'lg')}</button>
+        <span class="padgap"></span>
         <button data-k="0">0</button>
-        <button class="primary" data-k="go" aria-label="Sign in">${svgIcon('chevron', 'lg')}</button>
+        <button class="ghost" data-k="del" aria-label="Delete"
+          >${svgIcon('back', 'lg')}</button>
+        ${slots ? '' : `<button class="primary wide" data-k="go">Sign in</button>`}
       </div>
-      ${state.config.quickSignin
-        ? '<button class="wide" id="uselist">Pick from the list instead</button>'
-        : ''}
+      ${person
+        ? '<button class="wide" id="notme">Not you? Pick another name</button>'
+        : state.config.quickSignin
+          ? '<button class="wide" id="uselist">Pick from the list instead</button>'
+          : ''}
     </div>
   </div>
-  ${installHintHTML()}`;
+  ${person ? '' : installHintHTML()}`;
 
   $('#uselist')?.addEventListener('click', renderPeoplePicker);
-  wireInstallHint();
+  $('#notme')?.addEventListener('click', renderPeoplePicker);
+  if (!person) wireInstallHint();
 
   let pin = '';
   const dots = $('#dots');
   const err = $('#err');
-  const draw = () => { dots.textContent = '•'.repeat(pin.length); };
+  const draw = () => {
+    dots.innerHTML = slots
+      ? Array.from({ length: slots }, (_, i) =>
+        `<i class="${i < pin.length ? 'on' : ''}"></i>`).join('')
+      : '•'.repeat(pin.length);
+  };
+  draw();
 
   async function submit() {
     if (pin.length < 4) return;
     err.textContent = '';
+    dots.classList.add('working');
     try {
-      await signIn({ pin });
+      await signIn(person ? { userId: person.id, pin } : { pin });
     } catch (e) {
       pin = '';
+      dots.classList.remove('working');
       draw();
       err.textContent = e.message;
     }
   }
 
-  app.querySelectorAll('[data-k]').forEach((b) => {
-    b.onclick = () => {
-      const k = b.dataset.k;
-      if (k === 'del') pin = pin.slice(0, -1);
-      else if (k === 'go') return submit();
-      else if (pin.length < 8) pin += k;
-      draw();
-    };
-  });
+  const type = (k) => {
+    if (k === 'del') pin = pin.slice(0, -1);
+    else if (k === 'go') return submit();
+    else if (pin.length < 8) pin += k;
+    draw();
+    // The last slot filled is the whole intent - nobody needs to confirm it.
+    if (slots && pin.length === slots) submit();
+  };
+
+  app.querySelectorAll('[data-k]').forEach((b) => { b.onclick = () => type(b.dataset.k); });
 
   addEventListener('keydown', function onKey(e) {
     if (!document.body.contains(dots)) return removeEventListener('keydown', onKey);
-    if (/^\d$/.test(e.key) && pin.length < 8) { pin += e.key; draw(); }
-    else if (e.key === 'Backspace') { pin = pin.slice(0, -1); draw(); }
+    if (/^\d$/.test(e.key)) type(e.key);
+    else if (e.key === 'Backspace') type('del');
     else if (e.key === 'Enter') submit();
   });
 }
@@ -3494,6 +3563,29 @@ async function loadConfig() {
   if (state.config && Date.now() - state.configAt < 10 * 60_000) return;
   state.config = await api('/config');
   state.configAt = Date.now();
+  await refreshToken();
+}
+
+/**
+ * Trades a token that is a month old for a new one.
+ *
+ * A phone in regular use therefore never reaches the expiry and never asks for
+ * a PIN a second time; one that stops being used runs out on its own. A
+ * failure here is deliberately quiet - the old token is still good, and the
+ * next load will try again.
+ */
+async function refreshToken() {
+  if (!state.token) return;
+  const issued = Number(localStorage.getItem('bc.tokenAt') || 0);
+  if (issued && Date.now() - issued < 30 * 86400_000) return;
+  try {
+    const { token, user } = await api('/session/refresh', { method: 'POST' });
+    state.token = token;
+    state.user = user;
+    localStorage.setItem('bc.token', token);
+    localStorage.setItem('bc.tokenAt', String(Date.now()));
+    localStorage.setItem('bc.user', JSON.stringify(user));
+  } catch { /* the token we have still works */ }
 }
 
 async function render() {
