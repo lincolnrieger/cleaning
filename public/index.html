@@ -154,9 +154,14 @@
           + 'the app itself is still downloading on this connection. It should '
           + 'appear shortly.');
       } else {
+        // The app is running and the server is quick, so it is waiting on some
+        // other request - name it rather than blaming the connection, which is
+        // what this used to do and was usually wrong.
+        const waiting = (window.__inflight ? window.__inflight() : []).join(', ');
         why(`The server is answering in ${took}ms, so it is not the hold-up. `
-          + 'This device\'s connection is the slow part; the app should appear '
-          + 'shortly.');
+          + (waiting
+            ? `The app is waiting on ${waiting}.`
+            : 'The app is running but has not drawn a screen yet.'));
       }
     } catch {
       why('The server is up, but setting up the database is taking too long. '
