@@ -617,7 +617,7 @@ const routes = {
            ORDER BY last_at DESC`,
         ).bind(day).all(),
         env.DB.prepare(
-          `SELECT id, building_id, clean_type, priority, note FROM schedule WHERE day = ?`,
+          `SELECT id, building_id, clean_type, priority, checkin, note FROM schedule WHERE day = ?`,
         ).bind(day).all(),
         env.DB.prepare(
           `SELECT building_id, clean_type, completed_at, completed_by
@@ -684,6 +684,7 @@ const routes = {
         })),
         scheduled: Boolean(plan),
         priority: plan?.priority ?? null,
+        checkin: Boolean(plan?.checkin),
         note: plan?.note ?? null,
         lastCleaned: lastFor.get(b.id) ?? null,
       };
@@ -715,7 +716,7 @@ const routes = {
         'SELECT id, name, grp FROM buildings WHERE active = 1 ORDER BY sort_order, name',
       ).all(),
       env.DB.prepare(
-        `SELECT id, building_id, day, clean_type, priority, note
+        `SELECT id, building_id, day, clean_type, priority, checkin, note
          FROM schedule WHERE day BETWEEN ? AND ?`,
       ).bind(from, to).all(),
       env.DB.prepare(
@@ -751,6 +752,7 @@ const routes = {
       put(r.building_id, r.day, {
         cleanType: typeOf(r.clean_type),
         priority: r.priority,
+        checkin: Boolean(r.checkin),
         note: r.note,
       });
     }
@@ -788,7 +790,7 @@ const routes = {
 
   'POST /schedule': async (req, env, { user }) => {
     require(user, 'office', 'admin');
-    const { buildingId, day: rawDay, priority, note, cleanType } = await req.json();
+    const { buildingId, day: rawDay, priority, note, cleanType, checkin } = await req.json();
     const day = isDay(rawDay) ? rawDay : localDay(env);
     const id = Number(buildingId);
     const type = typeOf(cleanType);
@@ -799,15 +801,17 @@ const routes = {
     if (!building) throw new HttpError(404, 'Building not found.');
 
     await env.DB.prepare(
-      `INSERT INTO schedule (building_id, day, clean_type, priority, note, created_by, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+      `INSERT INTO schedule
+         (building_id, day, clean_type, priority, checkin, note, created_by, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
        ON CONFLICT(building_id, day) DO UPDATE SET
          clean_type = excluded.clean_type,
          priority = excluded.priority,
+         checkin = excluded.checkin,
          note = excluded.note`,
     ).bind(
       id, day, type, Math.min(Math.max(Number(priority) || 1, 1), 99),
-      clean(note, 200) || null, user.name, now(),
+      checkin ? 1 : 0, clean(note, 200) || null, user.name, now(),
     ).run();
 
     await logActivity(env, {
@@ -894,7 +898,7 @@ const routes = {
     // What was planned decides the default, so the common path is: open the
     // building, get the checklist the office asked for, no choice to make.
     const plan = await env.DB.prepare(
-      'SELECT clean_type, note, priority FROM schedule WHERE building_id = ? AND day = ?',
+      'SELECT clean_type, note, priority, checkin FROM schedule WHERE building_id = ? AND day = ?',
     ).bind(id, day).first();
     const requested = url.searchParams.get('type');
     const cleanType = typeOf(requested, typeOf(plan?.clean_type));
@@ -961,6 +965,7 @@ const routes = {
       cleanTypeLabel: typeLabel(cleanType),
       sizes: { full: sizeOf('full'), check: sizeOf('check') },
       scheduledType: plan ? typeOf(plan.clean_type) : null,
+      scheduleCheckin: Boolean(plan?.checkin),
       scheduleNote: plan?.note ?? null,
       items,
       completed: status ?? null,
@@ -1432,9 +1437,11 @@ const routes = {
       workedMinutes.set(r.user_id, (workedMinutes.get(r.user_id) ?? 0) + (span > 0 ? span : 0));
     }
 
-    // Hours against a target are a management figure, not something a cleaner
-    // should be reading off a colleague's row - so they are left out of the
-    // response entirely rather than merely hidden by the front end.
+    // Hours are a management figure, not something a cleaner should be reading
+    // off a colleague's row - so they are left out of the response entirely
+    // rather than merely hidden by the front end. That covers both the weekly
+    // totals and, below, the times on somebody else's shift: a cleaner sees
+    // WHO is on each day, which is what a handover needs, and not when.
     const canSeeHours = user.role !== 'cleaner';
 
     const staff = people.results.map((p) => {
@@ -1472,11 +1479,17 @@ const routes = {
       return { ...s, flags };
     });
 
+    // A cleaner keeps the times on their own shifts - they need to know when
+    // they start - and gets a colleague's day without its hours.
+    const shown = canSeeHours ? withFlags : withFlags.map((s) => (s.user_id === user.id
+      ? s
+      : { ...s, start_time: null, end_time: null, note: '' }));
+
     return json({
       from,
       days,
       today: localDay(env),
-      shifts: withFlags,
+      shifts: shown,
       staff,
       canEdit: user.role !== 'cleaner',
     });

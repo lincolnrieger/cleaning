@@ -191,7 +191,8 @@ The first edit here takes ownership of the checklists, and
 this screen can be undone by a later push.
 
 Then **Planning → Buildings**: tap a square, pick **Full Clean** or **Check**,
-set the order it gets done in, and the cleaner gets exactly that list when
+tick **Checking in today** if guests arrive there that day, set the order it
+gets done in if it matters, and the cleaner gets exactly that list when
 they open the job. The plan doesn't name who cleans what — that's the roster's
 job, and the cleaners sort the buildings out between themselves on the day.
 **Print / save as PDF** under the grid prints the week's plan on one A4 sheet.

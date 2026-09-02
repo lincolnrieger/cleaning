@@ -985,6 +985,9 @@ function staleDays(b, day) {
   return Math.round((asDate(day) - asDate(b.lastCleaned)) / 86400000);
 }
 
+/** Guests arrive here today: the one thing that reorders a morning. */
+const CHECKIN_PILL = '<span class="pill checkin">Checking in today</span>';
+
 /** The badge that says which of the two checklists a job is. */
 const typePill = (id, extra = '') =>
   `<span class="pill type-${esc(id)}">${esc(typeLabel(id))}${extra}</span>`;
@@ -1026,6 +1029,7 @@ function overviewTile(b) {
       <span class="tile-title">
         ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
+        ${b.checkin ? CHECKIN_PILL : ''}
       </span>
       <span class="tile-meta">${typePill(b.cleanType)}
         <span class="grow">${meta}</span></span>
@@ -1268,6 +1272,7 @@ function jobTile(b) {
       <span class="tile-title">
         ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
+        ${b.checkin ? CHECKIN_PILL : ''}
       </span>
       <span class="tile-meta">${typePill(b.cleanType)}
         <span class="grow">${who}${
@@ -1312,7 +1317,10 @@ async function renderSchedule() {
     let inner;
     if (scheduled || c.done || c.completedAt) {
       inner = `<div class="cell-top">
-          ${scheduled ? `<span class="prio">${c.priority}</span>` : ''}
+          ${scheduled ? `<span class="prio ${c.checkin ? 'checkin' : ''}"
+            >${c.priority}</span>` : ''}
+          ${scheduled && c.checkin
+            ? '<span class="checkmark" title="Checking in today">IN</span>' : ''}
           ${scheduled ? `<span class="typetag t-${type}"
             title="${esc(typeLabel(type))}">${typeTag(type)}</span>` : ''}
           ${c.completedAt ? `<span class="tickmark">${svgIcon('check')}</span>` : ''}
@@ -1378,9 +1386,11 @@ async function renderSchedule() {
         <span><i class="sw t-full"></i>Full Clean</span>
         <span><i class="sw t-check"></i>Check</span>
         <span><i class="sw done"></i>Signed off</span>
+        <span><span class="checkmark">IN</span>Checking in today</span>
       </div>
       <p class="printonly print-foot">
-        The number is the order it gets done in · a tick means signed off</p>
+        The number is the order it gets done in · IN means guests check in that
+        day · a tick means signed off</p>
     </div>
 
     <div class="row wrap noprint">
@@ -1443,7 +1453,16 @@ function openScheduleEditor(data, buildingId, day) {
 
       <label class="field"><span>Order of priority — 1 gets done first</span>
         <input id="prio" type="number" min="1" max="99" inputmode="numeric"
-          value="${scheduled ? cell.priority : nextPriority(data, day)}"></label>
+          value="${scheduled ? cell.priority : 1}"></label>
+
+      <label class="switch-row">
+        <input type="checkbox" id="checkin" ${cell.checkin ? 'checked' : ''}>
+        <span class="grow">
+          <strong>Checking in today</strong>
+          <span class="small muted">Guests arrive here today, so it comes first
+            whatever the order says.</span>
+        </span>
+      </label>
 
       <label class="field"><span>Note for this job (optional)</span>
         <input id="note" maxlength="200" value="${esc(cell.note ?? '')}"
@@ -1473,6 +1492,7 @@ function openScheduleEditor(data, buildingId, day) {
         body: {
           buildingId, day, cleanType,
           priority: Number(sheet.querySelector('#prio').value) || 1,
+          checkin: sheet.querySelector('#checkin').checked,
           note: sheet.querySelector('#note').value,
         },
       });
@@ -1514,14 +1534,6 @@ function openScheduleEditor(data, buildingId, day) {
     toast(res.checked ? 'Removed and progress cleared' : 'Removed from schedule');
     renderSchedule();
   });
-}
-
-/** Suggests the next free priority number for a day. */
-function nextPriority(data, day) {
-  const used = data.buildings
-    .map((b) => data.cells[`${b.id}:${day}`]?.priority)
-    .filter((p) => p != null);
-  return used.length ? Math.max(...used) + 1 : 1;
 }
 
 /* ---------------------------------------------- view: building checklist */
@@ -1575,8 +1587,10 @@ async function renderBuilding(id, wantType) {
       ${unplanned ? `<div class="banner warn">
         <strong>The office did not schedule this building for
         ${esc(dayLabel(day).toLowerCase())}.</strong>
-        Clean it anyway if it needs it — it still records against your name.
       </div>` : ''}
+      ${data.scheduleCheckin ? `<div class="banner checkin">
+        <strong>Checking in today.</strong> Guests arrive here today, so this one
+        comes first.</div>` : ''}
       ${data.scheduleNote ? `<div class="banner info">
         <strong>From the office:</strong> ${esc(data.scheduleNote)}</div>` : ''}
       <p class="pad tight small" id="signoff" hidden></p>
@@ -2482,7 +2496,9 @@ async function renderRoster() {
 
     const inner = shifts.length
       ? shifts.map((s) => `<span class="shift ${s.flags.length ? 'clash' : ''}">
-          <b>${esc(timeRange(s.start_time, s.end_time))}</b>
+          <b>${s.start_time
+            ? esc(timeRange(s.start_time, s.end_time))
+            : 'On'}</b>
           ${s.note ? `<span class="tiny" title="${esc(s.note)}">${esc(s.note)}</span>` : ''}
           ${s.flags.length
             ? `<span class="shift-marks"><span class="warnmark">${svgIcon('warning')}</span></span>`

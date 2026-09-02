@@ -136,6 +136,7 @@ const TABLES = [
      day         TEXT    NOT NULL,
      clean_type  TEXT    NOT NULL DEFAULT 'full',
      priority    INTEGER NOT NULL DEFAULT 1,
+     checkin     INTEGER NOT NULL DEFAULT 0,
      note        TEXT,
      created_by  TEXT    NOT NULL,
      created_at  TEXT    NOT NULL,
@@ -605,6 +606,9 @@ async function migrate(env, waitUntil) {
   // back to a Go button for them.
   await ensureColumn(db, 'users', 'pin_length', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'schedule', 'clean_type', "TEXT NOT NULL DEFAULT 'full'");
+  // Guests arriving that day. Marked on the plan, and carried through to the
+  // cleaner's list, because it is the one thing that reorders a morning.
+  await ensureColumn(db, 'schedule', 'checkin', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'maintenance', 'location', "TEXT NOT NULL DEFAULT ''");
 
   await ensureReportKinds(db);
