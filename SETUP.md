@@ -163,24 +163,32 @@ their access stops on the next request.
 
 ---
 
-## Step 7 — Check the two checklists
+## Step 7 — Build your buildings and their checklists
+
+The app ships with one building called **Test** and nothing else, so this step
+is where the park gets entered.
 
 A checklist here is the **broad areas** of a building, not the individual jobs
-inside them — Stags is *Bathroom* and *Kitchen*, the Manor is its five areas.
+inside them — a block is *Bathroom* and *Kitchen*, a lodge is its five rooms.
 What an area covers (toilets, surfaces, refilling dispensers) is the note
 printed under it, so it reads as one tick rather than five; the app records
 that the area was done, by whom, and when.
 
-Every building starts with a **Full Clean** and a **Check**. Both walk the
-same areas, so the two lists are the same and each entry is marked **on both
-checklists** — edit it once. The Check is the same round, done faster.
+Every building has a **Full Clean** and a **Check**. Both usually walk the
+same areas, so an entry can be marked **on both checklists** and maintained
+once — the Check is the same round, done faster.
 
-1. **Checklists** → open a building and read its list. Add, rename, hide,
-   reorder or delete as needed.
-2. A banner names any building whose Check list is empty. Open it and either
-   add entries by hand, or tap **Add the Full Clean list** and trim.
-3. Anything that should be on *both* lists can be set to **Both** when you add
-   or edit it, so you only maintain it once.
+1. **Checklists** → **Add a building**. Give it a name, and a group if several
+   share one (chalets, bell tents) so they fold together on every screen.
+2. Open it and add its areas, with a note under each saying what it covers.
+   Set anything that belongs on both lists to **Both**.
+3. A banner names any building whose Check list is still empty. Open it and
+   either add entries by hand, or tap **Add the Full Clean list** and trim.
+4. Delete the **Test** building once you no longer need it.
+
+The first edit here takes ownership of the checklists, and
+`data/checklist.json` stops being applied on deploy — so nothing you build on
+this screen can be undone by a later push.
 
 Then **Planning → Buildings**: tap a square, pick **Full Clean** or **Check**,
 set the order it gets done in, and the cleaner gets exactly that list when

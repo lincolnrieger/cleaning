@@ -1506,8 +1506,11 @@ async function renderBuilding(id, wantType) {
   const locked = data.readOnly;
   const type = data.cleanType;
   // Warn when the office planned the other one - the single most expensive
-  // mistake this app can let somebody make is cleaning the wrong list.
+  // mistake this app can let somebody make is cleaning the wrong list. And
+  // say when they planned nothing here at all, so an unscheduled building is
+  // an explicit fact rather than the absence of a banner.
   const mismatch = data.scheduledType && data.scheduledType !== type;
+  const unplanned = !data.scheduledType;
 
   app.innerHTML = `
     <div class="card">
@@ -1523,6 +1526,11 @@ async function renderBuilding(id, wantType) {
       ${mismatch ? `<div class="banner warn">
         <strong>The office scheduled a ${esc(typeLabel(data.scheduledType))} here.</strong>
         You're on the ${esc(typeLabel(type))} checklist.
+      </div>` : ''}
+      ${unplanned ? `<div class="banner warn">
+        <strong>The office did not schedule this building for
+        ${esc(dayLabel(day).toLowerCase())}.</strong>
+        Clean it anyway if it needs it — it still records against your name.
       </div>` : ''}
       ${data.scheduleNote ? `<div class="banner info">
         <strong>From the office:</strong> ${esc(data.scheduleNote)}</div>` : ''}
@@ -2727,23 +2735,22 @@ async function renderChecklistAdmin() {
 
   const empties = data.buildings.filter((b) => b.active && !itemsFor(b.id).length);
 
+  // Only the two states somebody has to act on get a banner. "Edited in the
+  // app, and the file matches" is the steady state - saying so on every visit
+  // was noise.
+  const notice = data.source === 'app'
+    ? (data.fileDiffers
+      ? `<strong>The checklist file has changed, and it is not being applied.</strong>
+         These checklists were edited in the app, so <code>data/checklist.json</code>
+         stopped overwriting them. To take what the file now says, use
+         <strong>Restore from the checklist file</strong> at the bottom of this page.`
+      : '')
+    : `<strong>Managed by the checklist file.</strong> The first edit you make here
+       takes over, and <code>data/checklist.json</code> stops being applied — so a
+       later deploy can't quietly undo your work.`;
+
   app.innerHTML = `
-    <div class="card">
-      <div class="banner ${data.source === 'app' && data.fileDiffers ? 'warn'
-        : data.source === 'app' ? 'info' : 'warn'}">
-        ${data.source === 'app' && data.fileDiffers
-          ? `<strong>The checklist file has changed, and it is not being applied.</strong>
-             These checklists were edited in the app, so <code>data/checklist.json</code>
-             stopped overwriting them. To take what the file now says, use
-             <strong>Restore from the checklist file</strong> at the bottom of this page.`
-          : data.source === 'app'
-            ? `<strong>Edited in the app.</strong> These checklists are now managed here, and
-               <code>data/checklist.json</code> no longer overwrites them on deploy.`
-            : `<strong>Managed by the checklist file.</strong> The first edit you make here
-               takes over, and <code>data/checklist.json</code> stops being applied — so a
-               later deploy can't quietly undo your work.`}
-      </div>
-    </div>
+    ${notice ? `<div class="card"><div class="banner warn">${notice}</div></div>` : ''}
 
     <div class="card">
       <div class="pad">${typeTabs(type)}</div>
