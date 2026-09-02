@@ -84,8 +84,8 @@
     // Show the panel and its two ways out straight away, then narrate as the
     // checks come back. A screen that says nothing while it works out what is
     // wrong is the problem being fixed here.
-    el.innerHTML = '<strong>The app hasn\'t started yet.</strong><br>'
-      + '<span id="bootwhy">Checking what is wrong…</span><br>'
+    el.innerHTML = '<strong>Taking longer than usual.</strong><br>'
+      + '<span id="bootwhy">Checking why…</span><br>'
       + '<button id="bootretry">Try again</button> '
       + '<button id="bootreset">Reset and reload</button>';
     document.getElementById('bootretry').onclick = () => location.reload();
@@ -112,6 +112,7 @@
     };
 
     if (window.__bootError) return why(`The app reported: ${window.__bootError}`);
+    const appLoaded = Boolean(window.__appStarted);
 
     // /health answers without touching the database, so it separates "the
     // site is down" from "the database step is stuck", which look identical
@@ -135,17 +136,27 @@
       why(`The checklist did not load: ${health.syncError}`);
     }
 
-    why('The server is up. Waiting on it to answer…');
+    why('The server is up. Asking it for the day\'s data…');
     const started = Date.now();
     try {
       const res = await get('/api/config', 20000);
-      const took = Math.round((Date.now() - started) / 1000);
-      if (res.ok) {
-        why(`The server answered after ${took}s, which was too slow for the `
-          + 'page. Try again — it is usually only the first load after an update.');
-      } else {
+      const took = Date.now() - started;
+      if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         why(`The server said: ${body.error || `error ${res.status}`}`);
+      } else if (took > 5000) {
+        why(`The server took ${Math.round(took / 1000)}s to answer. That is the `
+          + 'hold-up — try again, it is usually only the first load after an update.');
+      } else if (!appLoaded) {
+        // The server is quick and the app file still is not here: the download
+        // is the slow part, not anything at the other end.
+        why(`The server is answering in ${took}ms, so it is not the hold-up — `
+          + 'the app itself is still downloading on this connection. It should '
+          + 'appear shortly.');
+      } else {
+        why(`The server is answering in ${took}ms, so it is not the hold-up. `
+          + 'This device\'s connection is the slow part; the app should appear '
+          + 'shortly.');
       }
     } catch {
       why('The server is up, but setting up the database is taking too long. '

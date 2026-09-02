@@ -3,6 +3,11 @@
 
 'use strict';
 
+// Lets the boot screen in index.html tell "the app file never arrived" apart
+// from "it arrived and is waiting on the server", which look identical from
+// there and have completely different causes.
+window.__appStarted = Date.now();
+
 const $ = (sel) => document.querySelector(sel);
 const app = $('#app');
 const bar = $('#bar');
@@ -205,11 +210,20 @@ async function request(path, { method = 'GET', body, raw, contentType } = {}) {
   if (body && !raw) headers['content-type'] = 'application/json';
   if (contentType) headers['content-type'] = contentType;
 
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers,
-    body: raw ? body : body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      headers,
+      body: raw ? body : body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // "Failed to fetch" is the browser talking to itself. Out at a bell tent
+    // with one bar, what is actually true is worth saying instead.
+    throw new Error(navigator.onLine
+      ? 'Could not reach the site. Check your signal and try again.'
+      : 'No connection. The app needs signal to load the day\'s work.');
+  }
 
   if (res.status === 401 && state.token) {
     signOut();
@@ -3576,21 +3590,29 @@ async function loadConfig() {
   if (state.config && Date.now() - state.configAt < 10 * 60_000) return;
   state.config = await api('/config');
   state.configAt = Date.now();
-  await refreshToken();
+  // Deliberately not awaited. The token in hand is still valid, so making the
+  // first paint wait on a second round trip bought nothing and cost everyone
+  // a visibly slower start - the whole screen sat on "Loading…" through it.
+  refreshToken();
 }
 
 /**
  * Trades a token that is a month old for a new one.
  *
  * A phone in regular use therefore never reaches the expiry and never asks for
- * a PIN a second time; one that stops being used runs out on its own. A
- * failure here is deliberately quiet - the old token is still good, and the
- * next load will try again.
+ * a PIN a second time; one that stops being used runs out on its own. Runs
+ * alongside the first screen rather than in front of it, and a failure here is
+ * deliberately quiet - the old token is still good, and the next load will try
+ * again.
  */
 async function refreshToken() {
   if (!state.token) return;
   const issued = Number(localStorage.getItem('bc.tokenAt') || 0);
-  if (issued && Date.now() - issued < 30 * 86400_000) return;
+  if (!issued) {
+    localStorage.setItem('bc.tokenAt', String(Date.now()));
+    return;
+  }
+  if (Date.now() - issued < 30 * 86400_000) return;
   try {
     const { token, user } = await api('/session/refresh', { method: 'POST' });
     state.token = token;

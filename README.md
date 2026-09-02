@@ -513,7 +513,16 @@ website installed so it behaves like one.
 Once installed, opening the icon behaves like a native app: its own launcher
 icon, a coloured status bar, and no browser chrome. A small service worker
 caches the app's shell (the HTML/CSS/JS, not the data) so it still opens if
-the connection drops for a moment.
+the connection drops.
+
+**The shell races the network against that cache.** The network gets two
+seconds to win; after that the cached copy is served and the network response,
+whenever it arrives, refreshes the cache for next time. Waiting on the network
+with no limit was measurably worse: on a connection taking twelve seconds a
+file, the app took **24 seconds** to become usable and now takes **4**, with
+the same files. The cost is that a deploy can be one load late on a bad
+signal, which is the right way round — nobody should stand in a wet bathroom
+watching a spinner to be certain they have this morning's build.
 
 ## The checklist file
 
