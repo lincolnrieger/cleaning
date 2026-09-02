@@ -412,10 +412,24 @@ A few things worth knowing:
   column of them can be read down.
 - **Empty progress bars aren't drawn.** A building at 0/25 says "0/25"; it
   doesn't also get a grey bar that means nothing.
-- Text inputs are 16px, the threshold below which iOS Safari zooms the page
-  when you tap a field — so it never does. Buttons use
-  `touch-action: manipulation` to drop the double-tap-to-zoom delay, and the
-  layout respects the notch and home indicator via safe-area insets.
+- **Pinch-to-zoom is never blocked, and never needed.** The two things that
+  make people zoom are dealt with instead: text inputs are 16px, the threshold
+  below which iOS Safari zooms the page when you tap a field, and the whole
+  body is `touch-action: manipulation`, which drops double-tap-to-zoom (the
+  accidental one) while leaving pinch alone. Turning zoom off outright would
+  only take the option away from anyone who needs it — and iOS Safari ignores
+  the attempt anyway.
+- **The clock and battery never sit on top of anything.** The app bar reserves
+  `env(safe-area-inset-top)` on a phone with a cutout, and the sticky rows
+  underneath — the section tabs, a checklist's progress line — offset by the
+  same amount, so nothing scrolls up behind the notch. Signed out, where there
+  is no app bar, the page itself takes the inset. The status bar is set to
+  `default` rather than `black-translucent`: translucent draws a *white* clock
+  straight over the app bar, which is also white.
+- Taps have no grey flash box — `-webkit-tap-highlight-color` is off — so
+  every row that can be pressed has its own `:active` state instead, and
+  controls don't select their own label or raise the copy bubble under a
+  resting thumb. The layout respects the home indicator via safe-area insets.
 - Icons are one inline SVG set drawn on a single grid — no icon font, no CDN,
   no emoji, so nothing renders differently on somebody's phone.
 - The bottom tab bar stays at five tabs at most, which is why the building

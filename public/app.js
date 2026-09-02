@@ -1132,7 +1132,9 @@ async function renderCleanerHome() {
   const today = state.config.today;
   const [{ buildings }, roster] = await Promise.all([
     api(`/overview?day=${today}`),
-    api(`/roster?from=${today}&days=1`).catch(() => ({ shifts: [] })),
+    // null, not an empty roster: a failed request must not be mistaken for
+    // "you aren't on today", which is a thing the screen now says out loud.
+    api(`/roster?from=${today}&days=1`).catch(() => null),
   ]);
   if (!live()) return;
   // "Today, Tue 12 Aug" is a fact they can act on; a greeting is not.
@@ -1144,7 +1146,7 @@ async function renderCleanerHome() {
   const rest = buildings.filter((b) => !b.scheduled);
 
   const doneCount = todays.filter((b) => b.completed_at).length;
-  const myShifts = (roster.shifts ?? []).filter((s) => s.user_id === state.user.id);
+  const myShifts = roster ? (roster.shifts ?? []).filter((s) => s.user_id === state.user.id) : null;
 
   const left = todays.length - doneCount;
   const pct = todays.length ? Math.round((doneCount / todays.length) * 100) : 0;
@@ -1165,12 +1167,16 @@ async function renderCleanerHome() {
           <i style="width:${pct}%"></i></div>
           <p class="tiny muted gap-top-sm">${doneCount} of ${todays.length} done today</p>` : ''}
       </div>
-      ${myShifts.length ? `<div class="banner info">
+      ${myShifts?.length ? `<div class="banner info">
         <strong>You're on ${myShifts.map((s) =>
           esc(timeRange(s.start_time, s.end_time))).join(' and ')}</strong>
         ${myShifts.some((s) => s.note)
           ? `<div class="tiny">${
             myShifts.filter((s) => s.note).map((s) => esc(s.note)).join(' · ')}</div>` : ''}
+      </div>` : myShifts ? `<div class="banner warn">
+        <strong>You're not on today</strong>
+        <div class="tiny">Nothing is rostered to you. Check the roster if that
+          looks wrong.</div>
       </div>` : ''}
     </div>
 

@@ -52,6 +52,8 @@
 
   --tap: 44px;
   --bar-h: 52px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --bar-total: calc(var(--bar-h) + var(--safe-top));
 
   --ring: 0 0 0 2px var(--card), 0 0 0 4px color-mix(in srgb, var(--accent) 55%, transparent);
   --lift: 0 8px 28px rgb(16 20 28 / .14);
@@ -110,7 +112,21 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-button, .tile, .task, .cell, .person { touch-action: manipulation; }
+body {
+  touch-action: manipulation; /* kills double-tap zoom; pinch still works */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Controls shouldn't select their own label or raise the copy/define bubble
+   when a thumb rests on them. Content text stays selectable. */
+button, .btn, .tile, .crow, .task, .cell, .persontile, .card-toggle, .grouphead {
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* With the tap highlight gone, every row has to say it was pressed. */
+.tile:active, .crow:active, .task:active, .persontile:active,
+.card-toggle:active, .brow:active { background: var(--line-2); }
 
 :focus-visible { outline: none; box-shadow: var(--ring); border-radius: var(--r); }
 
@@ -145,7 +161,7 @@ button, .tile, .task, .cell, .person { touch-action: manipulation; }
   align-items: center;
   justify-content: center;
   gap: var(--s2);
-  padding: 7px var(--s4);
+  padding: calc(7px + var(--safe-top)) var(--s4) 7px;
   background: var(--warn-wash);
   color: var(--warn);
   font-size: 12.5px;
@@ -163,8 +179,8 @@ header.bar {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  min-height: var(--bar-h);
-  padding: 6px var(--s4);
+  min-height: var(--bar-total);
+  padding: calc(6px + var(--safe-top)) var(--s4) 6px;
   padding-left: max(var(--s4), env(safe-area-inset-left));
   padding-right: max(var(--s4), env(safe-area-inset-right));
   background: var(--card);
@@ -267,7 +283,7 @@ header.bar h1 {
 /* Section nav */
 nav.nav {
   position: sticky;
-  top: var(--bar-h);
+  top: var(--bar-total);
   z-index: 15;
   display: flex;
   gap: var(--s1);
@@ -321,6 +337,8 @@ main {
 }
 
 main.wide { max-width: 1320px; }
+
+header.bar[hidden] ~ main { padding-top: calc(var(--s4) + var(--safe-top)); }
 
 /* -------------------------------------------------------------- cards */
 
@@ -878,7 +896,7 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
    never needs a scroll back to the top. */
 .progresshead {
   position: sticky;
-  top: var(--bar-h);
+  top: var(--bar-total);
   z-index: 12;
   background: var(--card);
   border-bottom: 1px solid var(--line);
@@ -1338,26 +1356,6 @@ table.avail td.dimmed { opacity: .28; }
 .pinslots > i.on { background: var(--accent); border-color: var(--accent); }
 .pinslots.working { opacity: .5; }
 
-.person {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  width: 100%;
-  padding: 11px var(--s4);
-  border: none;
-  border-top: 1px solid var(--line-2);
-  border-radius: 0;
-  background: none;
-  text-align: left;
-  min-height: 58px;
-  font-weight: 400;
-}
-
-.person:first-of-type { border-top: none; }
-.person:hover { background: var(--hover); }
-.person .pname { display: block; font-weight: 620; font-size: 14.5px; }
-.person .prole { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 650; }
-
 .installhint {
   display: flex;
   align-items: center;
@@ -1553,7 +1551,7 @@ code.phrase {
 /* On a phone the checklist is the whole screen, so its progress line sits
    directly under the app bar with nothing between. */
 @media (max-width: 767px) {
-  .progresshead { top: var(--bar-h); }
+  .progresshead { top: var(--bar-total); }
 }
 
 /* ============================================================= printing */
