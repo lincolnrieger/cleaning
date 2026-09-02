@@ -149,11 +149,17 @@ That screen disappears permanently the moment the first account exists — nobod
 else can use it to make themselves an admin.
 
 Then tap **People** and add your cleaners and office staff. Each person gets
-their own PIN; that PIN is how the app knows who cleaned what.
+their own PIN; tapping your name and entering it is how the app knows who
+cleaned what.
 
 **Use 6-digit PINs.** Four digits is guessable, and everyone at camp shares one
 internet connection, so the app can't lock out attackers as aggressively as it
 otherwise would.
+
+Everyone signs in once on their own phone and stays signed in — the session
+lasts 90 days and renews itself with use — so the PIN is a one-off, not a
+daily ritual. If a phone goes missing, switch that person off under **People**;
+their access stops on the next request.
 
 ---
 

@@ -27,6 +27,7 @@ const TABLES = [
      name       TEXT    NOT NULL,
      role       TEXT    NOT NULL CHECK (role IN ('cleaner', 'office', 'admin')),
      pin_hash   TEXT    NOT NULL UNIQUE,
+     pin_length INTEGER NOT NULL DEFAULT 0,
      active     INTEGER NOT NULL DEFAULT 1,
      availability TEXT  NOT NULL DEFAULT '1111111',
      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -598,6 +599,11 @@ async function migrate(env, waitUntil) {
   await ensureColumn(db, 'buildings', 'grp', "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(db, 'users', 'availability', "TEXT NOT NULL DEFAULT '1111111'");
   await ensureColumn(db, 'tasks', 'photo_mode', "TEXT NOT NULL DEFAULT 'none'");
+  // How many digits the PIN is - the sign-in pad draws that many slots and
+  // submits on the last one. Not recoverable from the hash, so people who
+  // predate this column read 0 until their PIN is next set, and the pad falls
+  // back to a Go button for them.
+  await ensureColumn(db, 'users', 'pin_length', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'schedule', 'clean_type', "TEXT NOT NULL DEFAULT 'full'");
   await ensureColumn(db, 'maintenance', 'location', "TEXT NOT NULL DEFAULT ''");
 

@@ -31,15 +31,29 @@ browser, no software to install and no commands to run.
 | Add people, set PINs, delete accounts | — | — | ✅ |
 | Edit buildings and their checklists | — | — | ✅ |
 
-Everyone signs in with a 4–8 digit PIN. PINs are unique — the PIN *is* the
-identity, which is what makes attribution work without usernames. The header
-shows who is signed in, their role, and a colour-coded initials badge.
+### Signing in
+
+**Tap your name, then your PIN.** The sign-in screen opens on a grid of
+everyone's names and initials badges; tapping one asks for *that person's*
+PIN, on a pad that shows the right number of slots and signs you in on the
+last digit. No typing, no username, and — because the PIN is checked against
+the person you picked — a fumbled digit can never sign you in as a colleague
+and put their name on your morning's work.
+
+**And then it stops asking.** A session lasts 90 days and renews itself
+whenever it's a month old, so a phone in regular use is signed in once and
+never again. Sign out from the header when you hand a phone back; switching
+someone off under **People** cuts their access on the next request, which is
+what to do about a lost one.
+
+The header shows who is signed in, their role, and a colour-coded initials
+badge.
 
 ### Test mode
 
-**People → Sign-in** has a switch that replaces the PIN pad with a list of
-names — tap yourself and you're in. It makes setting up and demonstrating the
-app much quicker.
+**People → Sign-in** has a switch that drops the PIN step — tap your name and
+you're straight in. It makes setting up and demonstrating the app much
+quicker.
 
 It is also a wide open door: anyone with the link can sign in as anyone,
 including an admin. While it's on, an orange banner sits across the top of
@@ -577,8 +591,14 @@ This is sized for a small team, not a bank.
 
 - PINs are hashed before storage, so a database dump doesn't hand over working
   PINs. Two people can't share a PIN — the app says so rather than failing.
-- Sessions are signed tokens that expire after 14 hours — long enough for a
-  shift, short enough that a shared phone doesn't stay signed in for a week.
+- A PIN is checked against the person whose name was tapped, so a mistype
+  fails rather than signing you in as whoever happens to own those digits.
+- Sessions are signed tokens lasting 90 days, renewed once they are a month
+  old. A phone in regular use never asks again; one that stops being used
+  expires on its own. Sign out on a shared phone, and switch the person off
+  under **People** if one goes missing.
+- The sign-in screen lists staff names and how many digits each PIN is. That
+  is the price of tap-your-name, and the throttle below is what covers it.
 - Deactivating someone in **People** cuts their access on their next request,
   not whenever their token happens to expire.
 - The last active admin can't disable or demote themselves, so you can't lock
