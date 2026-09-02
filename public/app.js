@@ -204,11 +204,32 @@ class ApiError extends Error {
   }
 }
 
+/**
+ * Every request currently in the air, oldest first.
+ *
+ * The screen used to sit on "Loading…" with no way for anyone - the person
+ * holding the phone, or me reading their screenshot - to see WHICH request it
+ * was waiting on. Now it can be named.
+ */
+const inflight = new Set();
+window.__inflight = () => [...inflight].map((r) => `${r.path} (${
+  Math.round((Date.now() - r.at) / 1000)}s)`);
+
+/** A request that never settles is a spinner that never stops. */
+const REQUEST_TIMEOUT_MS = 30_000;
+const UPLOAD_TIMEOUT_MS = 120_000;
+
 async function request(path, { method = 'GET', body, raw, contentType } = {}) {
   const headers = {};
   if (state.token) headers.authorization = `Bearer ${state.token}`;
   if (body && !raw) headers['content-type'] = 'application/json';
   if (contentType) headers['content-type'] = contentType;
+
+  const track = { path, at: Date.now() };
+  inflight.add(track);
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(),
+    raw ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
 
   let res;
   try {
@@ -216,13 +237,19 @@ async function request(path, { method = 'GET', body, raw, contentType } = {}) {
       method,
       headers,
       body: raw ? body : body ? JSON.stringify(body) : undefined,
+      signal: stop.signal,
     });
   } catch {
     // "Failed to fetch" is the browser talking to itself. Out at a bell tent
     // with one bar, what is actually true is worth saying instead.
-    throw new Error(navigator.onLine
-      ? 'Could not reach the site. Check your signal and try again.'
-      : 'No connection. The app needs signal to load the day\'s work.');
+    throw new Error(stop.signal.aborted
+      ? `The server did not answer in time (${path}). Please try again.`
+      : navigator.onLine
+        ? 'Could not reach the site. Check your signal and try again.'
+        : 'No connection. The app needs signal to load the day\'s work.');
+  } finally {
+    clearTimeout(timer);
+    inflight.delete(track);
   }
 
   if (res.status === 401 && state.token) {
@@ -3623,9 +3650,56 @@ async function refreshToken() {
   } catch { /* the token we have still works */ }
 }
 
+/**
+ * The app's own "still working" screen, shown the moment it takes the page
+ * over.
+ *
+ * Every view fetches before it draws, so until the first response landed the
+ * page kept index.html's boot text - and after ten seconds that turned into
+ * "the app hasn't started", which was never true and told nobody anything.
+ * This paints straight away, and if it is still up after eight seconds it
+ * names the request it is waiting on, which is the fact everybody has been
+ * guessing at.
+ */
+function showLoading() {
+  app.innerHTML = `<div class="card"><div class="pad center stack">
+    <p class="muted" id="loadmsg">Loading today…</p>
+  </div></div>`;
+
+  const since = Date.now();
+  let asked = false;
+  // One timer: it stops itself the moment a real screen replaces this node.
+  const tick = setInterval(() => {
+    const msg = $('#loadmsg');
+    if (!msg) return clearInterval(tick);
+
+    const secs = Math.round((Date.now() - since) / 1000);
+    if (secs < 8) return;
+
+    const waiting = window.__inflight();
+    msg.innerHTML = `<strong>Still loading — ${secs}s.</strong><br>
+      <span class="small">${waiting.length
+        ? `Waiting on ${esc(waiting.join(', '))}`
+        : 'Waiting on the server.'}</span>`;
+
+    if (!asked) {
+      asked = true;
+      const retry = document.createElement('button');
+      retry.className = 'wide gap-top';
+      retry.textContent = 'Try again';
+      retry.onclick = () => location.reload();
+      msg.after(retry);
+    }
+  }, 1000);
+}
+
 async function render() {
   stopPolling();
   closeSheet();
+  // Only while index.html's boot text is still what's on screen: on every
+  // later render there is already a screen, and flashing this over it would
+  // be a step backwards.
+  if ($('#booting')) showLoading();
 
   try {
     await loadConfig();
