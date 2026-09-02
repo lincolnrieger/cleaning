@@ -627,13 +627,32 @@ async function migrate(env, waitUntil) {
     // after that deploy was paying for all of them before it answered - long
     // enough that the page gave up and said the app hadn't started. The
     // tables above must exist before anything is served; this doesn't, so it
-    // runs behind the response. The version is only written once it lands, so
-    // a failure just means the next request tries again.
-    // Logged rather than swallowed: behind the response, a rejection would
-    // otherwise be invisible, and a checklist that quietly never syncs is
-    // indistinguishable from one the file no longer owns.
-    const job = applyChecklistFile(db).catch((err) => console.error('checklist sync', err));
-    if (waitUntil) waitUntil(job); else await job;
+    // runs behind the response.
+    //
+    // The attempt is claimed BEFORE the work, and only retried every ten
+    // minutes. The version is still written on success, so nothing is skipped
+    // that worked - but a sync that fails can no longer be restarted by every
+    // cold isolate that comes along, which turns one bad write into hundreds
+    // of them and takes the database down with it.
+    const [tried, at] = String(await readSetting(db, 'checklist_attempt', '')).split('|');
+    const due = tried !== version || Date.now() - Number(at || 0) > 10 * 60_000;
+
+    if (due) {
+      await writeSetting(db, 'checklist_attempt', `${version}|${Date.now()}`);
+      setup.syncing = true;
+      const job = applyChecklistFile(db).then(
+        () => { setup.syncing = false; setup.syncError = ''; },
+        (err) => {
+          // Recorded rather than swallowed: behind the response a rejection is
+          // invisible, and a checklist that quietly never syncs looks exactly
+          // like one the file no longer owns.
+          setup.syncing = false;
+          setup.syncError = err.message;
+          console.error('checklist sync', err);
+        },
+      );
+      if (waitUntil) waitUntil(job); else await job;
+    }
   }
 
   // Old rate-limit rows serve no purpose once their lockout has expired, and
@@ -658,10 +677,49 @@ async function migrate(env, waitUntil) {
 // Cached per isolate: the work above happens once, not once per request.
 let pending = null;
 
+/**
+ * What the setup step is doing, for GET /health to report.
+ *
+ * That route answers without waiting on any of this, which is the point: when
+ * the database is the thing that is stuck, something still has to be able to
+ * say so.
+ */
+const setup = { ready: false, startedAt: 0, error: '', syncing: false, syncError: '' };
+
+export const setupState = () => ({ ...setup, waitedMs: setup.startedAt ? Date.now() - setup.startedAt : 0 });
+
+/**
+ * Setup that never finishes is worse than setup that fails: every request in
+ * the isolate waits on the same promise, so the site answers nothing at all
+ * and the page can only say it is still waiting. This turns that into a
+ * sentence. The work already sent to the database carries on regardless, and
+ * every step of it is idempotent, so the retry picks up where this left off.
+ */
+const SETUP_TIMEOUT_MS = 20_000;
+
+function withTimeout(promise) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('The database is taking too long to set up. Please try again.')),
+        SETUP_TIMEOUT_MS,
+      );
+    }),
+  ]);
+}
+
 export function ensureReady(env, waitUntil) {
   if (!pending) {
-    pending = migrate(env, waitUntil).catch((err) => {
+    setup.startedAt = Date.now();
+    setup.error = '';
+    pending = withTimeout(migrate(env, waitUntil)).then((key) => {
+      setup.ready = true;
+      return key;
+    }, (err) => {
       pending = null; // let the next request retry rather than wedging the site
+      setup.error = err.message;
       throw err;
     });
   }
