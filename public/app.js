@@ -1552,6 +1552,10 @@ async function renderBuilding(id, wantType) {
   // an explicit fact rather than the absence of a banner.
   const mismatch = data.scheduledType && data.scheduledType !== type;
   const unplanned = !data.scheduledType;
+  // No entries is a legitimate setup: some buildings are one job, and a list
+  // of one line saying "clean it" helps nobody. There is nothing to measure,
+  // so the progress line goes and the sign-off is the whole screen.
+  const nothingToTick = !data.items.length;
 
   app.innerHTML = `
     <div class="card">
@@ -1578,6 +1582,7 @@ async function renderBuilding(id, wantType) {
       <p class="pad tight small" id="signoff" hidden></p>
     </div>
 
+    ${nothingToTick ? '' : `
     <!-- Follows you down the list, so "how far am I" never needs a scroll up. -->
     <div class="progresshead">
       <div class="progresshead-inner">
@@ -1585,16 +1590,17 @@ async function renderBuilding(id, wantType) {
         <span class="small muted nowrap">${esc(dayLabel(day))}</span>
       </div>
       <div class="meter" id="meter"><i></i></div>
-    </div>
+    </div>`}
 
     <div class="card" id="items">
-      ${data.items.length
-        ? data.items.map((t) => taskRow(t, locked)).join('')
-        : `<div class="empty"><b>Nothing on this checklist</b>
-           The office can add areas under Checklists.</div>`}
+      ${nothingToTick
+        ? `<div class="empty"><b>Nothing to tick here</b>
+           Clean it, then mark it complete below.${state.user.role === 'admin'
+             ? ' Areas can be added under Checklists whenever you want them.' : ''}</div>`
+        : data.items.map((t) => taskRow(t, locked)).join('')}
     </div>
-    ${data.items.length ? `<p class="tiny muted center">
-      Tick each area as you finish it — what it covers is listed under it.</p>` : ''}
+    ${nothingToTick ? '' : `<p class="tiny muted center">
+      Tick each area as you finish it — what it covers is listed under it.</p>`}
 
     <div class="card" id="issues" hidden><h2>Open issues here</h2><div id="issuelist"></div></div>
 
@@ -1645,8 +1651,11 @@ async function completeBuilding(id, day, type, data, locked) {
       : left
         ? `<strong>${left}</strong> item${left === 1 ? ' is' : 's are'} still unticked.
            You can still mark it done — the office sees ${done} of ${total} ticked.`
-        : `All <strong>${total}</strong> items are ticked. The office will see it
-           as finished.`,
+        : total
+          ? `All <strong>${total}</strong> items are ticked. The office will see it
+             as finished.`
+          : 'There is nothing to tick here, so this is the whole job. The office '
+            + 'will see it as finished.',
     confirmText: undo ? 'Reopen' : 'Yes, all done',
   });
   if (!go) return;
@@ -1839,10 +1848,15 @@ function paintBuilding(data, locked) {
   const { done, total } = counts(data);
   const pct = total ? Math.round((done / total) * 100) : 0;
 
-  $('#count').textContent = `${done} of ${total} done`;
+  // Absent on a building with nothing to tick, where there is no progress to
+  // draw in the first place.
+  const count = $('#count');
   const meter = $('#meter');
-  meter.classList.toggle('full', pct === 100);
-  meter.firstElementChild.style.width = `${pct}%`;
+  if (count) count.textContent = `${done} of ${total} done`;
+  if (meter) {
+    meter.classList.toggle('full', pct === 100);
+    meter.firstElementChild.style.width = `${pct}%`;
+  }
 
   const signoff = $('#signoff');
   signoff.hidden = !data.completed;
@@ -2732,6 +2746,14 @@ async function renderChecklistAdmin() {
 
   const groups = groupBuildings(data.buildings);
 
+  // Buildings with nothing on this list. Worth flagging when it looks like an
+  // oversight - not when every building is empty, which is a park being set up
+  // from scratch, or run on sign-off alone, and where a wall of orange pills
+  // helps nobody.
+  const active = data.buildings.filter((b) => b.active);
+  const empties = active.filter((b) => !itemsFor(b.id).length);
+  const oversight = empties.length > 0 && empties.length < active.length;
+
   const buildingRow = (b, groupKey, folded) => {
     const items = itemsFor(b.id);
     const search = [b.name, b.grp, ...items.map((t) => t.item)].join(' ').toLowerCase();
@@ -2745,7 +2767,9 @@ async function renderChecklistAdmin() {
       </div>
       <div class="small muted">
         ${items.length ? esc(items.map((t) => t.item).join(' · '))
-          : '<span class="pill late">empty</span>'}
+          : oversight
+            ? '<span class="pill late">empty</span>'
+            : 'No list — sign-off only'}
       </div>
       <div class="tiny muted">
         ${items.length} on the ${esc(typeLabel(type))} ·
@@ -2774,21 +2798,15 @@ async function renderChecklistAdmin() {
     });
   }
 
-  const empties = data.buildings.filter((b) => b.active && !itemsFor(b.id).length);
-
-  // Only the two states somebody has to act on get a banner. "Edited in the
-  // app, and the file matches" is the steady state - saying so on every visit
-  // was noise.
-  const notice = data.source === 'app'
-    ? (data.fileDiffers
-      ? `<strong>The checklist file has changed, and it is not being applied.</strong>
-         These checklists were edited in the app, so <code>data/checklist.json</code>
-         stopped overwriting them. To take what the file now says, use
-         <strong>Restore from the checklist file</strong> at the bottom of this page.`
-      : '')
-    : `<strong>Managed by the checklist file.</strong> The first edit you make here
-       takes over, and <code>data/checklist.json</code> stops being applied — so a
-       later deploy can't quietly undo your work.`;
+  // One banner, for the one state somebody has to act on: the file has moved
+  // on and the app is ignoring it, which otherwise looks exactly like a deploy
+  // that never happened.
+  const notice = data.source === 'app' && data.fileDiffers
+    ? `<strong>The checklist file has changed, and it is not being applied.</strong>
+       These checklists were edited in the app, so <code>data/checklist.json</code>
+       stopped overwriting them. To take what the file now says, use
+       <strong>Restore from the checklist file</strong> at the bottom of this page.`
+    : '';
 
   app.innerHTML = `
     ${notice ? `<div class="card"><div class="banner warn">${notice}</div></div>` : ''}
@@ -2800,7 +2818,7 @@ async function renderChecklistAdmin() {
       </div>
       <h2>
         ${esc(typeLabel(type))} — ${data.buildings.filter((b) => b.active).length} buildings</h2>
-      ${empties.length ? `<div class="pad">
+      ${oversight ? `<div class="pad">
         <div class="banner warn">
           <strong>${empties.length} building${empties.length === 1 ? ' has' : 's have'} no
           ${esc(typeLabel(type))} checklist:</strong>
@@ -2827,11 +2845,15 @@ async function renderChecklistAdmin() {
 
     <div class="card danger">
       <h2>Restore from the checklist file</h2>
-      <div class="pad">
+      <div class="pad stack">
         <p class="small muted">Throws away edits made here and
           rebuilds <strong>both</strong> checklists from <code>data/checklist.json</code>.
           Cleaning history is not affected.</p>
         <button class="wide danger" id="restore">Restore from file</button>
+        <p class="small muted">Or empty the park completely and start again.
+          This one takes the buildings, their checklists and every record of
+          them having been cleaned.</p>
+        <button class="wide destroy" id="wipe">Delete all buildings</button>
       </div>
     </div>`;
 
@@ -2856,6 +2878,28 @@ async function renderChecklistAdmin() {
       applyChecklistFilter($('#search').value.trim().toLowerCase());
     });
   });
+
+  $('#wipe').onclick = async () => {
+    const typed = await askText({
+      title: 'Delete every building?',
+      body: `All <strong>${data.buildings.length}</strong> buildings go, with their
+        checklists, their photos, their schedule and every record of them having
+        been cleaned. <strong>There is no undo.</strong> The checklist file stops
+        being applied, so a later deploy won't put them back.`,
+      label: 'Type "delete all" to confirm',
+      confirmText: 'Delete everything',
+    });
+    if (!typed) return;
+    try {
+      const r = await api('/admin/buildings/delete-all', {
+        method: 'POST', body: { confirm: typed },
+      });
+      toast(`Deleted ${r.deleted} building${r.deleted === 1 ? '' : 's'}`);
+      renderChecklistAdmin();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
 
   $('#restore').onclick = async () => {
     const typed = await askText({

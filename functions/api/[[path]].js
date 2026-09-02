@@ -1738,6 +1738,49 @@ const routes = {
   },
 
   /**
+   * Clears the park out entirely, for starting again from an empty screen.
+   *
+   * Takes ownership of the checklist on the way out, or the next deploy would
+   * simply put back everything the file still lists - which would read as the
+   * button not having worked.
+   */
+  'POST /admin/buildings/delete-all': async (req, env, { user }) => {
+    require(user, 'admin');
+    const { confirm } = await req.json();
+    if (clean(confirm, 40).toLowerCase() !== 'delete all') {
+      throw new HttpError(400, 'Type "delete all" to confirm.');
+    }
+
+    const { results: buildings } = await env.DB.prepare('SELECT id FROM buildings').all();
+    const { results: photos } = await env.DB.prepare(
+      'SELECT photo_key FROM task_photos',
+    ).all();
+    const { results: reportPhotos } = await env.DB.prepare(
+      'SELECT photo_key FROM maintenance WHERE photo_key IS NOT NULL',
+    ).all();
+
+    // Every table that hangs off a building, cleared by hand: D1 does not
+    // enforce ON DELETE CASCADE.
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM task_photos'),
+      env.DB.prepare('DELETE FROM task_log'),
+      env.DB.prepare('DELETE FROM tasks'),
+      env.DB.prepare('DELETE FROM schedule'),
+      env.DB.prepare('DELETE FROM building_status'),
+      env.DB.prepare('DELETE FROM maintenance'),
+      env.DB.prepare('DELETE FROM activity'),
+      env.DB.prepare('DELETE FROM buildings'),
+    ]);
+
+    await dropPhotos(env, [
+      ...photos.map((p) => p.photo_key),
+      ...reportPhotos.map((p) => p.photo_key),
+    ]);
+    await ownChecklist(env);
+    return json({ ok: true, deleted: buildings.length });
+  },
+
+  /**
    * Puts a building's Full Clean list onto its Check list, or the other way
    * round. Rather than copying rows, an entry that is on one list is promoted
    * to "both" - same row, so every tick and photo it has ever recorded stays

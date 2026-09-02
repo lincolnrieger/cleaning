@@ -78,8 +78,14 @@ ever needs a genuinely different quick pass, give it its own `check` list in
 
 ### What's on a checklist
 
-**Broad areas, not individual jobs.** A building is its rooms — *Bathroom*,
-*Kitchen*, *Dorms*, *Lower Bathrooms* — not the jobs inside them. What an area
+**A building doesn't need a checklist at all.** Plenty are one job: turn up,
+clean it, mark it done. A building with no entries drops the tick list and the
+progress bar and leaves the sign-off, so that is exactly what it asks for —
+and areas can be added to it later without anything being reset.
+
+**Broad areas, not individual jobs.** Where a building does earn a list, it is
+its rooms — *Bathroom*, *Kitchen*, *Dorms*, *Lower Bathrooms* — not the jobs
+inside them. What an area
 covers (toilets, surfaces, refilling dispensers) goes in the note printed
 under it, so a cleaner can see what it takes in without it becoming five more
 boxes to tick. The app records that the area was done, by whom, and when.
@@ -161,12 +167,16 @@ over their work.
 
 **The first edit you make in the app takes over.** After that
 `data/checklist.json` stops being applied on deploy, so a later push can't
-quietly undo your work. The banner at the top of the page tells you which is
-in charge, and says so plainly when the file has changed and is *not* being
-applied — the case that otherwise looks exactly like a deploy that didn't
-work. **Restore from file** hands it back and rewrites the checklists there
-and then: anything you added that isn't in the file becomes hidden, and
-cleaning history is untouched either way.
+quietly undo your work. A banner appears for the one case worth acting on: the
+file has changed and is *not* being applied, which otherwise looks exactly
+like a deploy that didn't work. **Restore from file** hands it back and
+rewrites the checklists there and then: anything you added that isn't in the
+file becomes hidden, and cleaning history is untouched either way.
+
+Under it, **Delete all buildings** empties the park outright — buildings,
+checklists, photos, schedule and every record of them having been cleaned —
+behind a typed confirmation. It takes ownership on the way out, so a later
+deploy won't quietly put back everything the file still lists.
 
 So: use the file for bulk changes, use the screen for day-to-day tweaks, and
 don't expect both at once.
@@ -529,11 +539,10 @@ watching a spinner to be certain they have this morning's build.
 `data/checklist.json` is where a whole park's worth of buildings can be
 written in one go, both checklists for each of them, and applied on deploy.
 
-**Right now it holds one building called *Test*, on purpose.** The real
-buildings and their checklists are being built on the **Checklists** screen
-instead, which takes ownership the moment the first edit is made there. The
-Test entry stays as a working example of the shape, and as a way to check the
-file still reaches the app at all.
+**Right now it holds the park's buildings by name, with no entries.** That is
+deliberate: each one is sign-off only until somebody decides it needs a list,
+and lists get built on the **Checklists** screen, which takes ownership the
+moment the first edit is made there.
 
 It has three parts:
 
