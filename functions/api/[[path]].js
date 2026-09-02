@@ -2,7 +2,7 @@
 // Single Cloudflare Pages Function handling every /api/* route.
 
 import {
-  ensureReady, applyChecklistFile, checklistVersion,
+  ensureReady, setupState, applyChecklistFile, checklistVersion,
   contacts, CLEAN_TYPES, CLEAN_TYPE_LABELS, isCleanType, PHOTO_MODES,
 } from './_setup.js';
 
@@ -474,6 +474,10 @@ async function rosterConflicts(env, { userId, day, from, to, ignoreId = null }) 
 
 const routes = {
   /* --- session --- */
+
+  // Handled before the setup step in onRequest; this entry only exists so the
+  // unknown-endpoint check lets it past.
+  'GET /health': async () => json({ ok: true }),
 
   'GET /config': async (_req, env) => {
     const bootstrapped = await env.DB.prepare('SELECT 1 FROM users LIMIT 1').first();
@@ -2085,11 +2089,19 @@ export async function onRequest(context) {
 
   if (!handler) return fail(404, `No such endpoint: ${key}`);
 
+  // Answered before the setup step and without touching the database, so
+  // there is always something that replies even when the database is the
+  // thing that is stuck. If this answers and /config does not, the problem is
+  // the setup step; if neither answers, the problem is upstream of the app.
+  if (key === 'GET /health') return json({ ok: true, ...setupState() });
+
   try {
     // Creates the tables on the first request after a deploy; a no-op on
     // every request after that. Rewriting the checklist from the file is
     // handed to waitUntil, so a big edit never sits in front of a page load.
-    signingKey = await ensureReady(env, waitUntil);
+    // Wrapped rather than passed bare: waitUntil is a method, and calling it
+    // detached from its context throws on some runtimes.
+    signingKey = await ensureReady(env, (p) => waitUntil(p));
   } catch (err) {
     console.error('setup', err);
     return fail(503, err.message);

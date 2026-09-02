@@ -13,6 +13,7 @@
      a status bar iOS keeps clear of the page, and the launcher name.
      Deliberately NOT black-translucent: that draws a white clock straight over
      the app bar, which is white. -->
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Cleaning">
@@ -80,11 +81,11 @@
     const el = alive();
     if (!el) return; // the app took over, as it should
 
-    // Show the panel and its two ways out straight away, then fill in the
-    // reason as the checks below come back - a screen that says nothing while
-    // it works out what is wrong is the problem we are fixing.
+    // Show the panel and its two ways out straight away, then narrate as the
+    // checks come back. A screen that says nothing while it works out what is
+    // wrong is the problem being fixed here.
     el.innerHTML = '<strong>The app hasn\'t started yet.</strong><br>'
-      + '<span id="bootwhy">Still waiting on the server…</span><br>'
+      + '<span id="bootwhy">Checking what is wrong…</span><br>'
       + '<button id="bootretry">Try again</button> '
       + '<button id="bootreset">Reset and reload</button>';
     document.getElementById('bootretry').onclick = () => location.reload();
@@ -110,34 +111,48 @@
         .finally(() => clearTimeout(timer));
     };
 
-    // Which of the three is it: a broken app file, a server that refuses, or
-    // a server that is merely slow? Say which, rather than leaving anyone to
-    // guess from a blank screen.
     if (window.__bootError) return why(`The app reported: ${window.__bootError}`);
 
+    // /health answers without touching the database, so it separates "the
+    // site is down" from "the database step is stuck", which look identical
+    // from here otherwise.
+    why('Checking the server…');
+    let health = null;
     try {
-      const res = await get('/app.js', 8000);
-      if (!res.ok) return why(`The app file failed to load (${res.status}).`);
+      const res = await get('/api/health', 8000);
+      if (res.ok) health = await res.json().catch(() => null);
+      else if (res.status === 404) health = { legacy: true };
+      else return why(`The server is up but returned ${res.status}.`);
     } catch {
-      return why('No connection to the site.');
+      return why('The server is not answering at all. It may be mid-deploy, '
+        + 'or this device is offline — try again in a minute.');
     }
 
+    if (health && health.error) {
+      return why(`The server could not set itself up: ${health.error}`);
+    }
+    if (health && health.syncError) {
+      why(`The checklist did not load: ${health.syncError}`);
+    }
+
+    why('The server is up. Waiting on it to answer…');
     const started = Date.now();
     try {
-      const res = await get('/api/config', 25000);
+      const res = await get('/api/config', 20000);
       const took = Math.round((Date.now() - started) / 1000);
       if (res.ok) {
-        why(`The server took ${took}s to answer. It sets itself up after an `
-          + 'update, so give it a moment and try again.');
+        why(`The server answered after ${took}s, which was too slow for the `
+          + 'page. Try again — it is usually only the first load after an update.');
       } else {
         const body = await res.json().catch(() => ({}));
         why(`The server said: ${body.error || `error ${res.status}`}`);
       }
     } catch {
-      why('The server did not answer. It may still be setting itself up after '
-        + 'an update — try again in a minute.');
+      why('The server is up, but setting up the database is taking too long. '
+        + 'Try again in a minute; if it keeps happening the database binding '
+        + 'is the thing to check.');
     }
-  }, 15000);
+  }, 10000);
 </script>
 <script src="/app.js"></script>
 </body>
