@@ -1,23 +1,41 @@
 {
-  "_comment": "THIS FILE IS THE STARTING CHECKLIST. Edit it on GitHub and commit - the site redeploys and picks up the changes by itself, until the first edit is made inside the app (Checklists screen), after which the app owns them and this file stops being applied. \"Restore from the checklist file\" on that screen hands control back and rewrites everything from here. Each building has a flat list of things to tick off - broad areas, not individual jobs. An entry is [\"Name\"], or [\"Name\", \"Optional note\"], and can take a third value: \"photo\" to allow a photo against it, or \"photo required\" to insist on one.",
+  "_comment": "THIS FILE IS THE STARTING CHECKLIST. Edit it on GitHub and commit - the site redeploys and picks up the changes by itself, until the first edit is made inside the app (Checklists screen), after which the app owns them and this file stops being applied. \"Restore from the checklist file\" on that screen hands control back and rewrites everything from here. An entry is [\"Name\"], or [\"Name\", \"Optional note\"], and can take a third value: \"photo\" to allow a photo against it, or \"photo required\" to insist on one.",
   "contacts": {
     "office": "0402 930 714",
     "maintenance": "0437 316 386"
   },
-  "_everyVisit_note": "Added to the bottom of EVERY building's checklist, on both a Full Clean and a Check. Empty on purpose - the buildings are being built in the app instead.",
+  "_everyVisit_note": "Added to the bottom of EVERY building's checklist, on both a Full Clean and a Check. Empty on purpose: the buildings below have no entries either.",
   "everyVisit": [],
   "_cleaningTypes_note": "Every building has two checklists: \"full\" is the Full Clean, \"check\" is the quicker Check. An entry named on both lists is stored once and counts either way.",
-  "_buildings_note": "Deliberately down to one building with one item. The real buildings and checklists are being built on the Checklists screen in the app, which takes ownership the moment the first edit is made there. This entry stays as a working example of the shape, and as something to check the file still reaches the app at all.",
+  "_buildings_note": "Names only, with no entries. A building with an empty checklist is a deliberate setup, not an unfinished one: the app drops the tick list and the progress bar and leaves the sign-off, so it is turn up, do it, mark it complete. Add areas to any of them on the Checklists screen whenever they earn one - the first edit there takes ownership and this file stops being applied.",
   "buildings": [
-    {
-      "name": "Test",
-      "group": "",
-      "full": [
-        ["Test"]
-      ],
-      "check": [
-        ["Test"]
-      ]
-    }
+    { "name": "Rymill Centre", "group": "", "full": [], "check": [] },
+    { "name": "Lower Rymill Toilets", "group": "", "full": [], "check": [] },
+    { "name": "Lower Rymill Bag Room", "group": "", "full": [], "check": [] },
+    { "name": "Staff Toilet", "group": "", "full": [], "check": [] },
+    { "name": "Pem Fooks", "group": "", "full": [], "check": [] },
+    { "name": "Staff Room", "group": "", "full": [], "check": [] },
+    { "name": "Manor", "group": "", "full": [], "check": [] },
+    { "name": "Hooper Bunkhouse", "group": "", "full": [], "check": [] },
+    { "name": "Tank Room", "group": "", "full": [], "check": [] },
+    { "name": "WVR Toilets", "group": "", "full": [], "check": [] },
+    { "name": "Stags + Toilets", "group": "", "full": [], "check": [] },
+    { "name": "Chambers' Chalet", "group": "", "full": [], "check": [] },
+    { "name": "Hanson's Chalet", "group": "", "full": [], "check": [] },
+    { "name": "Stephen's Chalet", "group": "", "full": [], "check": [] },
+    { "name": "Bell Tent - Tube", "group": "", "full": [], "check": [] },
+    { "name": "Seeonee Acacia", "group": "", "full": [], "check": [] },
+    { "name": "Seeonee Banksia", "group": "", "full": [], "check": [] },
+    { "name": "Seeonee Bathrooms", "group": "", "full": [], "check": [] },
+    { "name": "St George", "group": "", "full": [], "check": [] },
+    { "name": "Gilwell", "group": "", "full": [], "check": [] },
+    { "name": "Brownsea", "group": "", "full": [], "check": [] },
+    { "name": "Bert's Toilets", "group": "", "full": [], "check": [] },
+    { "name": "Reception", "group": "", "full": [], "check": [] },
+    { "name": "Upstairs Office", "group": "", "full": [], "check": [] },
+    { "name": "Lones Hut", "group": "", "full": [], "check": [] },
+    { "name": "Wetland Viewing Room", "group": "", "full": [], "check": [] },
+    { "name": "Crew Quarters", "group": "", "full": [], "check": [] },
+    { "name": "Laundry", "group": "", "full": [], "check": [] }
   ]
 }
