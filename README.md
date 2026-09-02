@@ -78,18 +78,19 @@ ever needs a genuinely different quick pass, give it its own `check` list in
 
 ### What's on a checklist
 
-**Broad areas, not individual jobs.** Stags is *Bathroom* and *Kitchen*. The
-Manor is *Dorms*, *Corridor / Downstairs*, *Kitchen*, *Lower Bathrooms*,
-*Upper Bathrooms*. What belongs inside each area — toilets, surfaces,
-refilling dispensers — is the note printed under it, so the cleaner can see
-what it covers without it becoming five more boxes to tick. The app records
-that the area was done, by whom, and when.
+**Broad areas, not individual jobs.** A building is its rooms — *Bathroom*,
+*Kitchen*, *Dorms*, *Lower Bathrooms* — not the jobs inside them. What an area
+covers (toilets, surfaces, refilling dispensers) goes in the note printed
+under it, so a cleaner can see what it takes in without it becoming five more
+boxes to tick. The app records that the area was done, by whom, and when.
 
-Seeonee lists its four rooms as four areas for the same reason: when only the
-Acacia Room needs doing, the cleaner ticks that room and leaves the rest.
+Splitting a building into more areas is how you make part of it cleanable on
+its own: give a hall its four rooms as four areas and somebody sent to clean
+one of them ticks that room and leaves the rest.
 
-The *Every visit* block — litter, consumables, lost property, damage, secure —
-is appended to every building, on both checklists.
+A building's checklist can also carry an *Every visit* block — litter,
+consumables, damage, secure — appended to every building on both checklists.
+That comes from the checklist file rather than the screen.
 
 ### How a cleaner picks one — usually they don't
 
@@ -516,8 +517,14 @@ the connection drops for a moment.
 
 ## The checklist file
 
-`data/checklist.json` holds all 21 buildings across the park, and both
-checklists for each of them.
+`data/checklist.json` is where a whole park's worth of buildings can be
+written in one go, both checklists for each of them, and applied on deploy.
+
+**Right now it holds one building called *Test*, on purpose.** The real
+buildings and their checklists are being built on the **Checklists** screen
+instead, which takes ownership the moment the first edit is made there. The
+Test entry stays as a working example of the shape, and as a way to check the
+file still reaches the app at all.
 
 It has three parts:
 
