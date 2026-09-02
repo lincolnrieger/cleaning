@@ -3,13 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1f6feb">
+<!-- The strip behind the clock and battery, matched to the app bar sitting
+     under it rather than to a blue that no longer appears anywhere. -->
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171b22" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
 <!-- iOS ignores the manifest for "Add to Home Screen" polish, so these three
      tags carry the equivalent behaviour there: standalone (no browser chrome),
-     a dark status bar readable against the blue header, and the launcher name. -->
+     a status bar iOS keeps clear of the page, and the launcher name.
+     Deliberately NOT black-translucent: that draws a white clock straight over
+     the app bar, which is white. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Cleaning">
 <title>Woodhouse Cleaning</title>
 <link rel="manifest" href="/manifest.webmanifest">
