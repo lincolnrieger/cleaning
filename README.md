@@ -313,12 +313,15 @@ It's a clean A4 landscape sheet:
 
 | Staff | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
 |---|---|---|---|---|---|---|---|
-| Casey | 8am–4pm | 8am–4pm | OFF | 10am–6pm | 8am–4pm | OFF | OFF |
-| Dana | 10am–6pm | OFF | 8am–4pm | 8am–4pm | 10am–4pm | 9am–1pm | OFF |
+| Casey | 8am–4pm | 8am–4pm | — | 10am–6pm | 8am–4pm | — | — |
+| Dana | 10am–6pm | — | 8am–4pm | 8am–4pm | 10am–4pm | 9am–1pm | — |
 
-Navigation, buttons, filters and the app header are all removed, days someone
-isn't available read **OFF**, clashes carry a ⚠, and a staff member's row
-never splits across pages.
+Navigation, buttons, filters and the app header are all removed, clashes carry
+a ⚠, and a staff member's row never splits across pages. **On paper a square
+is either On or a dash.** The screen still separates "not available" (OFF)
+from "available, nobody rostered" (+), because the office is deciding there;
+the printed sheet is read by people who only need to know who is in, so both
+kinds of blank print as one dash and there is no key to decode.
 
 **For a PDF**, use the same button and choose *Save as PDF* as the printer —
 every browser and phone has it, and it produces the same layout. There's also
@@ -330,25 +333,29 @@ every browser and phone has it, and it produces the same layout. There's also
 
 **Planning → Buildings** is a week grid: buildings down the side, days across
 the top. Tap any square to put that building on the plan for that day, **pick
-Full Clean or Check** (the sheet shows how many items each is), give it a
-priority number, and add a note ("group arriving 2pm — finish by 1pm").
+Full Clean or Check** (the sheet shows how many items each is), optionally
+give it a priority number, and add a note ("group arriving 2pm — finish by
+1pm").
 
 **The plan says what needs cleaning and in what order — not who does it.**
 Who's in on a given day is the roster's job, and cleaners sort the buildings
 out between themselves on the day. That's one less thing to keep in step, and
 nobody is ever locked out of a building they weren't formally given.
 
-Each square shows its priority, an **F** or **C** badge for which clean, the
-office's note, and how it's going — green with a tick once it's signed off.
-Today's column is highlighted and weekends are shaded back.
+Each square shows its priority if it has one, an **F** or **C** badge for
+which clean, the office's note, and how it's going — green with a tick once
+it's signed off. Today's column is highlighted and weekends are shaded back.
 
 What that feeds:
 
-- **Cleaners** open the app to **To clean today**, in priority order — the
-  same list for everyone — each tile naming its checklist, the office's note,
-  and who has already started it so two people don't double up. Everything
-  unscheduled sits below. If they're rostered on, their shift times are at the
-  top of the screen.
+- **Cleaners** open the app to **Buildings** — what is on today, in priority
+  order, the same list for everyone — each tile naming its checklist, the
+  office's note, and who has already started it so two people don't double up.
+  Everything unscheduled sits below. If they're rostered on, their shift times
+  are at the top of the screen, along with **who else is on** that day. The
+  day picker at the top steps back and forward through the week, so "what's on
+  tomorrow?" is a tap rather than a phone call; ticking off stays a today-only
+  job, so another day's list is there to read, not to work from.
 - **The office overview** becomes a run sheet: scheduled buildings first in
   priority order with "4 of 4 left" at the top and unscheduled buildings in a
   second column. The percentage and task counts cover **only what is scheduled
@@ -358,10 +365,10 @@ What that feeds:
 
 **Print / save as PDF** under the grid prints the week's plan on its own — A4
 landscape, the app furniture removed, each scheduled square showing its
-priority number and the words *Full Clean* or *Check* rather than a colour, so
-it still reads on a greyscale printer. Groups folded shut on screen are
-printed anyway: a plan with buildings silently missing would be worse than no
-plan. *Save as PDF* as the printer gives you a file instead.
+priority number where it has one and the words *Full Clean* or *Check* rather
+than a colour, so it still reads on a greyscale printer. Groups folded shut on
+screen are printed anyway: a plan with buildings silently missing would be
+worse than no plan. *Save as PDF* as the printer gives you a file instead.
 
 **Removing a job from the plan** asks first, and if any work was already
 recorded that day it offers to wipe those ticks, photos and the sign-off too —
@@ -427,8 +434,11 @@ A few things worth knowing:
   arrive that day. It shows as a pink flag beside the priority number — on the
   planning grid, on the overview, on a cleaner's list and on the building's own
   checklist — because it is the one thing that reorders a morning regardless of
-  what the numbers say. Every new job starts at priority 1; change it only
-  where the order genuinely matters.
+  what the numbers say. A new job starts with **no priority set** — the office
+  numbers the handful of jobs that genuinely have to happen in an order, those
+  lead the day's list in that order, and everything else follows in the
+  buildings' own order. Numbers that were only ever there because something
+  had to go in the box said nothing.
 - **Numbers line up.** Counts, times and dates use tabular figures, so a
   column of them can be read down.
 - **Empty progress bars aren't drawn.** A building at 0/25 says "0/25"; it
@@ -463,6 +473,10 @@ A few things worth knowing:
   building rows underneath are sized like buttons, not table rows: the name at
   17px, the status and count in their own column, and a chevron so it's
   obvious the row opens something.
+- **Home is always top left.** Every screen but the home screen itself carries
+  a **Home** button in the app bar, next to *Back* where there is one — one tap
+  out of a checklist, a report or a week grid, without working out which tab
+  you came in through.
 - **The report button says "Report".** A circle with a plus in it is a guess.
 
 Dark mode follows the phone's own setting, on every screen.

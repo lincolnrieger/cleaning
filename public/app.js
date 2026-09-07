@@ -336,7 +336,7 @@ const icon = (key) => `<span class="navicon">${svgIcon(key)}</span>`;
 // is already the most a phone can carry legibly; eight would be unreadable.
 const NAV = {
   cleaner: [
-    ['', 'Today', 'home'],
+    ['', 'Buildings', 'home'],
     ['roster', 'Roster', 'calendar'],
     ['issues', 'Reports', 'clipboard'],
   ],
@@ -362,6 +362,12 @@ function chrome({ title, back = false, section = '', wide = false }) {
   // uses this to reclaim space on a phone.
   bar.classList.toggle('has-back', back);
   $('#signout').hidden = !state.user;
+  // Nothing to go home to when this IS home, so it stays out of the way there.
+  // Optional, because a cached index.html one deploy behind this file would
+  // otherwise take every screen down over a button.
+  const atHome = ['', '#', '#/'].includes(location.hash);
+  const homeBtn = $('#home');
+  if (homeBtn) homeBtn.hidden = !state.user || atHome;
   document.querySelector('main').classList.toggle('wide', wide);
 
   const who = $('#who');
@@ -423,6 +429,7 @@ function wirePlanningTabs(root) {
   });
 }
 
+if ($('#home')) $('#home').onclick = () => { location.hash = '#/'; };
 $('#back').onclick = () => {
   // Going back is right for a detail page reached from a list; landing
   // straight on a deep link there is no history to go back to, so fall home.
@@ -957,7 +964,7 @@ async function renderOverview() {
         dayLabel(day).toLowerCase() === 'today' ? 'Not scheduled today' : 'Not scheduled this day',
         rest.length)}
       ${state.openSections.has('overview-rest')
-        ? `<div class="crow-list">${rest.map(compactRow).join('')}</div>` : ''}
+        ? `<div class="crow-list">${rest.map((b) => compactRow(b)).join('')}</div>` : ''}
     </div>` : ''}
 
     ${stale.length ? `<div class="card"><div class="pad tight small muted">
@@ -1027,7 +1034,8 @@ function overviewTile(b) {
       ${canDrillIn() ? `data-b="${b.id}" data-type="${esc(b.cleanType)}"` : 'disabled'}>
     <span class="tile-main">
       <span class="tile-title">
-        ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
+        ${b.scheduled && b.priority != null
+          ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
         ${b.checkin ? CHECKIN_PILL : ''}
       </span>
@@ -1048,8 +1056,8 @@ function overviewTile(b) {
  * building nobody's touching today, so this drops both and shows only what's
  * actually worth a glance: name, staleness, and whether it has an open issue.
  */
-function compactRow(b) {
-  return `<button class="crow" ${canDrillIn() ? `data-b="${b.id}"` : 'disabled'}>
+function compactRow(b, canOpen = true) {
+  return `<button class="crow" ${canOpen && canDrillIn() ? `data-b="${b.id}"` : 'disabled'}>
     <span class="crow-top">
       <span class="crow-name">${esc(b.name)}</span>
       ${b.open_issues ? `<span class="crow-dot" title="${b.open_issues} open issue${
@@ -1174,24 +1182,43 @@ function wireSectionToggles(root, rerender) {
 
 async function renderCleanerHome() {
   const live = screen();
-  const today = state.config.today;
+  // Cleaners used to be pinned to today. They can step through the days now -
+  // to see what is on tomorrow, or check what was on yesterday - but ticking
+  // stays a today-only job, so anything but today is read-only here.
+  const day = viewDay();
+  const isToday = day === state.config.today;
   const [{ buildings }, roster] = await Promise.all([
-    api(`/overview?day=${today}`),
+    api(`/overview?day=${day}`),
     // null, not an empty roster: a failed request must not be mistaken for
     // "you aren't on today", which is a thing the screen now says out loud.
-    api(`/roster?from=${today}&days=1`).catch(() => null),
+    api(`/roster?from=${day}&days=1`).catch(() => null),
   ]);
   if (!live()) return;
-  // "Today, Tue 12 Aug" is a fact they can act on; a greeting is not.
-  chrome({ title: 'Today', section: '' });
+  chrome({ title: 'Buildings', section: '' });
 
-  // The plan says what needs cleaning, not who does it, so today's list is
+  // The plan says what needs cleaning, not who does it, so the day's list is
   // the same for everyone: what is on, in priority order.
   const todays = buildings.filter((b) => b.scheduled);
   const rest = buildings.filter((b) => !b.scheduled);
 
   const doneCount = todays.filter((b) => b.completed_at).length;
-  const myShifts = roster ? (roster.shifts ?? []).filter((s) => s.user_id === state.user.id) : null;
+  // Filtered by day rather than trusting the window asked for: one day is
+  // what this screen is about, whatever the roster call comes back with.
+  const shifts = roster ? (roster.shifts ?? []).filter((s) => s.day === day) : null;
+  const myShifts = shifts ? shifts.filter((s) => s.user_id === state.user.id) : null;
+
+  // Everybody rostered on this day, one entry each however many shifts they
+  // have. The server hands a cleaner their colleagues' names without the
+  // times, which is exactly what a handover needs: who else is about.
+  const crew = [];
+  for (const sh of shifts ?? []) {
+    let person = crew.find((c) => c.id === sh.user_id);
+    if (!person) { person = { id: sh.user_id, name: sh.user_name, times: [] }; crew.push(person); }
+    const when = timeRange(sh.start_time, sh.end_time);
+    if (when) person.times.push(when);
+  }
+  crew.sort((a, b) => (a.id === state.user.id ? -1 : b.id === state.user.id ? 1 : 0)
+    || a.name.localeCompare(b.name));
 
   const left = todays.length - doneCount;
   const pct = todays.length ? Math.round((doneCount / todays.length) * 100) : 0;
@@ -1201,16 +1228,18 @@ async function renderCleanerHome() {
   ].filter(([, n]) => n);
 
   app.innerHTML = `
+    <div class="card"><div class="pad tight">${dayNav(day)}</div></div>
+
     <div class="card">
       <div class="pad">
-        <p class="daystamp"><strong>${esc(dayLabel(today))}</strong>
-          <span class="num">${esc(auDate(today))}</span></p>
         <p class="headline">${todays.length
-          ? `<b class="num">${left}</b> ${left === 1 ? 'building' : 'buildings'} left to clean`
+          ? `<b class="num">${isToday ? left : todays.length}</b>
+             ${(isToday ? left : todays.length) === 1 ? 'building' : 'buildings'}
+             ${isToday ? 'left to clean' : 'on this day'}`
           : '<b>Nothing scheduled</b>'}</p>
         ${todays.length ? `<div class="meter lg ${pct === 100 ? 'full' : ''}">
           <i style="width:${pct}%"></i></div>
-          <p class="tiny muted gap-top-sm">${doneCount} of ${todays.length} done today</p>` : ''}
+          <p class="tiny muted gap-top-sm">${doneCount} of ${todays.length} done</p>` : ''}
       </div>
       ${myShifts?.length ? `<div class="banner info">
         <strong>You're on ${myShifts.map((s) =>
@@ -1219,26 +1248,49 @@ async function renderCleanerHome() {
           ? `<div class="tiny">${
             myShifts.filter((s) => s.note).map((s) => esc(s.note)).join(' · ')}</div>` : ''}
       </div>` : myShifts ? `<div class="banner warn">
-        <strong>You're not on today</strong>
+        <strong>You're not on ${isToday ? 'today' : 'this day'}</strong>
         <div class="tiny">Nothing is rostered to you. Check the roster if that
           looks wrong.</div>
       </div>` : ''}
     </div>
 
+    ${shifts ? `<div class="card">
+      <h2><span class="grow">Who else is on${isToday ? ' today' : ''}</span>
+        <span class="num">${crew.length}</span></h2>
+      ${crew.length ? `<div class="pad tight crew-list">
+        ${crew.map((c) => `<span class="crew-chip${c.id === state.user.id ? ' me' : ''}">
+          ${avatar(c.name)}
+          <span class="crew-who">
+            <span class="crew-name">${esc(firstName(c.name))}${
+              c.id === state.user.id ? ' (you)' : ''}</span>
+            ${c.times.length
+              ? `<span class="tiny muted num">${c.times.map(esc).join(', ')}</span>` : ''}
+          </span>
+        </span>`).join('')}
+      </div>` : `<div class="empty"><b>Nobody rostered</b>
+        No shifts are on the roster for this day.</div>`}
+    </div>` : ''}
+
     ${todays.length ? `<div class="card">
-      <h2><span class="grow">To clean today</span>
-        <span class="num">${left} left</span></h2>
-      ${todays.map((b) => jobTile(b)).join('')}
+      <h2><span class="grow">${isToday ? 'To clean today' : 'On this day'}</span>
+        <span class="num">${isToday ? `${left} left` : `${todays.length}`}</span></h2>
+      ${todays.map((b) => jobTile(b, isToday)).join('')}
     </div>` : `<div class="card"><div class="empty">
-      <b>Nothing scheduled today</b>
-      Pick any building below and start whenever you like.
+      <b>Nothing scheduled${isToday ? ' today' : ' this day'}</b>
+      ${isToday
+        ? 'Pick any building below and start whenever you like.'
+        : 'Nothing is on the plan for this day.'}
     </div></div>`}
 
     ${rest.length ? `<div class="card">
       ${sectionToggle('home-rest', 'Other buildings', rest.length)}
       ${state.openSections.has('home-rest')
-        ? `<div class="crow-list">${rest.map(compactRow).join('')}</div>` : ''}
+        ? `<div class="crow-list">${rest.map((b) => compactRow(b, isToday)).join('')}</div>` : ''}
     </div>` : ''}
+
+    ${isToday ? '' : `<p class="tiny muted center">Looking at
+      ${esc(auDate(day))}. Ticking off is only ever today's job — go back to
+      today to start cleaning.</p>`}
 
     ${phones.length ? `<div class="card">
       <h2>Need a hand?</h2>
@@ -1249,11 +1301,17 @@ async function renderCleanerHome() {
     </div>` : ''}`;
 
   wireTiles();
+  wireDayNav(app, renderCleanerHome);
   wireSectionToggles(app, renderCleanerHome);
   poll(renderCleanerHome, 60000);
 }
 
-function jobTile(b) {
+/**
+ * One building on the day's list. `canOpen` is false when a cleaner is
+ * looking at a day that isn't today: the job is worth seeing, but its
+ * checklist only ever belongs to today.
+ */
+function jobTile(b, canOpen = true) {
   const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
   const status = b.completed_at
     ? `<span class="pill done">Done ${esc(time(b.completed_at))}</span>`
@@ -1267,10 +1325,11 @@ function jobTile(b) {
     : '';
 
   return `<button class="tile${b.completed_at ? ' finished' : ''}"
-      data-b="${b.id}" data-type="${esc(b.cleanType)}">
+      ${canOpen ? `data-b="${b.id}" data-type="${esc(b.cleanType)}"` : 'disabled'}>
     <span class="tile-main">
       <span class="tile-title">
-        ${b.scheduled ? `<span class="prio num">${b.priority}</span>` : ''}
+        ${b.scheduled && b.priority != null
+          ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
         ${b.checkin ? CHECKIN_PILL : ''}
       </span>
@@ -1280,7 +1339,7 @@ function jobTile(b) {
     </span>
     <span class="tile-end">${status}
       <span class="tile-count num">${b.done}/${b.total}<span class="hide-narrow"> tasks</span></span></span>
-    ${svgIcon('chevron', 'lg tile-chev')}
+    ${canOpen ? svgIcon('chevron', 'lg tile-chev') : ''}
     ${b.done ? `<span class="meter ${pct === 100 ? 'full' : ''}">
       <i style="width:${pct}%"></i></span>` : ''}
   </button>`;
@@ -1303,7 +1362,7 @@ async function renderSchedule() {
 
   const cell = (b, day) => {
     const c = data.cells[`${b.id}:${day}`] ?? {};
-    const scheduled = c.priority != null;
+    const scheduled = Boolean(c.scheduled);
     const type = c.cleanType ?? c.completedType ?? 'full';
     const size = b.sizes?.[type] ?? 0;
     const pct = size && c.done ? Math.round((c.done / size) * 100) : 0;
@@ -1317,7 +1376,7 @@ async function renderSchedule() {
     let inner;
     if (scheduled || c.done || c.completedAt) {
       inner = `<div class="cell-top">
-          ${scheduled ? `<span class="prio ${c.checkin ? 'checkin' : ''}"
+          ${scheduled && c.priority != null ? `<span class="prio ${c.checkin ? 'checkin' : ''}"
             >${c.priority}</span>` : ''}
           ${scheduled && c.checkin
             ? '<span class="checkmark" title="Checking in today">IN</span>' : ''}
@@ -1371,7 +1430,7 @@ async function renderSchedule() {
                 </th></tr>` : '';
               return head + g.buildings.map((b) => {
                 const weekCount = data.days
-                  .filter((d) => data.cells[`${b.id}:${d}`]?.priority != null).length;
+                  .filter((d) => data.cells[`${b.id}:${d}`]?.scheduled).length;
                 return `<tr data-group="${esc(g.key)}" ${folded ? 'hidden' : ''}>
                   <th class="rowhead">${esc(b.name)}
                     <small>${weekCount ? `${weekCount} this week` : 'not scheduled'}</small></th>
@@ -1389,8 +1448,8 @@ async function renderSchedule() {
         <span><span class="checkmark">IN</span>Checking in today</span>
       </div>
       <p class="printonly print-foot">
-        The number is the order it gets done in · IN means guests check in that
-        day · a tick means signed off</p>
+        A number is the order it gets done in, and jobs without one follow ·
+        IN means guests check in that day · a tick means signed off</p>
     </div>
 
     <div class="row wrap noprint">
@@ -1399,7 +1458,7 @@ async function renderSchedule() {
 
     <p class="tiny muted center noprint">
       ${canEdit
-        ? 'Tap any square to put that building on the plan, pick Full Clean or Check, and set the order it gets done in.'
+        ? 'Tap any square to put that building on the plan and pick Full Clean or Check. Give it an order only when one matters — numbered jobs lead the day\'s list.'
         : 'This is the plan. The office sets it — tap a building on your home screen to start cleaning.'}
     </p>`;
 
@@ -1431,7 +1490,7 @@ async function renderSchedule() {
 function openScheduleEditor(data, buildingId, day) {
   const building = data.buildings.find((b) => b.id === buildingId);
   const cell = data.cells[`${buildingId}:${day}`] ?? {};
-  const scheduled = cell.priority != null;
+  const scheduled = Boolean(cell.scheduled);
   let cleanType = cell.cleanType ?? 'full';
 
   const sheet = openSheet(`
@@ -1453,7 +1512,9 @@ function openScheduleEditor(data, buildingId, day) {
 
       <label class="field"><span>Order of priority — 1 gets done first</span>
         <input id="prio" type="number" min="1" max="99" inputmode="numeric"
-          value="${scheduled ? cell.priority : 1}"></label>
+          placeholder="No priority set" value="${cell.priority ?? ''}">
+        <span class="field-hint">Leave it blank and the job simply sits with the
+          rest; numbered jobs lead the list, in order.</span></label>
 
       <label class="switch-row">
         <input type="checkbox" id="checkin" ${cell.checkin ? 'checked' : ''}>
@@ -1491,7 +1552,8 @@ function openScheduleEditor(data, buildingId, day) {
         method: 'POST',
         body: {
           buildingId, day, cleanType,
-          priority: Number(sheet.querySelector('#prio').value) || 1,
+          // Blank means blank: a new job is created with no priority set.
+          priority: sheet.querySelector('#prio').value.trim() || null,
           checkin: sheet.querySelector('#checkin').checked,
           note: sheet.querySelector('#note').value,
         },
@@ -2494,6 +2556,10 @@ async function renderRoster() {
       !shifts.length && entry?.preferred ? 'wants' : '']
       .filter(Boolean).join(' ');
 
+    // On paper an empty square is an empty square: the printed roster says
+    // who is on and nothing else, so both kinds of blank - "not available"
+    // and "available but not rostered" - come out as one dash, and the "+"
+    // that is only there to be tapped stays on screen.
     const inner = shifts.length
       ? shifts.map((s) => `<span class="shift ${s.flags.length ? 'clash' : ''}">
           <b>${s.start_time
@@ -2504,11 +2570,12 @@ async function renderRoster() {
             ? `<span class="shift-marks"><span class="warnmark">${svgIcon('warning')}</span></span>`
             : ''}
         </span>`).join('')
-      : entry
-        ? `<span class="offtext add">${canEdit ? '+' : '—'}</span>${entry.preferred
+      : `${entry
+        ? `<span class="offtext add noprint">${canEdit ? '+' : '—'}</span>${entry.preferred
           ? `<span class="prefstar" title="Would rather work this day"
               >${svgIcon('star')}</span>` : ''}`
-        : '<span class="offtext">OFF</span>';
+        : '<span class="offtext noprint">OFF</span>'}
+        <span class="offtext printonly">—</span>`;
 
     return `<td class="${day === data.today ? 'today-col' : ''}">
       <button class="${classes}" data-shift="${person.id}|${day}"
@@ -2551,8 +2618,6 @@ async function renderRoster() {
           </tbody>
         </table>
       </div>
-      <p class="printonly print-foot">
-        Flagged = clashes with availability · OFF = not available</p>
     </div>
 
     <div class="row wrap noprint">
