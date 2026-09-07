@@ -127,15 +127,16 @@ const TABLES = [
      resolved_at TEXT
    )`,
 
-  // "This building needs this kind of clean on this day", with an order of
-  // priority. One row per building per day. Deliberately not a list of who is
-  // doing it: the plan says what needs doing, the roster says who is in.
+  // "This building needs this kind of clean on this day", optionally with an
+  // order of priority - null means none was set. One row per building per day.
+  // Deliberately not a list of who is doing it: the plan says what needs
+  // doing, the roster says who is in.
   `CREATE TABLE IF NOT EXISTS schedule (
      id          INTEGER PRIMARY KEY,
      building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
      day         TEXT    NOT NULL,
      clean_type  TEXT    NOT NULL DEFAULT 'full',
-     priority    INTEGER NOT NULL DEFAULT 1,
+     priority    INTEGER,
      checkin     INTEGER NOT NULL DEFAULT 0,
      note        TEXT,
      created_by  TEXT    NOT NULL,
@@ -346,6 +347,43 @@ async function ensureStatusCleanTypes(db) {
   ).run();
   await db.prepare('DROP TABLE building_status').run();
   await db.prepare('ALTER TABLE building_status_new RENAME TO building_status').run();
+}
+
+/**
+ * Lets a scheduled job have no priority at all.
+ *
+ * `priority` was NOT NULL DEFAULT 1, so every job put on the plan came out
+ * numbered whether or not anybody had thought about the order - which made
+ * the numbers meaningless, since they were mostly all 1. It is nullable now:
+ * the office numbers the jobs that have to happen in an order and those lead
+ * the list; the rest sit below in the buildings' own order. SQLite cannot
+ * drop a NOT NULL in place, so this is the standard rebuild. Existing
+ * priorities are carried across untouched.
+ */
+async function ensureOptionalPriority(db) {
+  const sql = await tableSql(db, 'schedule');
+  if (!sql || !/priority\s+INTEGER\s+NOT\s+NULL/i.test(sql)) return;
+
+  await db.prepare(`CREATE TABLE schedule_new (
+     id          INTEGER PRIMARY KEY,
+     building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+     day         TEXT    NOT NULL,
+     clean_type  TEXT    NOT NULL DEFAULT 'full',
+     priority    INTEGER,
+     checkin     INTEGER NOT NULL DEFAULT 0,
+     note        TEXT,
+     created_by  TEXT    NOT NULL,
+     created_at  TEXT    NOT NULL,
+     UNIQUE (building_id, day)
+   )`).run();
+  await db.prepare(
+    `INSERT INTO schedule_new
+       (id, building_id, day, clean_type, priority, checkin, note, created_by, created_at)
+     SELECT id, building_id, day, clean_type, priority, checkin, note, created_by, created_at
+     FROM schedule`,
+  ).run();
+  await db.prepare('DROP TABLE schedule').run();
+  await db.prepare('ALTER TABLE schedule_new RENAME TO schedule').run();
 }
 
 /**
@@ -609,7 +647,7 @@ const COLUMNS = [
  * indexes and columns hash themselves; those four are code, so they need a
  * hand.
  */
-const MIGRATIONS_TAG = '2026-09-schema-stamp';
+const MIGRATIONS_TAG = '2026-09-optional-priority';
 
 /** What a fully migrated database of this version looks like. */
 const schemaStamp = () =>
@@ -630,6 +668,7 @@ async function buildSchema(db) {
 
   await ensureReportKinds(db);
   await ensureStatusCleanTypes(db);
+  await ensureOptionalPriority(db);
   await ensureFlatChecklist(db);
   // Last: the flatten above is the final reader of `areas`.
   await dropRetiredTables(db);

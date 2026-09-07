@@ -133,6 +133,20 @@ function clean(value, max) {
   return String(value ?? '').trim().slice(0, max);
 }
 
+/**
+ * The order a job gets done in, or null for "no priority set".
+ *
+ * A new job starts with nothing set rather than a made-up 1: the office
+ * numbers the handful of jobs that genuinely have to happen in an order, and
+ * everything else simply sits below them in the buildings' own order.
+ */
+function schedulePriority(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n < 1) return null;
+  return Math.min(n, 99);
+}
+
 /* -------------------------------------------------------- cleaning types */
 
 /**
@@ -690,11 +704,14 @@ const routes = {
       };
     });
 
-    // Scheduled buildings first in priority order, then everything else.
+    // Scheduled buildings first. Within those, anything the office gave an
+    // order to leads the list in that order; everything else - a job put on
+    // the plan without a priority - keeps the buildings' own order below them.
+    const rank = (b) => (b.priority == null ? Number.MAX_SAFE_INTEGER : b.priority);
     enriched.sort((x, y) => {
       if (x.scheduled !== y.scheduled) return x.scheduled ? -1 : 1;
-      if (x.scheduled && x.priority !== y.priority) return x.priority - y.priority;
-      return 0;
+      if (!x.scheduled) return 0;
+      return rank(x) - rank(y);
     });
 
     return json({ day, buildings: enriched });
@@ -750,6 +767,9 @@ const routes = {
     };
     for (const r of rows.results) {
       put(r.building_id, r.day, {
+        // Explicit, because priority is optional now: a job with no order set
+        // is still very much on the plan.
+        scheduled: true,
         cleanType: typeOf(r.clean_type),
         priority: r.priority,
         checkin: Boolean(r.checkin),
@@ -810,7 +830,7 @@ const routes = {
          checkin = excluded.checkin,
          note = excluded.note`,
     ).bind(
-      id, day, type, Math.min(Math.max(Number(priority) || 1, 1), 99),
+      id, day, type, schedulePriority(priority),
       checkin ? 1 : 0, clean(note, 200) || null, user.name, now(),
     ).run();
 

@@ -205,12 +205,12 @@ header.bar h1 {
   text-overflow: ellipsis;
 }
 
-#back { gap: var(--s1); padding: 0 10px; }
+#back, #home { gap: var(--s1); padding: 0 10px; }
 
 @media (max-width: 560px) {
-  .back-label, .signout-label { display: none; }
+  .back-label, .signout-label, .home-label { display: none; }
   #signout { padding: 0 10px; }
-  #back { padding: 0 8px; }
+  #back, #home { padding: 0 8px; }
   .who-name { max-width: 8ch; }
   header.bar { gap: var(--s2); }
   header.bar.has-back .who-text { display: none; }
@@ -881,9 +881,33 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 .headline b { font-weight: 700; color: var(--ink); }
 .headline + .meter { margin-top: var(--s3); }
 
-.daystamp { display: flex; align-items: baseline; gap: var(--s2); margin: 0 0 var(--s2); }
-.daystamp strong { font-size: 17px; font-weight: 680; letter-spacing: -0.01em; }
-.daystamp .num { font-size: 13.5px; color: var(--muted); }
+/* ------------------------------------------------- who else is on today */
+
+/* Names wrap into as many rows as they need: a big day is fifteen people and
+   a quiet one is two, and neither should scroll or stretch. */
+.crew-list { display: flex; flex-wrap: wrap; gap: var(--s2); }
+
+.crew-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 5px 10px 5px 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--sunken);
+  min-width: 0;
+}
+
+/* You, in the list of who is on - so the count reads as a crew, not as
+   "everyone except me". */
+.crew-chip.me {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, var(--sunken));
+}
+
+.crew-who { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.crew-name { font-size: 13.5px; font-weight: 620; white-space: nowrap; }
+.crew-who .tiny { white-space: nowrap; }
 
 /* Tap-to-call, because a phone number you have to retype is not a shortcut. */
 .callrow { display: grid; gap: var(--s2); }
