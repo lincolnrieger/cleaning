@@ -610,6 +610,22 @@ repo silently override what you set there.
 
 ### How the database sets itself up
 
+**One query decides whether there is anything to do.** The setup step runs on
+every cold isolate, and Cloudflare starts those constantly, so what it costs
+is what every slow start was made of: it used to charge about twenty-five
+*sequential* round trips to D1 — table creates, a PRAGMA per column, four
+rebuild checks, the indexes, then the settings — before a single screen could
+be drawn. Milliseconds against a local file; seconds against a real D1, and
+past thirty of them the app gives up on itself and says the server did not
+answer.
+
+A stamp — the hash of the tables, indexes, columns and a migrations tag — is
+written once the schema is at this version. A cold isolate reads that stamp
+and everything else the decision needs in **one** query, and on a database
+already at this version that is the only query it makes. Measured against a
+recording stand-in for D1: 19 round trips before, 1 after; a schema change
+still runs the full migration, once, and then settles back to 1.
+
 The first request after each deploy creates any missing tables, applies any
 schema changes, and compares a hash of `checklist.json` against the last one it
 stored. If they differ, it syncs buildings and their checklists — adding new

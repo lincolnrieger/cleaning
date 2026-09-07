@@ -581,6 +581,139 @@ export async function applyChecklistFile(db) {
   return counts;
 }
 
+/**
+ * Columns an upgrade might be missing, as data rather than a list of calls, so
+ * that adding one changes the schema stamp below and the check runs again.
+ *
+ * They go in before the rebuilds, because each rebuild recreates its table
+ * from a fixed CREATE and copies the columns by name: a column added
+ * afterwards is a column the rebuild would have silently dropped on the way
+ * past.
+ */
+const COLUMNS = [
+  ['buildings', 'grp', "TEXT NOT NULL DEFAULT ''"],
+  ['users', 'availability', "TEXT NOT NULL DEFAULT '1111111'"],
+  ['tasks', 'photo_mode', "TEXT NOT NULL DEFAULT 'none'"],
+  // How many digits the PIN is - the sign-in pad draws that many slots and
+  // submits on the last one. Not recoverable from the hash, so people who
+  // predate this column read 0 until their PIN is next set.
+  ['users', 'pin_length', 'INTEGER NOT NULL DEFAULT 0'],
+  ['schedule', 'clean_type', "TEXT NOT NULL DEFAULT 'full'"],
+  // Guests arriving that day, carried through to the cleaner's list.
+  ['schedule', 'checkin', 'INTEGER NOT NULL DEFAULT 0'],
+  ['maintenance', 'location', "TEXT NOT NULL DEFAULT ''"],
+];
+
+/**
+ * Bump when one of the one-off rebuilds below has to run again. The tables,
+ * indexes and columns hash themselves; those four are code, so they need a
+ * hand.
+ */
+const MIGRATIONS_TAG = '2026-09-schema-stamp';
+
+/** What a fully migrated database of this version looks like. */
+const schemaStamp = () =>
+  sha256Hex(JSON.stringify([TABLES, INDEXES, COLUMNS, MIGRATIONS_TAG]));
+
+/** Every setting the setup step needs, so it can read them in one go. */
+const SETUP_KEYS = [
+  'setup_stamp', 'auth_secret', 'checklist_source', 'checklist_version', 'checklist_attempt',
+];
+
+/** Creates and upgrades the schema. Only runs when the stamp has moved. */
+async function buildSchema(db) {
+  await db.batch(TABLES.map((sql) => db.prepare(sql)));
+
+  for (const [table, column, definition] of COLUMNS) {
+    await ensureColumn(db, table, column, definition);
+  }
+
+  await ensureReportKinds(db);
+  await ensureStatusCleanTypes(db);
+  await ensureFlatChecklist(db);
+  // Last: the flatten above is the final reader of `areas`.
+  await dropRetiredTables(db);
+
+  await db.batch(INDEXES.map((sql) => db.prepare(sql)));
+
+  // Old rate-limit rows serve no purpose once their lockout has expired, and
+  // this table is otherwise append-only forever. Once a deploy is plenty.
+  await db.prepare('DELETE FROM login_attempts WHERE until_ts < ?')
+    .bind(Date.now() - 86400_000).run();
+}
+
+/**
+ * Rewrites the checklist from the file when the file has moved and the app
+ * has not taken ownership. Works from settings already read, so it costs
+ * nothing on the usual path where there is nothing to do.
+ */
+async function syncIfDue(db, have, waitUntil) {
+  // Once an admin edits the checklist inside the app, the app owns it and the
+  // file stops being applied - otherwise the next deploy would quietly undo
+  // their work. "Restore from file" in the admin screen hands control back.
+  if ((have.get('checklist_source') ?? 'file') === 'app') return;
+
+  const version = await checklistVersion();
+  if (have.get('checklist_version') === version) return;
+
+  // The attempt is claimed BEFORE the work, and only retried every ten
+  // minutes. The version is still written on success, so nothing that worked
+  // is skipped - but a sync that fails can no longer be restarted by every
+  // cold isolate that comes along, which turns one bad write into hundreds of
+  // them and takes the database down with it.
+  const [tried, at] = String(have.get('checklist_attempt') ?? '').split('|');
+  if (tried === version && Date.now() - Number(at || 0) < 10 * 60_000) return;
+
+  await writeSetting(db, 'checklist_attempt', `${version}|${Date.now()}`);
+  setup.syncing = true;
+
+  // A reworked checklist is hundreds of statements, so it runs behind the
+  // response rather than in front of a page load.
+  const job = applyChecklistFile(db).then(
+    () => { setup.syncing = false; setup.syncError = ''; },
+    (err) => {
+      // Recorded rather than swallowed: behind the response a rejection is
+      // invisible, and a checklist that quietly never syncs looks exactly like
+      // one the file no longer owns.
+      setup.syncing = false;
+      setup.syncError = err.message;
+      console.error('checklist sync', err);
+    },
+  );
+  if (waitUntil) waitUntil(job); else await job;
+}
+
+/**
+ * The key that signs sessions and hashes PINs. Set AUTH_SECRET in the
+ * dashboard to override; otherwise one is generated and kept in the database
+ * so there is nothing to configure by hand.
+ */
+async function signingSecret(env, db, have) {
+  if (env.AUTH_SECRET && env.AUTH_SECRET.length >= 16) return env.AUTH_SECRET;
+  if (have.get('auth_secret')) return have.get('auth_secret');
+
+  const generated = [...crypto.getRandomValues(new Uint8Array(32))]
+    .map((b) => b.toString(16).padStart(2, '0')).join('');
+  // INSERT OR IGNORE + re-read, so simultaneous first requests agree on one value.
+  await db.prepare(
+    `INSERT OR IGNORE INTO settings (key, value) VALUES ('auth_secret', ?)`,
+  ).bind(generated).run();
+  return readSetting(db, 'auth_secret');
+}
+
+/**
+ * Sets the database up, and - far more often - works out that it is already
+ * set up and stops.
+ *
+ * That distinction is the whole point. This runs on every cold isolate, and
+ * Cloudflare starts them constantly, so it used to charge roughly twenty-five
+ * SEQUENTIAL round trips to a database that may be an ocean away before the
+ * first screen could be drawn: table creates, a PRAGMA per column, four
+ * rebuild checks, the indexes, then the settings. Fast against a local file,
+ * seconds against a real D1, and past thirty of them the app gave up on
+ * itself. Now one query reads everything the decision needs, and on a
+ * database already at this version that is the only query there is.
+ */
 async function migrate(env, waitUntil) {
   const db = env.DB;
   if (!db) {
@@ -591,91 +724,24 @@ async function migrate(env, waitUntil) {
     );
   }
 
-  await db.batch(TABLES.map((sql) => db.prepare(sql)));
-
-  // Every column an upgrade might be missing goes in first, because each of
-  // the rebuilds below recreates its table from a fixed CREATE and copies the
-  // columns by name: a column added afterwards is a column the rebuild would
-  // have silently dropped on the way past.
-  await ensureColumn(db, 'buildings', 'grp', "TEXT NOT NULL DEFAULT ''");
-  await ensureColumn(db, 'users', 'availability', "TEXT NOT NULL DEFAULT '1111111'");
-  await ensureColumn(db, 'tasks', 'photo_mode', "TEXT NOT NULL DEFAULT 'none'");
-  // How many digits the PIN is - the sign-in pad draws that many slots and
-  // submits on the last one. Not recoverable from the hash, so people who
-  // predate this column read 0 until their PIN is next set, and the pad falls
-  // back to a Go button for them.
-  await ensureColumn(db, 'users', 'pin_length', 'INTEGER NOT NULL DEFAULT 0');
-  await ensureColumn(db, 'schedule', 'clean_type', "TEXT NOT NULL DEFAULT 'full'");
-  // Guests arriving that day. Marked on the plan, and carried through to the
-  // cleaner's list, because it is the one thing that reorders a morning.
-  await ensureColumn(db, 'schedule', 'checkin', 'INTEGER NOT NULL DEFAULT 0');
-  await ensureColumn(db, 'maintenance', 'location', "TEXT NOT NULL DEFAULT ''");
-
-  await ensureReportKinds(db);
-  await ensureStatusCleanTypes(db);
-  await ensureFlatChecklist(db);
-  // Last: the flatten above is the final reader of `areas`.
-  await dropRetiredTables(db);
-
-  await db.batch(INDEXES.map((sql) => db.prepare(sql)));
-
-  // Once an admin edits the checklist inside the app, the app owns it and the
-  // file stops being applied - otherwise the next deploy would quietly undo
-  // their work. "Restore from file" in the admin screen hands control back.
-  const source = await readSetting(db, 'checklist_source', 'file');
-
-  // Only rewrite the checklist when its content actually changed.
-  const version = await checklistVersion();
-  if (source !== 'app' && await readSetting(db, 'checklist_version') !== version) {
-    // A reworked checklist is hundreds of statements, and the first request
-    // after that deploy was paying for all of them before it answered - long
-    // enough that the page gave up and said the app hadn't started. The
-    // tables above must exist before anything is served; this doesn't, so it
-    // runs behind the response.
-    //
-    // The attempt is claimed BEFORE the work, and only retried every ten
-    // minutes. The version is still written on success, so nothing is skipped
-    // that worked - but a sync that fails can no longer be restarted by every
-    // cold isolate that comes along, which turns one bad write into hundreds
-    // of them and takes the database down with it.
-    const [tried, at] = String(await readSetting(db, 'checklist_attempt', '')).split('|');
-    const due = tried !== version || Date.now() - Number(at || 0) > 10 * 60_000;
-
-    if (due) {
-      await writeSetting(db, 'checklist_attempt', `${version}|${Date.now()}`);
-      setup.syncing = true;
-      const job = applyChecklistFile(db).then(
-        () => { setup.syncing = false; setup.syncError = ''; },
-        (err) => {
-          // Recorded rather than swallowed: behind the response a rejection is
-          // invisible, and a checklist that quietly never syncs looks exactly
-          // like one the file no longer owns.
-          setup.syncing = false;
-          setup.syncError = err.message;
-          console.error('checklist sync', err);
-        },
-      );
-      if (waitUntil) waitUntil(job); else await job;
-    }
+  let have = new Map();
+  try {
+    const { results } = await db.prepare(
+      `SELECT key, value FROM settings WHERE key IN (${SETUP_KEYS.map(() => '?').join(', ')})`,
+    ).bind(...SETUP_KEYS).all();
+    have = new Map(results.map((r) => [r.key, r.value]));
+  } catch {
+    // No settings table: a database that has never been set up at all.
   }
 
-  // Old rate-limit rows serve no purpose once their lockout has expired, and
-  // this table is otherwise append-only forever.
-  await db.prepare('DELETE FROM login_attempts WHERE until_ts < ?')
-    .bind(Date.now() - 86400_000).run();
+  const stamp = await schemaStamp();
+  if (have.get('setup_stamp') !== stamp) {
+    await buildSchema(db);
+    await writeSetting(db, 'setup_stamp', stamp);
+  }
 
-  // The key that signs sessions and hashes PINs. Set AUTH_SECRET in the
-  // dashboard to override; otherwise one is generated and kept in the
-  // database so there is nothing to configure by hand.
-  if (env.AUTH_SECRET && env.AUTH_SECRET.length >= 16) return env.AUTH_SECRET;
-
-  const generated = [...crypto.getRandomValues(new Uint8Array(32))]
-    .map((b) => b.toString(16).padStart(2, '0')).join('');
-  // INSERT OR IGNORE + re-read, so simultaneous first requests agree on one value.
-  await db.prepare(
-    `INSERT OR IGNORE INTO settings (key, value) VALUES ('auth_secret', ?)`,
-  ).bind(generated).run();
-  return readSetting(db, 'auth_secret');
+  await syncIfDue(db, have, waitUntil);
+  return signingSecret(env, db, have);
 }
 
 // Cached per isolate: the work above happens once, not once per request.
