@@ -7,6 +7,12 @@ builds the week's roster.
 **To get it running, follow [SETUP.md](SETUP.md)** — it's all done in the
 browser, no software to install and no commands to run.
 
+**To hand to a cleaner, print
+[docs/cleaner-manual.pdf](docs/cleaner-manual.pdf)** — twelve A4 pages of
+pictures and short sentences covering the whole job, ending in a cut-out card
+for the cupboard wall. [How to rebuild it](docs/README.md) when a screen
+changes.
+
 ---
 
 ## What each role sees
