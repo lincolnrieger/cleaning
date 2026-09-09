@@ -72,6 +72,10 @@ const otherType = (id) => (id === 'full' ? 'check' : 'full');
 /** One letter, for the schedule grid where a whole word won't fit. */
 const typeTag = (id) => (id === 'check' ? 'C' : 'F');
 
+/** First word only, for a printed column an inch wide: "Full Clean" wrapping
+    onto two lines costs a row of buildings on every page. */
+const typeShort = (id) => typeLabel(id).split(' ')[0];
+
 /** There is one kind of report - something in a building needs fixing - so
     reporting is a description and a photo, with no category to choose first
     and no label to read afterwards. Older reports all read as this one. */
@@ -1385,7 +1389,7 @@ async function renderSchedule() {
           ${c.completedAt ? `<span class="tickmark">${svgIcon('check')}</span>` : ''}
         </div>
         ${scheduled
-          ? `<span class="printonly celltype">${esc(typeLabel(type))}</span>` : ''}
+          ? `<span class="printonly celltype">${esc(typeShort(type))}</span>` : ''}
         ${c.note ? `<div class="names">${esc(c.note)}</div>` : ''}
         ${c.done ? `<div class="mini ${pct === 100 ? 'full' : ''}"><i style="width:${pct}%"></i></div>` : ''}`;
     } else {
@@ -1668,24 +1672,31 @@ async function renderBuilding(id, wantType) {
       <div class="meter" id="meter"><i></i></div>
     </div>`}
 
-    <div class="card" id="items">
-      ${nothingToTick
-        ? `<div class="empty"><b>Nothing to tick here</b>
-           Clean it, then mark it complete below.${state.user.role === 'admin'
-             ? ' Areas can be added under Checklists whenever you want them.' : ''}</div>`
-        : data.items.map((t) => taskRow(t, locked)).join('')}
-    </div>
-    ${nothingToTick ? '' : `<p class="tiny muted center">
+    ${nothingToTick ? `
+    <!-- A building with no items isn't an empty screen to apologise for: the
+         one button that ends the job is the whole screen, sized to be hit
+         with a thumb and read across a room. -->
+    <div class="card oneshot">
+      <span class="oneshot-mark">${svgIcon('check')}</span>
+      <p class="oneshot-lead"></p>
+      ${locked ? '' : '<button class="primary oneshot-btn" id="complete"></button>'}
+      ${state.user.role === 'admin' ? `<p class="tiny muted oneshot-hint">
+        Areas can be added under Checklists whenever you want them.</p>` : ''}
+    </div>` : `
+    <div class="card" id="items">${data.items.map((t) => taskRow(t, locked)).join('')}</div>
+    <p class="tiny muted center">
       Tick each area as you finish it — what it covers is listed under it.</p>`}
 
     <div class="card" id="issues" hidden><h2>Open issues here</h2><div id="issuelist"></div></div>
 
     ${locked ? '<p class="note center">Read-only — only cleaners can tick items.</p>' : `
       <!-- The action that ends the job stays in reach instead of sitting
-           below sixty items. -->
+           below sixty items. With nothing to tick it has already been made
+           the screen itself, so the bar carries reporting alone. -->
       <div class="actionbar">
-        <button class="primary" id="complete"></button>
-        <button id="report" title="Report something that needs fixing"
+        ${nothingToTick ? '' : '<button class="primary" id="complete"></button>'}
+        <button id="report" ${nothingToTick ? 'class="wide"' : ''}
+          title="Report something that needs fixing"
           >${svgIcon('warning')} Report</button>
       </div>`}`;
 
@@ -1953,6 +1964,19 @@ function paintBuilding(data, locked) {
     $('#complete').textContent = data.completed
       ? `Reopen this ${typeLabel(data.cleanType).toLowerCase()}`
       : `Mark ${typeLabel(data.cleanType).toLowerCase()} complete`;
+  }
+
+  // On a building with nothing to tick the card is the only status there is,
+  // so it turns green rather than leaving the pill above to carry it alone,
+  // and its one line says where the job stands instead of repeating itself.
+  const oneshot = $('.oneshot');
+  if (oneshot) {
+    oneshot.classList.toggle('is-done', Boolean(data.completed));
+    oneshot.querySelector('.oneshot-lead').textContent = data.completed
+      ? 'Done — there was nothing to tick here.'
+      : locked
+        ? 'This one has no checklist. It is a single job, done in one go.'
+        : 'This one has no checklist. Clean it, then mark it done.';
   }
 }
 
@@ -2596,7 +2620,9 @@ async function renderRoster() {
           .join('; ')}${conflicts.length > 4 ? `; and ${conflicts.length - 4} more` : ''}.
       </div></div>` : ''}
 
-    <div class="card" id="printarea">
+    <!-- The roster keeps the wider sheet: its squares carry start and finish
+         times, which a portrait column cannot hold without wrapping. -->
+    <div class="card print-landscape" id="printarea">
       <h1 class="printonly print-title">Cleaning Schedule - Week Commencing ${esc(auDate(from))}</h1>
       <div class="grid-wrap">
         <table class="sched roster">
