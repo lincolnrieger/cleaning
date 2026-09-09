@@ -773,6 +773,9 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 .banner { padding: var(--s3) var(--s4); font-size: 14.5px; line-height: 1.5; }
 .banner.warn { background: var(--warn-wash); color: var(--warn); }
 .banner.info { background: var(--accent-wash); color: var(--accent); }
+.banner.done { background: var(--done-wash); color: var(--done); }
+/* No modifier: a plain statement of where something stands, not an alert. */
+.banner.plain { background: var(--sunken); color: var(--ink-2); }
 .banner strong { font-weight: 680; }
 .banner.inset { border-radius: var(--r); margin: 0; }
 
@@ -1284,6 +1287,12 @@ td.weekend { background: var(--sunken); }
 .legend i.sw.yes { background: var(--done-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--done) 40%, transparent); }
 .legend i.sw.no { background: var(--line-2); box-shadow: inset 0 0 0 1px var(--line); }
 .legend i.sw.done { background: var(--done-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--done) 40%, transparent); }
+.legend i.sw.weekonly-sw { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* Availability that belongs to one week rather than to how someone usually
+   works. Quiet, but it has to be visible at a glance: reading a one-off week
+   as somebody's new normal is how a roster ends up wrong for a month. */
+.weekonly { color: var(--accent); font-weight: 640; }
 
 /* --------------------------------------------------------- availability */
 
@@ -1314,6 +1323,19 @@ table.avail td.dimmed { opacity: .28; }
 .avtimes { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .avtimes input[type="time"] { min-height: 38px; padding: 0 8px; font-size: 15px; min-width: 0; }
 .avtimes input:disabled { opacity: .35; }
+
+/* A day name, two time fields and a star do not fit across a phone, and what
+   happens instead is that the last of them slides off the edge unseen. Below
+   this width the times take a line of their own. */
+@media (max-width: 470px) {
+  .avrow { flex-wrap: wrap; }
+  .avrow .avday { width: auto; flex: 1; }
+  .avtimes { flex-basis: 100%; order: 3; }
+}
+
+/* The one button that hands a week to the staff. Full width where that is
+   the only sensible size, capped on a desktop so it stops being a slab. */
+.approve { max-width: 420px; margin-inline: auto; }
 
 /* --------------------------------------------------------------- roster */
 

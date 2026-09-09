@@ -420,8 +420,11 @@ const planningSection = () => (state.user.role === 'cleaner' ? 'roster' : 'sched
 
 /** The three weekly-planning screens, as one tab strip. */
 function planningTabs(current) {
+  const cleaner = state.user.role === 'cleaner';
   const tabs = [['schedule', 'Buildings'], ['roster', 'Staff roster']];
-  if (state.user.role !== 'cleaner') tabs.push(['availability', 'Availability']);
+  // Cleaners get the same tab, pointed at their own week rather than
+  // everybody's - the days they can work are theirs to say.
+  tabs.push(['availability', cleaner ? 'My availability' : 'Availability']);
   return `<div class="tabs noprint">${tabs.map(([route, label]) =>
     `<button data-goto="${route}" aria-current="${route === current}">${esc(label)}</button>`,
   ).join('')}</div>`;
@@ -1210,6 +1213,10 @@ async function renderCleanerHome() {
   // what this screen is about, whatever the roster call comes back with.
   const shifts = roster ? (roster.shifts ?? []).filter((s) => s.day === day) : null;
   const myShifts = shifts ? shifts.filter((s) => s.user_id === state.user.id) : null;
+  // A week the office hasn't approved yet comes back empty by design. Saying
+  // "you're not on today" off the back of that would be a lie with
+  // consequences, so an unapproved week says so instead.
+  const rosterDraft = Boolean(roster) && roster.published === false;
 
   // Everybody rostered on this day, one entry each however many shifts they
   // have. The server hands a cleaner their colleagues' names without the
@@ -1245,7 +1252,11 @@ async function renderCleanerHome() {
           <i style="width:${pct}%"></i></div>
           <p class="tiny muted gap-top-sm">${doneCount} of ${todays.length} done</p>` : ''}
       </div>
-      ${myShifts?.length ? `<div class="banner info">
+      ${rosterDraft ? `<div class="banner info">
+        <strong>The roster for this week isn't out yet</strong>
+        <div class="tiny">The office is still working on it. It appears here
+          the moment they approve it.</div>
+      </div>` : myShifts?.length ? `<div class="banner info">
         <strong>You're on ${myShifts.map((s) =>
           esc(timeRange(s.start_time, s.end_time))).join(' and ')}</strong>
         ${myShifts.some((s) => s.note)
@@ -1258,7 +1269,7 @@ async function renderCleanerHome() {
       </div>` : ''}
     </div>
 
-    ${shifts ? `<div class="card">
+    ${shifts && !rosterDraft ? `<div class="card">
       <h2><span class="grow">Who else is on${isToday ? ' today' : ''}</span>
         <span class="num">${crew.length}</span></h2>
       ${crew.length ? `<div class="pad tight crew-list">
@@ -1681,7 +1692,7 @@ async function renderBuilding(id, wantType) {
       <p class="oneshot-lead"></p>
       ${locked ? '' : '<button class="primary oneshot-btn" id="complete"></button>'}
       ${state.user.role === 'admin' ? `<p class="tiny muted oneshot-hint">
-        Areas can be added under Checklists whenever you want them.</p>` : ''}
+        Add a checklist under Checklists if this one ever needs one.</p>` : ''}
     </div>` : `
     <div class="card" id="items">${data.items.map((t) => taskRow(t, locked)).join('')}</div>
     <p class="tiny muted center">
@@ -1741,8 +1752,8 @@ async function completeBuilding(id, day, type, data, locked) {
         : total
           ? `All <strong>${total}</strong> items are ticked. The office will see it
              as finished.`
-          : 'There is nothing to tick here, so this is the whole job. The office '
-            + 'will see it as finished.',
+          : 'There is no checklist here, so marking it done is the whole job. '
+            + 'The office will see it as finished.',
     confirmText: undo ? 'Reopen' : 'Yes, all done',
   });
   if (!go) return;
@@ -1973,10 +1984,10 @@ function paintBuilding(data, locked) {
   if (oneshot) {
     oneshot.classList.toggle('is-done', Boolean(data.completed));
     oneshot.querySelector('.oneshot-lead').textContent = data.completed
-      ? 'Done — there was nothing to tick here.'
+      ? 'Signed off. Nothing else to do here.'
       : locked
-        ? 'This one has no checklist. It is a single job, done in one go.'
-        : 'This one has no checklist. Clean it, then mark it done.';
+        ? 'One job, done in one go.'
+        : 'Clean it, then mark it done.';
   }
 }
 
@@ -2322,35 +2333,13 @@ function availabilitySummary(person) {
   ].filter(Boolean).join(' · ');
 }
 
-function editAvailability(person, onDone) {
-  const sheet = openSheet(`
-    <div class="sheet-head"><strong>${esc(person.name)}</strong>
-      <span class="tiny muted">availability</span></div>
-    <div class="pad stack">
-      <p class="dialog-body">Which days <strong>can</strong> they work, and between what
-        times? Leave the times blank for a day with no set hours. Tap a star for a day
-        they'd <strong>rather</strong> work — that never blocks anything, it just puts
-        them first when you're picking someone.</p>
-      <div class="avlist">${availabilityRows(person.availability)}</div>
-      <div class="row wrap tight">
-        <button data-preset="copy">Copy first day down</button>
-        <button data-preset="clear">Clear all</button>
-      </div>
-
-      <label class="field"><span>Ideal hours a week (optional)</span>
-        <input id="avhours" type="number" min="1" max="80" step="0.5" inputmode="decimal"
-          value="${esc(person.idealHours ?? '')}" placeholder="e.g. 25">
-        <span class="field-hint">Shown against what they're actually rostered, so you can
-          see at a glance who is short and who is over.</span></label>
-
-      <p class="err" id="err"></p>
-      <button class="primary wide" id="save">Save availability</button>
-      <button class="wide" id="cancel">Cancel</button>
-    </div>`);
-
-  wireAvailabilityRows(sheet);
-
-  const rows = () => [...sheet.querySelectorAll('[data-avrow]')];
+/**
+ * The two shortcuts every availability editor wants: set one day and push it
+ * down the week, or start again from nothing. Shared, because the office's
+ * sheet and a cleaner's own screen are the same seven rows.
+ */
+function wireAvailabilityPresets(root) {
+  const rows = () => [...root.querySelectorAll('[data-avrow]')];
   const setRow = (row, on, from = '', to = '') => {
     const box = row.querySelector('input[type="checkbox"]');
     box.checked = on;
@@ -2363,45 +2352,97 @@ function editAvailability(person, onDone) {
     if (!on) star.setAttribute('aria-pressed', 'false');
   };
 
-  sheet.querySelectorAll('[data-preset]').forEach((b) => {
+  root.querySelectorAll('[data-preset]').forEach((b) => {
     b.onclick = () => {
-      const kind = b.dataset.preset;
-      if (kind === 'clear') {
+      if (b.dataset.preset === 'clear') {
         rows().forEach((row) => setRow(row, false));
-      } else {
-        const first = rows()[0];
-        const on = first.querySelector('input[type="checkbox"]').checked;
-        const from = first.querySelector('.avfrom').value;
-        const to = first.querySelector('.avto').value;
-        const pref = first.querySelector('[data-pref]').getAttribute('aria-pressed') === 'true';
-        rows().slice(1).forEach((row) => {
-          setRow(row, on, from, to);
-          row.querySelector('[data-pref]').setAttribute('aria-pressed', String(on && pref));
-        });
+        return;
       }
+      const first = rows()[0];
+      const on = first.querySelector('input[type="checkbox"]').checked;
+      const from = first.querySelector('.avfrom').value;
+      const to = first.querySelector('.avto').value;
+      const pref = first.querySelector('[data-pref]').getAttribute('aria-pressed') === 'true';
+      rows().slice(1).forEach((row) => {
+        setRow(row, on, from, to);
+        row.querySelector('[data-pref]').setAttribute('aria-pressed', String(on && pref));
+      });
     };
   });
+}
 
-  sheet.querySelector('#cancel').onclick = closeSheet;
-  sheet.querySelector('#save').onclick = async (ev) => {
+/** The preset buttons themselves, so both editors offer the same two. */
+const availabilityPresets = () => `<div class="row wrap tight">
+  <button type="button" data-preset="copy">Copy first day down</button>
+  <button type="button" data-preset="clear">Clear all</button>
+</div>`;
+
+/**
+ * The office editing somebody's availability, either as their usual week or
+ * for the one week on screen.
+ *
+ * Both are offered every time rather than hidden behind a mode, because "she
+ * is away that week" and "she has changed days" look identical while you are
+ * typing them and are completely different afterwards.
+ */
+function editAvailability(person, onDone, week) {
+  const weekOnly = Boolean(person.weekOnly);
+  const sheet = openSheet(`
+    <div class="sheet-head"><strong>${esc(person.name)}</strong>
+      <span class="tiny muted">availability · week of ${esc(auDate(week))}</span></div>
+    <div class="pad stack">
+      ${weekOnly ? `<div class="banner info inset">
+        <strong>This week is set separately.</strong> Their usual week is
+        untouched underneath it.</div>` : ''}
+      <p class="dialog-body">Which days <strong>can</strong> they work, and between what
+        times? Leave the times blank for a day with no set hours. Tap a star for a day
+        they'd <strong>rather</strong> work — that never blocks anything, it just puts
+        them first when you're picking someone.</p>
+      <div class="avlist">${availabilityRows(person.availability)}</div>
+      ${availabilityPresets()}
+
+      <label class="field"><span>Ideal hours a week (optional)</span>
+        <input id="avhours" type="number" min="1" max="80" step="0.5" inputmode="decimal"
+          value="${esc(person.idealHours ?? '')}" placeholder="e.g. 25">
+        <span class="field-hint">Shown against what they're actually rostered, so you can
+          see at a glance who is short and who is over. Saved with their usual
+          week — one odd week never rewrites the target.</span></label>
+
+      <p class="err" id="err"></p>
+      <button class="primary wide" id="saveweek">Save for this week only</button>
+      <button class="wide" id="save">Save as their usual week</button>
+      ${weekOnly
+        ? '<button class="wide" id="clearweek">Drop this week\'s change</button>' : ''}
+      <button class="wide" id="cancel">Cancel</button>
+    </div>`);
+
+  wireAvailabilityRows(sheet);
+  wireAvailabilityPresets(sheet);
+
+  const send = (build, done) => async (ev) => {
     ev.currentTarget.disabled = true;
     try {
-      await api('/availability', {
-        method: 'POST',
-        body: {
-          userId: person.id,
-          days: readAvailabilityRows(sheet),
-          idealHours: sheet.querySelector('#avhours').value,
-        },
-      });
+      await api('/availability', { method: 'POST', body: { userId: person.id, ...build() } });
       closeSheet();
-      toast('Availability saved');
+      toast(done);
       onDone();
     } catch (e) {
       sheet.querySelector('#err').textContent = e.message;
       ev.currentTarget.disabled = false;
     }
   };
+
+  sheet.querySelector('#cancel').onclick = closeSheet;
+  sheet.querySelector('#save').onclick = send(() => ({
+    days: readAvailabilityRows(sheet),
+    idealHours: sheet.querySelector('#avhours').value,
+  }), 'Usual week saved');
+  sheet.querySelector('#saveweek').onclick = send(() => ({
+    weekFrom: week,
+    days: readAvailabilityRows(sheet),
+  }), `Saved for the week of ${auDate(week)}`);
+  sheet.querySelector('#clearweek')?.addEventListener('click',
+    send(() => ({ weekFrom: week, reset: true }), 'Back to their usual week'));
 }
 
 /* ------------------------------------- view: everyone's availability */
@@ -2482,7 +2523,8 @@ async function renderAvailability() {
             ${shown.map((p) => `<tr>
               <th class="rowhead">
                 <button class="linkish" data-edit="${p.id}">${esc(p.name)}</button>
-                <small>${esc(p.role)}${hoursLabel(p)
+                <small>${esc(p.role)}${p.weekOnly
+                  ? ' · <span class="weekonly">set for this week</span>' : ''}${hoursLabel(p)
                   ? ` · <span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
                   : ''}</small>
               </th>
@@ -2512,7 +2554,8 @@ async function renderAvailability() {
         <span><i class="sw yes"></i>Available</span>
         <span><i class="sw no"></i>Unavailable</span>
         <span><span class="prefstar">${svgIcon('star')}</span>Would rather work it</span>
-        <span>Tap a name to set days, hours and notes</span>
+        <span><i class="sw weekonly-sw"></i>Set for this week only</span>
+        <span>Tap a name to set days and hours</span>
       </div>
     </div>`;
 
@@ -2544,8 +2587,100 @@ async function renderAvailability() {
     b.onclick = () => editAvailability(
       data.staff.find((p) => p.id === Number(b.dataset.edit)),
       renderAvailability,
+      data.week ?? from,
     );
   });
+}
+
+/* ------------------------------------------ view: a cleaner's own availability */
+
+/**
+ * The person with the exam on Thursday is the person who knows about the
+ * exam. This is their own week, theirs to change: one set of seven rows,
+ * saved either as the week on screen or as what they usually do.
+ */
+async function renderMyAvailability() {
+  const live = screen('#/availability');
+  const from = weekFrom();
+  const data = await api(`/availability/mine?from=${from}`);
+  if (!live()) return;
+  chrome({ title: 'My availability', section: planningSection() });
+
+  const weekOnly = Boolean(data.week);
+  const days = data.week ?? data.usual.days;
+  const shifts = data.rostered.reduce((n, c) => n + c, 0);
+
+  app.innerHTML = `
+    ${planningTabs('availability')}
+    <div class="card"><div class="pad">${weekNav(from)}</div></div>
+
+    <div class="card">
+      <div class="banner ${weekOnly ? 'info' : 'plain'}">
+        ${weekOnly
+          ? `<strong>This week is set on its own.</strong>
+             Your usual week is still there underneath, and next week goes back to it.`
+          : '<strong>This is your usual week.</strong> Change it here and it applies to every week you haven\'t set on its own.'}
+      </div>
+      ${data.rosterPublished ? `<p class="pad tight small muted">
+        You're rostered <b class="num">${shifts}</b> time${shifts === 1 ? '' : 's'}
+        that week. Changing your availability doesn't move a shift you already
+        have — tell the office if one needs to change.</p>` : `<p class="pad tight small muted">
+        That week's roster isn't out yet, so now is a good time to say what
+        you can do.</p>`}
+    </div>
+
+    <div class="card">
+      <div class="pad stack">
+        <p class="dialog-body">Tick the days you <strong>can</strong> work, and the hours
+          if they matter — leave them blank for a day with no set hours. Tap a star for a
+          day you'd <strong>rather</strong> work. A star never blocks anything; it just
+          puts you first when the office is picking someone.</p>
+        <div class="avlist">${availabilityRows(days)}</div>
+        ${availabilityPresets()}
+
+        <label class="field"><span>Ideal hours a week (optional)</span>
+          <input id="avhours" type="number" min="1" max="80" step="0.5" inputmode="decimal"
+            value="${esc(data.usual.idealHours ?? '')}" placeholder="e.g. 25">
+          <span class="field-hint">What you'd like to average. Saved with your usual
+            week, and the office sees it against what you're actually rostered.</span></label>
+
+        <p class="err" id="err"></p>
+        <button class="primary wide" id="saveweek">Save for this week only</button>
+        <button class="wide" id="saveall">Save as my usual week</button>
+        ${weekOnly
+          ? '<button class="wide" id="clearweek">Go back to my usual week</button>' : ''}
+      </div>
+    </div>`;
+
+  wirePlanningTabs(app);
+  wireWeekNav(app, renderMyAvailability);
+  wireAvailabilityRows(app);
+  wireAvailabilityPresets(app);
+
+  const send = (build, done) => async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      await api('/availability', { method: 'POST', body: build() });
+      toast(done);
+      renderMyAvailability();
+    } catch (e) {
+      $('#err').textContent = e.message;
+      ev.currentTarget.disabled = false;
+    }
+  };
+
+  $('#saveweek').onclick = send(() => ({
+    weekFrom: from,
+    days: readAvailabilityRows(app),
+  }), `Saved for the week of ${auDate(from)}`);
+
+  $('#saveall').onclick = send(() => ({
+    days: readAvailabilityRows(app),
+    idealHours: $('#avhours').value,
+  }), 'Saved as your usual week');
+
+  $('#clearweek')?.addEventListener('click',
+    send(() => ({ weekFrom: from, reset: true }), 'Back to your usual week'));
 }
 
 /* ------------------------------------------------------- view: the roster */
@@ -2607,6 +2742,11 @@ async function renderRoster() {
         >${inner}</button></td>`;
   };
 
+  // A draft week is withheld from staff server-side, so the grid a cleaner
+  // would get here is every name with a dash under it - which reads as
+  // "nobody is working this week" rather than "this isn't decided yet".
+  const held = !data.canPublish && !data.published;
+
   app.innerHTML = `
     ${planningTabs('roster')}
     <div class="card noprint"><div class="pad">${weekNav(from)}</div></div>
@@ -2620,6 +2760,36 @@ async function renderRoster() {
           .join('; ')}${conflicts.length > 4 ? `; and ${conflicts.length - 4} more` : ''}.
       </div></div>` : ''}
 
+    ${data.canPublish ? `
+    <!-- Whether this week counts yet. A draft is the office thinking out
+         loud; approving it is the moment it becomes a promise, so the state
+         and the button that changes it sit together above the grid. -->
+    <div class="card noprint">
+      <div class="banner ${data.published ? 'done' : 'warn'}">
+        ${data.published
+          ? `<strong>Approved — staff can see this week.</strong>
+             ${esc(data.publishedBy ?? '')}${data.publishedAt
+               ? ` on ${esc(auDate(data.publishedAt.slice(0, 10)))}` : ''}.
+             Anything you change now shows to them straight away.`
+          : `<strong>Draft — staff can't see this week yet.</strong>
+             Move shifts around as much as you like. Approve it when it's settled.`}
+      </div>
+      <div class="pad">
+        <button class="${data.published ? '' : 'primary'} wide approve" id="publish">
+          ${data.published
+            ? `${svgIcon('back')} Withdraw from staff`
+            : `${svgIcon('check')} Approve for staff`}</button>
+      </div>
+    </div>` : data.published ? '' : `
+    <div class="card noprint">
+      <div class="banner info">
+        <strong>This week's roster isn't out yet.</strong>
+        The office is still working on it. Nothing here is final until they
+        approve it.
+      </div>
+    </div>`}
+
+    ${held ? '' : `
     <!-- The roster keeps the wider sheet: its squares carry start and finish
          times, which a portrait column cannot hold without wrapping. -->
     <div class="card print-landscape" id="printarea">
@@ -2656,14 +2826,47 @@ async function renderRoster() {
       ${canEdit
         ? 'Tap any square to add or change a shift. Shifts that clash with someone\'s '
           + 'availability are flagged rather than blocked.'
-        : 'This is the roster the office has set.'}</p>`;
+        : 'This is the roster the office has set.'}</p>`}`;
 
   wirePlanningTabs(app);
   wireWeekNav(app, renderRoster);
 
-  $('#print').onclick = () => window.print();
+  $('#print')?.addEventListener('click', () => window.print());
   $('#csv')?.addEventListener('click', () =>
     download(`/roster/export?from=${from}`, `roster-week-${auDate(from)}.csv`));
+
+  $('#publish')?.addEventListener('click', async () => {
+    const shifts = data.shifts.length;
+    const go = await ask(data.published ? {
+      title: 'Withdraw this week?',
+      body: `Staff stop seeing the week of
+        <strong>${esc(auDate(from))}</strong> until you approve it again.
+        None of the shifts change.`,
+      confirmText: 'Withdraw it',
+      danger: true,
+    } : {
+      title: 'Approve this week?',
+      body: shifts
+        ? `Staff will see all <strong>${shifts}</strong> shift${shifts === 1 ? '' : 's'}
+           for the week of <strong>${esc(auDate(from))}</strong>. After that, anything
+           you change shows to them straight away.`
+        : `There are no shifts in the week of <strong>${esc(auDate(from))}</strong> yet.
+           Approving it tells staff that is the answer, rather than that you
+           haven't finished.`,
+      confirmText: 'Approve for staff',
+    });
+    if (!go) return;
+
+    try {
+      await api('/roster/publish', {
+        method: 'POST', body: { from, published: !data.published },
+      });
+      toast(data.published ? 'Withdrawn from staff' : 'Approved — staff can see it');
+      renderRoster();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
 
   $('#copyweek')?.addEventListener('click', async () => {
     const go = await ask({
@@ -3869,8 +4072,9 @@ async function render() {
     if (head === 'schedule') return await renderSchedule();
     if (head === 'roster') return await renderRoster();
     if (head === 'availability') {
-      if (state.user.role === 'cleaner') return await renderRoster();
-      return await renderAvailability();
+      return state.user.role === 'cleaner'
+        ? await renderMyAvailability()
+        : await renderAvailability();
     }
     if (head === 'issues') return await renderIssues();
     if (head === 'admin') return await renderAdmin();

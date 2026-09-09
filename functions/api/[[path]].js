@@ -270,7 +270,55 @@ function validateAvailability({ days, idealHours }) {
   return JSON.stringify({ days: out, idealHours: hours });
 }
 
-const availabilityFor = (person, day) => availabilityDays(person.availability)[weekdayIndex(day)];
+/** The Monday that starts the week `day` falls in. */
+const weekStart = (day) => addDays(day, -weekdayIndex(day));
+
+/** The distinct weeks a run of days touches, in order. */
+const weeksIn = (days) => [...new Set(days.map(weekStart))];
+
+/**
+ * Availability set for one particular week, as a map of `userId:weekStart`.
+ *
+ * A week nobody has touched simply isn't in the map, and every reader falls
+ * back to the standing pattern - so the common case costs one small query
+ * that usually comes back empty.
+ */
+async function weekAvailability(env, weeks, userId = null) {
+  const map = new Map();
+  if (!weeks.length) return map;
+
+  const marks = weeks.map(() => '?').join(', ');
+  const { results } = await env.DB.prepare(
+    `SELECT user_id, week_start, availability FROM availability_weeks
+     WHERE week_start IN (${marks})${userId ? ' AND user_id = ?' : ''}`,
+  ).bind(...weeks, ...(userId ? [userId] : [])).all();
+
+  for (const r of results) map.set(`${r.user_id}:${r.week_start}`, r.availability);
+  return map;
+}
+
+/** What someone said about one day: that week's own answer, or their usual. */
+const availabilityRaw = (person, day, weeks) =>
+  weeks?.get(`${person.id}:${weekStart(day)}`) ?? person.availability;
+
+const availabilityFor = (person, day, weeks) =>
+  availabilityDays(availabilityRaw(person, day, weeks))[weekdayIndex(day)];
+
+/* ------------------------------------------------ approving the roster */
+
+/**
+ * Which of `weeks` have been approved for staff, as a map of week start to
+ * the row that says who approved it and when.
+ */
+async function publishedWeeks(env, weeks) {
+  if (!weeks.length) return new Map();
+  const marks = weeks.map(() => '?').join(', ');
+  const { results } = await env.DB.prepare(
+    `SELECT week_start, published_at, published_by FROM roster_published
+     WHERE week_start IN (${marks})`,
+  ).bind(...weeks).all();
+  return new Map(results.map((r) => [r.week_start, r]));
+}
 
 /* ----------------------------------------------------------- settings */
 
@@ -448,7 +496,9 @@ async function rosterConflicts(env, { userId, day, from, to, ignoreId = null }) 
   ).bind(userId).first();
   if (!person) throw new HttpError(404, 'That person is not on the staff list.');
 
-  const window = availabilityFor(person, day);
+  // The week's own availability if they set one, otherwise their usual.
+  const weeks = await weekAvailability(env, [weekStart(day)], person.id);
+  const window = availabilityFor(person, day, weeks);
   const weekday = DAY_NAMES[weekdayIndex(day)];
 
   if (!window) {
@@ -1357,6 +1407,7 @@ const routes = {
 
     await env.DB.batch([
       env.DB.prepare('DELETE FROM roster WHERE user_id = ?').bind(id),
+      env.DB.prepare('DELETE FROM availability_weeks WHERE user_id = ?').bind(id),
       // Keep the history, drop the link.
       env.DB.prepare('UPDATE task_log SET user_id = NULL WHERE user_id = ?').bind(id),
       env.DB.prepare('UPDATE task_photos SET user_id = NULL WHERE user_id = ?').bind(id),
@@ -1368,18 +1419,104 @@ const routes = {
 
   /* --- availability: the days and hours each person works --- */
 
+  /**
+   * Saves availability, either as somebody's usual week or as a one-off for
+   * one particular week.
+   *
+   * Cleaners may set their own: the person who knows they have an exam on
+   * Thursday is the person with the exam, and making them ring the office to
+   * say so is how a roster ends up built on out-of-date facts. Everyone
+   * else's is still the office's to set.
+   */
   'POST /availability': async (req, env, { user }) => {
-    // Cleaners' hours are managed by the office/admin, not by cleaners
-    // themselves - so this always requires an elevated role, self or not.
-    require(user, 'office', 'admin');
-    const { userId, days, idealHours } = await req.json();
+    canRead(user);
+    const { userId, days, idealHours, weekFrom, reset } = await req.json();
     const target = userId ? Number(userId) : user.id;
-    const stored = validateAvailability({ days, idealHours });
+    if (user.role === 'cleaner' && target !== user.id) {
+      throw new HttpError(403, 'You can only change your own availability.');
+    }
 
+    const person = await env.DB.prepare('SELECT id, availability FROM users WHERE id = ?')
+      .bind(target).first();
+    if (!person) throw new HttpError(404, 'That person no longer exists.');
+
+    // A week override is about days, not about how many hours somebody wants
+    // in an average week - that stays on their usual pattern, so one odd week
+    // never quietly rewrites their target.
+    const week = isDay(weekFrom) ? weekStart(weekFrom) : null;
+
+    if (week && reset) {
+      await env.DB.prepare('DELETE FROM availability_weeks WHERE user_id = ? AND week_start = ?')
+        .bind(target, week).run();
+      return json({ ok: true, week, cleared: true, ...parseAvailability(person.availability) });
+    }
+
+    if (week) {
+      const stored = validateAvailability({ days, idealHours: null });
+      const ts = now();
+      await env.DB.prepare(
+        `INSERT INTO availability_weeks
+           (user_id, week_start, availability, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, week_start) DO UPDATE SET
+           availability = excluded.availability,
+           updated_by   = excluded.updated_by,
+           updated_at   = excluded.updated_at`,
+      ).bind(target, week, stored, user.name, ts).run();
+      return json({ ok: true, week, ...parseAvailability(stored) });
+    }
+
+    const stored = validateAvailability({ days, idealHours });
     const res = await env.DB.prepare('UPDATE users SET availability = ? WHERE id = ?')
       .bind(stored, target).run();
     if (!res.meta.changes) throw new HttpError(404, 'That person no longer exists.');
-    return json({ ok: true, ...parseAvailability(stored) });
+    return json({ ok: true, week: null, ...parseAvailability(stored) });
+  },
+
+  /**
+   * One person's own availability for the week they are looking at, plus the
+   * usual week it falls back to. The cleaner's own screen: everybody else's
+   * is none of their business, so none of it is sent.
+   */
+  'GET /availability/mine': async (_req, env, { user, url }) => {
+    canRead(user);
+    const from = isDay(url.searchParams.get('from'))
+      ? weekStart(url.searchParams.get('from')) : weekStart(localDay(env));
+    const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
+
+    const [person, override, published, shifts] = await Promise.all([
+      env.DB.prepare('SELECT id, name, availability FROM users WHERE id = ?')
+        .bind(user.id).first(),
+      env.DB.prepare(
+        'SELECT availability, updated_by, updated_at FROM availability_weeks'
+        + ' WHERE user_id = ? AND week_start = ?',
+      ).bind(user.id, from).first(),
+      publishedWeeks(env, [from]),
+      env.DB.prepare(
+        'SELECT day FROM roster WHERE user_id = ? AND day BETWEEN ? AND ?',
+      ).bind(user.id, days[0], days[6]).all(),
+    ]);
+    if (!person) throw new HttpError(404, 'That person no longer exists.');
+
+    const usual = parseAvailability(person.availability);
+    // A draft week is not theirs to read yet, so the shift counts that would
+    // give it away come back as zeroes with the flag that says why.
+    const approved = published.has(from);
+    const counts = new Map();
+    if (approved) {
+      for (const r of shifts.results) counts.set(r.day, (counts.get(r.day) ?? 0) + 1);
+    }
+
+    return json({
+      from,
+      days,
+      today: localDay(env),
+      usual: { days: usual.days, idealHours: usual.idealHours },
+      week: override ? parseAvailability(override.availability).days : null,
+      setBy: override ? { by: override.updated_by, at: override.updated_at } : null,
+      rosterPublished: approved,
+      rostered: days.map((d) => counts.get(d) ?? 0),
+    });
   },
 
   /**
@@ -1393,7 +1530,8 @@ const routes = {
       ? url.searchParams.get('from') : localDay(env);
     const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
 
-    const [people, shifts] = await Promise.all([
+    const week = weekStart(from);
+    const [people, shifts, weekAvail] = await Promise.all([
       env.DB.prepare(
         `SELECT id, name, role, availability FROM users
          WHERE active = 1 ORDER BY name`,
@@ -1402,6 +1540,7 @@ const routes = {
         `SELECT user_id, day, start_time, end_time FROM roster
          WHERE day BETWEEN ? AND ?`,
       ).bind(days[0], days[6]).all(),
+      weekAvailability(env, weeksIn(days)),
     ]);
 
     const counts = new Map();
@@ -1417,13 +1556,19 @@ const routes = {
       from,
       days,
       today: localDay(env),
+      week,
       staff: people.results.map((p) => {
-        const { days: avail, idealHours } = parseAvailability(p.availability);
+        // Hours are a target for an average week, so they always come from
+        // the usual pattern - a week somebody has set separately says which
+        // days they can work, not what they are aiming for over a year.
+        const { idealHours } = parseAvailability(p.availability);
+        const override = weekAvail.get(`${p.id}:${week}`);
         return {
           id: p.id,
           name: p.name,
           role: p.role,
-          availability: avail,
+          availability: availabilityDays(override ?? p.availability),
+          weekOnly: Boolean(override),
           idealHours,
           rostered: days.map((d) => counts.get(`${p.id}:${d}`) ?? 0),
           rosteredHours: Math.round(((minutes.get(p.id) ?? 0) / 60) * 10) / 10,
@@ -1441,7 +1586,8 @@ const routes = {
     const span = Math.min(Math.max(Number(url.searchParams.get('days')) || 7, 1), 31);
     const days = Array.from({ length: span }, (_, i) => addDays(from, i));
 
-    const [shifts, people] = await Promise.all([
+    const weeks = weeksIn(days);
+    const [all, people, published, weekAvail] = await Promise.all([
       env.DB.prepare(
         `SELECT id, user_id, user_name, day, start_time, end_time, note
          FROM roster WHERE day BETWEEN ? AND ? ORDER BY day, start_time, user_name`,
@@ -1449,7 +1595,16 @@ const routes = {
       env.DB.prepare(
         `SELECT id, name, role, availability FROM users WHERE active = 1 ORDER BY name`,
       ).all(),
+      publishedWeeks(env, weeks),
+      weekAvailability(env, weeks),
     ]);
+
+    // A week nobody has approved yet does not exist as far as staff are
+    // concerned. Filtered here rather than in the front end: a draft roster
+    // people are still arguing about is not something to hand out and hide.
+    const shifts = user.role === 'cleaner'
+      ? { results: all.results.filter((s) => published.has(weekStart(s.day))) }
+      : all;
 
     const workedMinutes = new Map();
     for (const r of shifts.results) {
@@ -1464,13 +1619,14 @@ const routes = {
     // WHO is on each day, which is what a handover needs, and not when.
     const canSeeHours = user.role !== 'cleaner';
 
+    const week = weekStart(from);
     const staff = people.results.map((p) => {
-      const { days: avail, idealHours } = parseAvailability(p.availability);
+      const { idealHours } = parseAvailability(p.availability);
       return {
         id: p.id,
         name: p.name,
         role: p.role,
-        availability: avail,
+        availability: availabilityDays(weekAvail.get(`${p.id}:${week}`) ?? p.availability),
         ...(canSeeHours ? {
           idealHours,
           rosteredHours: Math.round(((workedMinutes.get(p.id) ?? 0) / 60) * 10) / 10,
@@ -1478,13 +1634,19 @@ const routes = {
       };
     });
     const byId = new Map(staff.map((p) => [p.id, p]));
+    // Kept as stored rather than as already resolved for one week: a span
+    // that crosses a week boundary has to read each shift against its own.
+    const rawById = new Map(people.results.map((p) => [p.id, p.availability]));
 
     // Flag anything already on the roster that no longer fits: availability
     // often changes after the roster is built, and a warning that only fired
     // at save time would never be seen again.
     const withFlags = shifts.results.map((s) => {
       const person = byId.get(s.user_id);
-      const window = person ? person.availability[weekdayIndex(s.day)] : null;
+      const window = person
+        ? availabilityFor({ id: s.user_id, availability: rawById.get(s.user_id) },
+          s.day, weekAvail)
+        : null;
       const flags = [];
       if (person && !window) flags.push('unavailable');
       else if (window?.from && window?.to) {
@@ -1512,7 +1674,50 @@ const routes = {
       shifts: shown,
       staff,
       canEdit: user.role !== 'cleaner',
+      canPublish: user.role !== 'cleaner',
+      // The week the screen is showing, plus every week the span touches, so
+      // a caller asking for a single day still learns whether that day counts.
+      published: published.has(week),
+      publishedAt: published.get(week)?.published_at ?? null,
+      publishedBy: published.get(week)?.published_by ?? null,
+      weeks: weeks.map((w) => ({
+        from: w,
+        published: published.has(w),
+        publishedAt: published.get(w)?.published_at ?? null,
+        publishedBy: published.get(w)?.published_by ?? null,
+      })),
     });
+  },
+
+  /**
+   * Approves a week for staff, or takes it back.
+   *
+   * Nothing about the shifts themselves changes - this is only whether the
+   * week is finished enough to be read as a promise. Once it is approved,
+   * later edits go straight to staff: withdrawing it is what stops that.
+   */
+  'POST /roster/publish': async (req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const body = await req.json();
+    if (!isDay(body.from)) throw new HttpError(400, 'Pick a week.');
+    const week = weekStart(body.from);
+
+    if (body.published === false) {
+      await env.DB.prepare('DELETE FROM roster_published WHERE week_start = ?')
+        .bind(week).run();
+      return json({ ok: true, from: week, published: false });
+    }
+
+    const ts = now();
+    await env.DB.prepare(
+      `INSERT INTO roster_published (week_start, published_at, published_by)
+       VALUES (?, ?, ?)
+       ON CONFLICT(week_start) DO UPDATE SET
+         published_at = excluded.published_at,
+         published_by = excluded.published_by`,
+    ).bind(week, ts, user.name).run();
+
+    return json({ ok: true, from: week, published: true, publishedAt: ts, publishedBy: user.name });
   },
 
   'POST /roster': async (req, env, { user }) => {
@@ -2102,7 +2307,8 @@ const routes = {
     }
 
     const tables = [
-      'schedule', 'roster', 'task_photos', 'task_log',
+      'schedule', 'roster', 'roster_published', 'availability_weeks',
+      'task_photos', 'task_log',
       'activity', 'building_status', 'maintenance', 'login_attempts',
     ];
     await env.DB.batch(tables.map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
