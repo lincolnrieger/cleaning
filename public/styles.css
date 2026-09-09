@@ -1071,8 +1071,6 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
    slab across a desktop window. */
 .oneshot-btn { width: 100%; max-width: 360px; min-height: 52px; font-size: 16px; }
 
-.oneshot-hint { margin: 0; max-width: 34ch; }
-
 /* Signed off: the same card, in the colour the rest of the app uses for done.
    Reopening is a correction, so it stops being the loudest thing on screen. */
 .oneshot.is-done .oneshot-mark { background: var(--done-wash); color: var(--done); }
@@ -1257,6 +1255,11 @@ td.weekend { background: var(--sunken); }
 .cell-top { display: flex; align-items: center; gap: 4px; }
 .cell .names { font-size: 11px; color: var(--muted); line-height: 1.25; text-align: center; }
 .cell .tickmark { color: var(--done); }
+
+/* A standing job. Quiet on purpose: it says how this square got here, which
+   matters when you are wondering why, and never before that. */
+.cell .repeatmark { color: var(--faint); display: inline-flex; }
+.cell .repeatmark .ico { width: 12px; height: 12px; vertical-align: 0; }
 .cell .tickmark .ico { width: 13px; height: 13px; stroke-width: 2.6; vertical-align: 0; }
 .cell .mini { width: 100%; height: 3px; border-radius: 99px; background: color-mix(in srgb, var(--ink) 12%, transparent); overflow: hidden; }
 .cell .mini > i { display: block; height: 100%; background: var(--accent); }
@@ -1798,6 +1801,9 @@ code.phrase {
     box-shadow: none !important;
   }
   .cell .typetag, .cell .plus, .cell .mini { display: none !important; }
+  /* Why a job is on the plan is an office question, and the printed sheet has
+     no legend to explain the mark. */
+  .cell .repeatmark { display: none !important; }
 
   /* An unscheduled day is a blank square. On screen it is a 54px tap target;
      on paper that target is dead space, and with seven of them a row it is
