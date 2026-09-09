@@ -304,20 +304,41 @@ const availabilityRaw = (person, day, weeks) =>
 const availabilityFor = (person, day, weeks) =>
   availabilityDays(availabilityRaw(person, day, weeks))[weekdayIndex(day)];
 
-/* ------------------------------------------------ approving the roster */
+/* ------------------------------------------- approving a week for staff */
+
+/** The two things that get approved a week at a time. */
+const PUBLISH_KINDS = ['plan', 'roster'];
 
 /**
  * Which of `weeks` have been approved for staff, as a map of week start to
  * the row that says who approved it and when.
  */
-async function publishedWeeks(env, weeks) {
+async function publishedWeeks(env, kind, weeks) {
   if (!weeks.length) return new Map();
   const marks = weeks.map(() => '?').join(', ');
   const { results } = await env.DB.prepare(
-    `SELECT week_start, published_at, published_by FROM roster_published
-     WHERE week_start IN (${marks})`,
-  ).bind(...weeks).all();
+    `SELECT week_start, published_at, published_by FROM published_weeks
+     WHERE kind = ? AND week_start IN (${marks})`,
+  ).bind(kind, ...weeks).all();
   return new Map(results.map((r) => [r.week_start, r]));
+}
+
+/** The approval fields every week-shaped screen sends back, in one shape. */
+function publishState(published, week, weeks) {
+  const row = published.get(week);
+  return {
+    published: published.has(week),
+    publishedAt: row?.published_at ?? null,
+    // Empty for a week carried across from before approving existed: nobody
+    // approved it, and naming somebody would be inventing them.
+    publishedBy: row?.published_by || null,
+    weeks: weeks.map((w) => ({
+      from: w,
+      published: published.has(w),
+      publishedAt: published.get(w)?.published_at ?? null,
+      publishedBy: published.get(w)?.published_by || null,
+    })),
+  };
 }
 
 /* ----------------------------------------------------------- settings */
@@ -653,7 +674,7 @@ const routes = {
     canRead(user);
     const day = dayParam(url, env);
 
-    const [buildings, totals, progress, crew, planned, statuses, lastDone, issues] =
+    const [buildings, totals, progress, crew, allPlanned, statuses, lastDone, issues, published] =
       await Promise.all([
         env.DB.prepare(
           `SELECT id, name, grp FROM buildings WHERE active = 1 ORDER BY sort_order, name`,
@@ -695,7 +716,15 @@ const routes = {
           `SELECT building_id, COUNT(*) AS n FROM maintenance
            WHERE status = 'open' GROUP BY building_id`,
         ).all(),
+        publishedWeeks(env, 'plan', [weekStart(day)]),
       ]);
+
+    // An unapproved week is not the plan yet, so a cleaner is shown no jobs
+    // rather than a draft. The flag goes back with it: "nothing scheduled"
+    // and "not decided yet" are different things to be told at 7am.
+    const planPublished = published.has(weekStart(day));
+    const planned = user.role === 'cleaner' && !planPublished
+      ? { results: [] } : allPlanned;
 
     // Sum a building's own items for this type plus the shared 'both' ones.
     const perType = (rows, id) => {
@@ -764,7 +793,7 @@ const routes = {
       return rank(x) - rank(y);
     });
 
-    return json({ day, buildings: enriched });
+    return json({ day, buildings: enriched, planPublished });
   },
 
   /* --- the weekly cleaning plan --- */
@@ -778,7 +807,8 @@ const routes = {
     const days = Array.from({ length: span }, (_, i) => addDays(from, i));
     const to = days[days.length - 1];
 
-    const [buildings, rows, totals, progress, completions] = await Promise.all([
+    const weeks = weeksIn(days);
+    const [buildings, all, totals, progress, completions, published, repeats] = await Promise.all([
       env.DB.prepare(
         'SELECT id, name, grp FROM buildings WHERE active = 1 ORDER BY sort_order, name',
       ).all(),
@@ -801,7 +831,19 @@ const routes = {
         `SELECT building_id, day, clean_type, completed_at, completed_by
          FROM building_status WHERE day BETWEEN ? AND ?`,
       ).bind(from, to).all(),
+      publishedWeeks(env, 'plan', weeks),
+      env.DB.prepare(
+        `SELECT building_id, weekday, clean_type, priority, checkin, note
+         FROM schedule_repeat ORDER BY weekday`,
+      ).all(),
     ]);
+
+    // A week the office hasn't approved is not the plan yet. Withheld here
+    // rather than in the front end: half a plan handed out is worse than
+    // none, because it looks finished.
+    const rows = user.role === 'cleaner'
+      ? { results: all.results.filter((r) => published.has(weekStart(r.day))) }
+      : all;
 
     const sizeOf = (bid) => {
       const pick = (t) =>
@@ -855,7 +897,119 @@ const routes = {
       buildings: buildings.results.map((b) => ({ ...b, sizes: sizeOf(b.id) })),
       cells,
       canEdit: user.role !== 'cleaner',
+      canPublish: user.role !== 'cleaner',
+      ...publishState(published, weekStart(from), weeks),
+      // The standing arrangements, and how many of them this week is still
+      // missing - the office should not have to compare two screens to find
+      // out that the Saturday changeover never made it onto the plan.
+      ...(user.role === 'cleaner' ? {} : {
+        repeats: repeats.results.map((r) => ({
+          buildingId: r.building_id,
+          weekday: r.weekday,
+          cleanType: typeOf(r.clean_type),
+          priority: r.priority,
+          checkin: Boolean(r.checkin),
+          note: r.note,
+        })),
+        repeatsMissing: repeats.results.filter((r) => days.some((d) =>
+          weekdayIndex(d) === r.weekday
+          && !all.results.some((x) => x.building_id === r.building_id && x.day === d))).length,
+      }),
     });
+  },
+
+  /**
+   * Puts every standing arrangement onto one week.
+   *
+   * Only fills days that are still empty: a repeat is what happens unless
+   * somebody has decided otherwise, and this must never overwrite the
+   * otherwise.
+   */
+  'POST /schedule/repeats/apply': async (req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const body = await req.json();
+    if (!isDay(body.from)) throw new HttpError(400, 'Pick a week.');
+    const week = weekStart(body.from);
+    const days = Array.from({ length: 7 }, (_, i) => addDays(week, i));
+
+    const [repeats, existing] = await Promise.all([
+      env.DB.prepare(
+        `SELECT r.building_id, r.weekday, r.clean_type, r.priority, r.checkin, r.note
+         FROM schedule_repeat r
+         JOIN buildings b ON b.id = r.building_id AND b.active = 1`,
+      ).all(),
+      env.DB.prepare(
+        'SELECT building_id, day FROM schedule WHERE day BETWEEN ? AND ?',
+      ).bind(days[0], days[6]).all(),
+    ]);
+
+    const taken = new Set(existing.results.map((r) => `${r.building_id}:${r.day}`));
+    const ts = now();
+    const adds = [];
+    for (const r of repeats.results) {
+      const day = days[r.weekday];
+      if (taken.has(`${r.building_id}:${day}`)) continue;
+      adds.push(env.DB.prepare(
+        `INSERT INTO schedule
+           (building_id, day, clean_type, priority, checkin, note, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        r.building_id, day, typeOf(r.clean_type), r.priority,
+        r.checkin ? 1 : 0, r.note, user.name, ts,
+      ));
+    }
+
+    if (adds.length) await env.DB.batch(adds);
+    return json({
+      ok: true,
+      added: adds.length,
+      kept: repeats.results.length - adds.length,
+    });
+  },
+
+  /**
+   * Sets or clears "this building, this weekday, every week".
+   *
+   * Saved alongside the one-off day rather than instead of it, so the office
+   * schedules the Saturday changeover once and then says "and every Saturday"
+   * in the same breath.
+   */
+  'POST /schedule/repeat': async (req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const body = await req.json();
+    const id = Number(body.buildingId);
+    const weekday = Number(body.weekday);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+      throw new HttpError(400, 'Pick a day of the week.');
+    }
+
+    if (body.repeat === false) {
+      await env.DB.prepare(
+        'DELETE FROM schedule_repeat WHERE building_id = ? AND weekday = ?',
+      ).bind(id, weekday).run();
+      return json({ ok: true, repeat: false });
+    }
+
+    const building = await env.DB.prepare(
+      'SELECT name FROM buildings WHERE id = ? AND active = 1',
+    ).bind(id).first();
+    if (!building) throw new HttpError(404, 'Building not found.');
+
+    await env.DB.prepare(
+      `INSERT INTO schedule_repeat
+         (building_id, weekday, clean_type, priority, checkin, note, created_by, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+       ON CONFLICT(building_id, weekday) DO UPDATE SET
+         clean_type = excluded.clean_type,
+         priority = excluded.priority,
+         checkin = excluded.checkin,
+         note = excluded.note`,
+    ).bind(
+      id, weekday, typeOf(body.cleanType), schedulePriority(body.priority),
+      body.checkin ? 1 : 0, clean(body.note, 200) || null, user.name, now(),
+    ).run();
+
+    return json({ ok: true, repeat: true });
   },
 
   'POST /schedule': async (req, env, { user }) => {
@@ -967,9 +1121,16 @@ const routes = {
 
     // What was planned decides the default, so the common path is: open the
     // building, get the checklist the office asked for, no choice to make.
-    const plan = await env.DB.prepare(
-      'SELECT clean_type, note, priority, checkin FROM schedule WHERE building_id = ? AND day = ?',
-    ).bind(id, day).first();
+    // Except on a week the office has not approved: a cleaner is shown the
+    // same nothing here as on the plan itself, rather than being told to do a
+    // Full Clean by a draft that might say Check tomorrow.
+    const [row, planPublished] = await Promise.all([
+      env.DB.prepare(
+        'SELECT clean_type, note, priority, checkin FROM schedule WHERE building_id = ? AND day = ?',
+      ).bind(id, day).first(),
+      publishedWeeks(env, 'plan', [weekStart(day)]),
+    ]);
+    const plan = user.role === 'cleaner' && !planPublished.has(weekStart(day)) ? null : row;
     const requested = url.searchParams.get('type');
     const cleanType = typeOf(requested, typeOf(plan?.clean_type));
 
@@ -1278,6 +1439,35 @@ const routes = {
     return json({ ok: true });
   },
 
+  /**
+   * Deletes a report outright, photo and all.
+   *
+   * Resolving is the normal end of a report and keeps the record; this is for
+   * the ones that should never have been a record - a duplicate, a test, or
+   * something typed into the wrong building. Office and admin only, and the
+   * activity log keeps a line saying it happened.
+   */
+  'POST /maintenance/delete': async (req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const id = Number((await req.json()).id);
+    const row = await env.DB.prepare(
+      'SELECT id, building_id, detail, day, photo_key FROM maintenance WHERE id = ?',
+    ).bind(id).first();
+    if (!row) throw new HttpError(404, 'That report has already gone.');
+
+    await env.DB.prepare('DELETE FROM maintenance WHERE id = ?').bind(id).run();
+    await dropPhotos(env, [row.photo_key].filter(Boolean));
+    await logActivity(env, {
+      day: row.day,
+      buildingId: row.building_id,
+      kind: 'report_deleted',
+      detail: row.detail.slice(0, 120),
+      userName: user.name,
+    });
+
+    return json({ ok: true });
+  },
+
   /* --- photos on reports (only when an R2 bucket is bound) --- */
 
   'POST /photo': async (req, env, { user }) => {
@@ -1491,7 +1681,7 @@ const routes = {
         'SELECT availability, updated_by, updated_at FROM availability_weeks'
         + ' WHERE user_id = ? AND week_start = ?',
       ).bind(user.id, from).first(),
-      publishedWeeks(env, [from]),
+      publishedWeeks(env, 'roster', [from]),
       env.DB.prepare(
         'SELECT day FROM roster WHERE user_id = ? AND day BETWEEN ? AND ?',
       ).bind(user.id, days[0], days[6]).all(),
@@ -1595,7 +1785,7 @@ const routes = {
       env.DB.prepare(
         `SELECT id, name, role, availability FROM users WHERE active = 1 ORDER BY name`,
       ).all(),
-      publishedWeeks(env, weeks),
+      publishedWeeks(env, 'roster', weeks),
       weekAvailability(env, weeks),
     ]);
 
@@ -1677,47 +1867,43 @@ const routes = {
       canPublish: user.role !== 'cleaner',
       // The week the screen is showing, plus every week the span touches, so
       // a caller asking for a single day still learns whether that day counts.
-      published: published.has(week),
-      publishedAt: published.get(week)?.published_at ?? null,
-      publishedBy: published.get(week)?.published_by ?? null,
-      weeks: weeks.map((w) => ({
-        from: w,
-        published: published.has(w),
-        publishedAt: published.get(w)?.published_at ?? null,
-        publishedBy: published.get(w)?.published_by ?? null,
-      })),
+      ...publishState(published, week, weeks),
     });
   },
 
   /**
-   * Approves a week for staff, or takes it back.
+   * Approves a week of the plan or the roster for staff, or takes it back.
    *
-   * Nothing about the shifts themselves changes - this is only whether the
-   * week is finished enough to be read as a promise. Once it is approved,
-   * later edits go straight to staff: withdrawing it is what stops that.
+   * Nothing about the week's own rows changes - this is only whether it is
+   * finished enough to be read as a promise. Once it is approved, later edits
+   * go straight to staff: withdrawing it is what stops that.
    */
-  'POST /roster/publish': async (req, env, { user }) => {
+  'POST /week/publish': async (req, env, { user }) => {
     require(user, 'office', 'admin');
     const body = await req.json();
+    if (!PUBLISH_KINDS.includes(body.kind)) throw new HttpError(400, 'Pick what to approve.');
     if (!isDay(body.from)) throw new HttpError(400, 'Pick a week.');
     const week = weekStart(body.from);
 
     if (body.published === false) {
-      await env.DB.prepare('DELETE FROM roster_published WHERE week_start = ?')
-        .bind(week).run();
-      return json({ ok: true, from: week, published: false });
+      await env.DB.prepare('DELETE FROM published_weeks WHERE kind = ? AND week_start = ?')
+        .bind(body.kind, week).run();
+      return json({ ok: true, kind: body.kind, from: week, published: false });
     }
 
     const ts = now();
     await env.DB.prepare(
-      `INSERT INTO roster_published (week_start, published_at, published_by)
-       VALUES (?, ?, ?)
-       ON CONFLICT(week_start) DO UPDATE SET
+      `INSERT INTO published_weeks (kind, week_start, published_at, published_by)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(kind, week_start) DO UPDATE SET
          published_at = excluded.published_at,
          published_by = excluded.published_by`,
-    ).bind(week, ts, user.name).run();
+    ).bind(body.kind, week, ts, user.name).run();
 
-    return json({ ok: true, from: week, published: true, publishedAt: ts, publishedBy: user.name });
+    return json({
+      ok: true, kind: body.kind, from: week, published: true,
+      publishedAt: ts, publishedBy: user.name,
+    });
   },
 
   'POST /roster': async (req, env, { user }) => {
@@ -1961,6 +2147,7 @@ const routes = {
       ).bind(bid),
       env.DB.prepare('DELETE FROM tasks WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM schedule WHERE building_id = ?').bind(bid),
+      env.DB.prepare('DELETE FROM schedule_repeat WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM building_status WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM maintenance WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM activity WHERE building_id = ?').bind(bid),
@@ -2004,6 +2191,7 @@ const routes = {
       env.DB.prepare('DELETE FROM task_log'),
       env.DB.prepare('DELETE FROM tasks'),
       env.DB.prepare('DELETE FROM schedule'),
+      env.DB.prepare('DELETE FROM schedule_repeat'),
       env.DB.prepare('DELETE FROM building_status'),
       env.DB.prepare('DELETE FROM maintenance'),
       env.DB.prepare('DELETE FROM activity'),
@@ -2307,7 +2495,7 @@ const routes = {
     }
 
     const tables = [
-      'schedule', 'roster', 'roster_published', 'availability_weeks',
+      'schedule', 'schedule_repeat', 'roster', 'published_weeks', 'availability_weeks',
       'task_photos', 'task_log',
       'activity', 'building_status', 'maintenance', 'login_attempts',
     ];
