@@ -162,6 +162,31 @@ const TABLES = [
      updated_at TEXT    NOT NULL
    )`,
 
+  // A week of the roster is a draft until somebody approves it. No row means
+  // draft: cleaners are shown nothing for that week, so the office can move
+  // shifts around for as long as it takes without anyone making plans around
+  // a version that is about to change. Approving is per week rather than
+  // global because that is the unit the roster is actually built in.
+  `CREATE TABLE IF NOT EXISTS roster_published (
+     week_start   TEXT PRIMARY KEY,
+     published_at TEXT NOT NULL,
+     published_by TEXT NOT NULL
+   )`,
+
+  // What somebody can work in one particular week, overriding the standing
+  // pattern on users.availability. Same stored shape, so anything that can
+  // read one can read the other - a week off, a week of late starts, an
+  // extra Saturday - without that becoming their new normal.
+  `CREATE TABLE IF NOT EXISTS availability_weeks (
+     id           INTEGER PRIMARY KEY,
+     user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     week_start   TEXT    NOT NULL,
+     availability TEXT    NOT NULL,
+     updated_by   TEXT    NOT NULL,
+     updated_at   TEXT    NOT NULL,
+     UNIQUE (user_id, week_start)
+   )`,
+
   `CREATE TABLE IF NOT EXISTS login_attempts (
      ip       TEXT PRIMARY KEY,
      fails    INTEGER NOT NULL DEFAULT 0,
@@ -183,6 +208,7 @@ const INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_schedule_day ON schedule (day, priority)`,
   `CREATE INDEX IF NOT EXISTS idx_roster_day ON roster (day, start_time)`,
   `CREATE INDEX IF NOT EXISTS idx_roster_user ON roster (user_id, day)`,
+  `CREATE INDEX IF NOT EXISTS idx_availability_weeks ON availability_weeks (week_start)`,
 ];
 
 
