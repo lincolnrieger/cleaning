@@ -62,6 +62,33 @@
 
   --ring: 0 0 0 2px var(--card), 0 0 0 4px color-mix(in srgb, var(--accent) 55%, transparent);
   --lift: 0 8px 28px rgb(16 20 28 / .14);
+
+  /* On a phone this is a hand-held app, not a page: a card wants a little
+     depth under it rather than a hairline holding it to the background. */
+  --raise: 0 1px 2px rgb(16 20 28 / .04), 0 4px 14px rgb(16 20 28 / .05);
+
+  /* Motion. Three speeds and two curves, so everything that moves in this app
+     moves the same way: -out for things arriving and settling, -spring for
+     the one or two places where a tap deserves an answer with some life in
+     it. Nothing here is longer than a third of a second - a cleaner tapping
+     down a list of sixty items must never wait for the app to finish. */
+  --dur-1: .12s;
+  --dur-2: .2s;
+  --dur-3: .3s;
+  --ease-out: cubic-bezier(.2, .8, .3, 1);
+  --ease-spring: cubic-bezier(.34, 1.36, .5, 1);
+}
+
+/* One switch for the whole app. Somebody who has asked their phone to stop
+   animating things has asked for a reason, and a checklist works exactly as
+   well without any of this. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -827,6 +854,18 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
   .hide-narrow { display: none; }
   .tile { padding: var(--s3) var(--s3); gap: var(--s2); }
   .tile .name { font-size: 16.5px; }
+
+  /* Without this the name is an unshrinkable block, so a long one pushes the
+     order number onto a line of its own above it and the row reads as two
+     half-rows. Given room to shrink, the number and the name share the first
+     line and the name wraps underneath itself where it needs to. */
+  .tile .name { flex: 1; min-width: 0; }
+
+  /* The right-hand column is a status, not a headline. Trimming it on a phone
+     is what buys the name enough width to stay on one line. */
+  .tile-end .pill { font-size: 11.5px; padding: 2px 8px; }
+  .tile-count { font-size: 12.5px; }
+  .tile-chev { margin-left: -4px; }
 }
 
 /* One quiet green rule down the edge of anything finished. */
@@ -1551,10 +1590,12 @@ table.avail td.dimmed { opacity: .28; }
   font-size: 13.5px;
   font-weight: 550;
   box-shadow: var(--lift);
-  animation: rise .16s ease;
+  animation: rise var(--dur-2) var(--ease-out);
 }
 
-@keyframes rise { from { opacity: 0; transform: translate(-50%, 6px); } }
+@keyframes rise { from { opacity: 0; transform: translate(-50%, 12px); } }
+@keyframes sink { to { opacity: 0; transform: translate(-50%, 8px); } }
+.toast.going { animation: sink var(--dur-2) ease forwards; }
 .toast.bad { background: var(--danger); color: #fff; }
 
 .err { color: var(--danger); font-size: 13px; font-weight: 560; }
@@ -1571,6 +1612,85 @@ code.phrase {
 
 .banner code, .note code { font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 
+/* ==================================================================== motion
+
+   Everything that moves is in one place, so the app has a single vocabulary
+   rather than an animation invented per screen.
+
+   The screen entrance is driven by a class the router adds, not by the cards
+   existing: several screens refresh themselves on a timer, and a page that
+   fades itself back in every 45 seconds is a page that looks broken. */
+
+@keyframes card-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes sheet-out { to { transform: translateY(12px); opacity: 0; } }
+@keyframes sheet-out-mobile { to { transform: translateY(100%); } }
+@keyframes box-pop { 40% { transform: scale(1.25); } }
+@keyframes row-settle { from { background: color-mix(in srgb, var(--done) 22%, transparent); } }
+@keyframes pop-in { from { opacity: 0; transform: scale(.8); } }
+@keyframes shimmer { to { background-position: 200% 0; } }
+
+/* Cards arrive together but not quite: a few milliseconds apart is enough to
+   read as one screen settling instead of a list of things appearing. Capped
+   at six, because a stagger long enough to notice is a screen that is slow. */
+.screen-in > * { animation: card-in var(--dur-3) var(--ease-out) both; }
+.screen-in > :nth-child(1) { animation-delay: 0ms; }
+.screen-in > :nth-child(2) { animation-delay: 25ms; }
+.screen-in > :nth-child(3) { animation-delay: 50ms; }
+.screen-in > :nth-child(4) { animation-delay: 75ms; }
+.screen-in > :nth-child(5) { animation-delay: 100ms; }
+.screen-in > :nth-child(n + 6) { animation-delay: 120ms; }
+
+/* Press feedback. The colour flash alone reads as a hover on a phone, where
+   there is no such thing; a fraction of a millimetre of give reads as a
+   button being pushed. */
+.tile, .crow, .task, .persontile, .card-toggle, .brow, .cell, button, .btn {
+  transition: transform var(--dur-1) var(--ease-out), background var(--dur-1) linear;
+}
+
+.tile:active, .crow:active, .task:active, .persontile:active,
+.card-toggle:active, .brow:active { transform: scale(.995); }
+
+button:active, .btn:active, .cell:active { transform: scale(.97); }
+button:disabled:active, .btn:disabled:active { transform: none; }
+
+/* Ticking an item is the thing this app is for, so it is the one interaction
+   that answers back: the box springs shut and the row settles out of green.
+   The class comes off on its own, so a re-render never replays it. */
+.task.just-done .box { animation: box-pop var(--dur-3) var(--ease-spring); }
+.task.just-done { animation: row-settle .45s var(--ease-out); }
+.box .ico {
+  transform: scale(.5);
+  opacity: 0;
+  transition: transform var(--dur-2) var(--ease-spring), opacity var(--dur-1) linear;
+}
+
+.is-done .box .ico { transform: scale(1); opacity: 1; }
+
+/* Who ticked it, arriving after the tick rather than with it. */
+.task .who:not(:empty) { animation: card-in var(--dur-2) var(--ease-out); }
+
+.fab { animation: pop-in var(--dur-2) var(--ease-spring); }
+.fab:active { transform: scale(.94); }
+
+/* Loading. A shimmer that is shaped like the screen it is standing in for
+   says "this is coming" in a way that the word "Loading" cannot. */
+.skeleton { padding: var(--s4); display: grid; gap: var(--s3); }
+
+.skeleton i {
+  display: block;
+  height: 14px;
+  border-radius: 99px;
+  background: linear-gradient(90deg,
+    var(--line-2) 25%, var(--hover) 37%, var(--line-2) 50%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton i.tall { height: 42px; border-radius: var(--r); }
+.skeleton i.half { width: 55%; }
+.skeleton i.third { width: 32%; }
+
 /* Modal sheet */
 .sheet-bg {
   position: fixed;
@@ -1586,6 +1706,16 @@ code.phrase {
 @keyframes fade { from { opacity: 0; } }
 @media (min-width: 660px) { .sheet-bg { align-items: center; } }
 
+/* Closing is animated too, so a sheet leaves the way it arrived instead of
+   blinking out. The node is dropped by a timer either way - the motion is a
+   nicety and must never be the thing that decides whether it goes. */
+.sheet-bg.closing { animation: fade-out var(--dur-2) ease forwards; pointer-events: none; }
+.sheet-bg.closing .sheet { animation: sheet-out-mobile var(--dur-2) ease-in forwards; }
+
+@media (min-width: 660px) {
+  .sheet-bg.closing .sheet { animation-name: sheet-out; }
+}
+
 .sheet {
   background: var(--card);
   width: 100%;
@@ -1595,11 +1725,31 @@ code.phrase {
   border-radius: var(--r-lg) var(--r-lg) 0 0;
   padding-bottom: env(safe-area-inset-bottom);
   box-shadow: var(--lift);
-  animation: slide .18s cubic-bezier(.2, .8, .3, 1);
+  /* Up from the bottom edge on a phone, where that is where sheets come
+     from; a small settle on a desktop, where it is a dialog in the middle. */
+  animation: slide var(--dur-3) var(--ease-out);
 }
 
-@keyframes slide { from { transform: translateY(10px); } }
-@media (min-width: 660px) { .sheet { border-radius: var(--r-lg); } }
+@keyframes slide { from { transform: translateY(100%); } }
+
+@media (min-width: 660px) {
+  .sheet { border-radius: var(--r-lg); animation-name: slide-centre; }
+  @keyframes slide-centre { from { transform: translateY(12px); opacity: 0; } }
+}
+
+/* The grab handle every phone sheet has. Decoration, but the kind that tells
+   you which edge the thing came from and which way to push it back. */
+@media (max-width: 659px) {
+  .sheet::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 8px auto 0;
+    border-radius: 99px;
+    background: var(--line);
+  }
+}
 
 .sheet-head {
   position: sticky;
@@ -1672,8 +1822,35 @@ code.phrase {
 
   nav.nav button[aria-current="true"] { color: var(--accent); border-bottom-color: transparent; }
   nav.nav .navicon { display: block; }
-  nav.nav .navicon .ico { width: 23px; height: 23px; vertical-align: 0; }
   nav.nav .navlabel { white-space: nowrap; }
+
+  /* The icon sits in a pill that only exists on the current tab. It grows in
+     rather than appearing, so moving between tabs reads as one thing sliding
+     across the bar rather than two things blinking. */
+  nav.nav .navicon {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 28px;
+    border-radius: 99px;
+    transition: background var(--dur-2) var(--ease-out),
+      transform var(--dur-2) var(--ease-spring);
+  }
+
+  nav.nav .navicon .ico {
+    width: 22px;
+    height: 22px;
+    vertical-align: 0;
+    transition: stroke-width var(--dur-2) linear;
+  }
+
+  nav.nav button[aria-current="true"] .navicon {
+    background: var(--accent-wash);
+    transform: translateY(-1px);
+  }
+
+  nav.nav button[aria-current="true"] .ico { stroke-width: 2.2; }
+  nav.nav button:active .navicon { transform: scale(.9); }
 
   main { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
   .toast { bottom: calc(74px + env(safe-area-inset-bottom)); }
@@ -1686,6 +1863,25 @@ code.phrase {
   .stat b { font-size: 24px; }
   .stat span { font-size: 12px; }
   .crow-list { grid-template-columns: 1fr; }
+
+  /* On a phone a card is an object you are holding, not a region of a page:
+     a little depth under it beats a hairline drawn around it. */
+  .card {
+    border-color: transparent;
+    border-radius: 14px;
+    box-shadow: var(--raise);
+    margin-bottom: var(--s3);
+  }
+
+  /* Except the two that are furniture rather than content - a bar with a
+     shadow reads as a card that has come loose. */
+  .actionbar, .progresshead { box-shadow: none; }
+}
+
+/* Dark mode has no light to cast, so depth there is a lighter edge instead of
+   a darker shadow - the same job done the way the medium allows. */
+@media (max-width: 767px) and (prefers-color-scheme: dark) {
+  .card { border-color: var(--line); box-shadow: none; }
 }
 
 /* On a phone the checklist is the whole screen, so its progress line sits
