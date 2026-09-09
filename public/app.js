@@ -190,7 +190,13 @@ function toast(message, bad = false) {
   node.textContent = message;
   document.body.append(node);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.remove(), bad ? 4000 : 2000);
+  // Fades out on its own timer rather than on animationend: a toast that
+  // outstays its welcome because an animation never fired is worse than one
+  // that leaves without the fade.
+  toastTimer = setTimeout(() => {
+    node.classList.add('going');
+    setTimeout(() => node.remove(), 220);
+  }, bad ? 4000 : 2000);
 }
 
 /* -------------------------------------------------------------- api client */
@@ -641,7 +647,12 @@ function openSheet(html) {
 }
 
 function closeSheet() {
-  document.querySelector('.sheet-bg')?.remove();
+  // Only ever the live one: a sheet already on its way out is no longer in
+  // anybody's way, and re-closing it would restart the animation.
+  const bg = document.querySelector('.sheet-bg:not(.closing)');
+  if (!bg) return;
+  bg.classList.add('closing');
+  setTimeout(() => bg.remove(), 220);
 }
 
 // Esc closes whatever sheet or dialog is open.
@@ -1137,9 +1148,9 @@ function overviewTile(b) {
         ${b.scheduled && b.priority != null
           ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
-        ${b.checkin ? CHECKIN_PILL : ''}
       </span>
       <span class="tile-meta">${typePill(b.cleanType)}
+        ${b.checkin ? CHECKIN_PILL : ''}
         <span class="grow">${meta}</span></span>
     </span>
     <span class="tile-end">${status}
@@ -1446,9 +1457,12 @@ function jobTile(b, canOpen = true) {
         ${b.scheduled && b.priority != null
           ? `<span class="prio num">${b.priority}</span>` : ''}
         <span class="name">${esc(b.name)}</span>
-        ${b.checkin ? CHECKIN_PILL : ''}
       </span>
+      <!-- Beside the clean type rather than beside the name: on a phone a pill
+           that wide on the title line squeezes the building name into three
+           broken lines, and the name is what somebody is looking for. -->
       <span class="tile-meta">${typePill(b.cleanType)}
+        ${b.checkin ? CHECKIN_PILL : ''}
         <span class="grow">${who}${
           b.note ? `${who ? ' · ' : ''}${esc(b.note)}` : ''}</span></span>
     </span>
@@ -2209,6 +2223,12 @@ async function toggleTask(el, buildingId, day) {
   // Flip immediately so the tap feels instant, then reconcile with the server.
   el.classList.toggle('is-done', next);
   el.dataset.done = next ? '1' : '0';
+  // Only on the way in, and only until it has played: an item that is already
+  // ticked should not spring every time the screen refreshes underneath it.
+  if (next) {
+    el.classList.add('just-done');
+    el.addEventListener('animationend', () => el.classList.remove('just-done'), { once: true });
+  }
   if (task) task.done = next;
   paintBuilding(state.building, false);
 
@@ -4170,9 +4190,16 @@ async function refreshToken() {
  * guessing at.
  */
 function showLoading() {
-  app.innerHTML = `<div class="card"><div class="pad center stack">
-    <p class="muted" id="loadmsg">Loading today…</p>
-  </div></div>`;
+  // Shaped like the screen that is coming - a headline, then a list of rows -
+  // so the wait reads as the app filling in rather than as nothing happening.
+  app.innerHTML = `
+    <div class="card"><div class="skeleton">
+      <i class="tall half"></i><i class="third"></i>
+    </div></div>
+    <div class="card"><div class="skeleton">
+      <i class="half"></i><i></i><i class="third"></i>
+    </div></div>
+    <p class="tiny muted center" id="loadmsg">Loading today…</p>`;
 
   const since = Date.now();
   let asked = false;
@@ -4184,6 +4211,10 @@ function showLoading() {
     const secs = Math.round((Date.now() - since) / 1000);
     if (secs < 8) return;
 
+    // Past eight seconds this is no longer a screen loading, so the shimmer
+    // that promises one goes and the explanation takes the screen.
+    app.querySelectorAll('.card').forEach((c) => c.remove());
+    msg.className = 'card pad center';
     const waiting = window.__inflight();
     msg.innerHTML = `<strong>Still loading — ${secs}s.</strong><br>
       <span class="small">${waiting.length
@@ -4201,7 +4232,36 @@ function showLoading() {
   }, 1000);
 }
 
+/** The hash the last completed render drew, so a repeat is not a move. */
+let lastScreen = null;
+
+/**
+ * Draws the screen for the current hash, and lets it arrive.
+ *
+ * The entrance is only played when this is actually a move between screens.
+ * Several views refresh themselves on a timer and the app re-renders whenever
+ * it comes back into view; a page that fades itself in every 45 seconds, or
+ * every time a phone comes out of a pocket, looks broken rather than lively.
+ */
 async function render() {
+  const moved = location.hash !== lastScreen;
+  lastScreen = location.hash;
+
+  await route();
+
+  if (!moved) return;
+  app.classList.remove('screen-in');
+  // Reading a layout property between the two is what lets the animation
+  // restart when the same class goes back on.
+  void app.offsetWidth;
+  app.classList.add('screen-in');
+  clearTimeout(enterTimer);
+  enterTimer = setTimeout(() => app.classList.remove('screen-in'), 600);
+}
+
+let enterTimer = null;
+
+async function route() {
   stopPolling();
   closeSheet();
   // Only while index.html's boot text is still what's on screen: on every
