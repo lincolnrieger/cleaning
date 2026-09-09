@@ -327,6 +327,9 @@ const ICONS = {
   copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 5.5h-9a2 2 0 0 0-2 2v9"/>',
   trash: '<path d="M4.5 7h15"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12.5h9L17.5 7"/>',
   star: '<path d="m12 4.4 2.36 4.79 5.28.77-3.82 3.72.9 5.26L12 16.46l-4.72 2.48.9-5.26-3.82-3.72 5.28-.77z"/>',
+  // A standing job: this one comes back the same day every week.
+  repeat: '<path d="M4.5 11a7.5 7.5 0 0 1 12.9-5.2L20 8.5"/><path d="M20 4.5v4h-4"/>'
+    + '<path d="M19.5 13a7.5 7.5 0 0 1-12.9 5.2L4 15.5"/><path d="M4 19.5v-4h4"/>',
 };
 
 /** An inline icon. `cls` takes `lg` for the 20px size. */
@@ -428,6 +431,85 @@ function planningTabs(current) {
   return `<div class="tabs noprint">${tabs.map(([route, label]) =>
     `<button data-goto="${route}" aria-current="${route === current}">${esc(label)}</button>`,
   ).join('')}</div>`;
+}
+
+/**
+ * Whether the week on screen has been approved for staff, and the one button
+ * that changes it. Shared by the plan and the roster: they are approved
+ * separately but the decision reads the same either way, and two different
+ * explanations of one idea is one too many.
+ */
+function approvalCard(data, what) {
+  if (!data.canPublish) {
+    return data.published ? '' : `
+    <div class="card noprint">
+      <div class="banner info">
+        <strong>This week's ${esc(what)} isn't out yet.</strong>
+        The office is still working on it. Nothing here is final until they
+        approve it.
+      </div>
+    </div>`;
+  }
+
+  const who = data.publishedBy ? ` by ${esc(data.publishedBy)}` : '';
+  const when = data.publishedAt ? ` on ${esc(auDate(data.publishedAt.slice(0, 10)))}` : '';
+
+  return `
+    <!-- A draft is the office thinking out loud; approving it is the moment
+         it becomes a promise. The state and the button that changes it sit
+         together, above the thing they are about. -->
+    <div class="card noprint">
+      <div class="banner ${data.published ? 'done' : 'warn'}">
+        ${data.published
+          ? `<strong>Approved — staff can see this week.</strong>
+             Approved${who}${when}. Anything you change now shows to them
+             straight away.`
+          : `<strong>Draft — staff can't see this ${esc(what)} yet.</strong>
+             Move things around as much as you like. Approve it when it's
+             settled.`}
+      </div>
+      <div class="pad">
+        <button class="${data.published ? '' : 'primary'} wide approve" id="publish">
+          ${data.published
+            ? `${svgIcon('back')} Withdraw from staff`
+            : `${svgIcon('check')} Approve for staff`}</button>
+      </div>
+    </div>`;
+}
+
+/** The confirm-and-send half of the card above. */
+function wireApproval(root, { data, kind, what, from, count, rerender }) {
+  root.querySelector('#publish')?.addEventListener('click', async () => {
+    const go = await ask(data.published ? {
+      title: `Withdraw this ${what}?`,
+      body: `Staff stop seeing the ${what} for the week of
+        <strong>${esc(auDate(from))}</strong> until you approve it again.
+        Nothing in it changes.`,
+      confirmText: 'Withdraw it',
+      danger: true,
+    } : {
+      title: 'Approve this week?',
+      body: count
+        ? `Staff will see all <strong>${count}</strong> ${count === 1 ? 'entry' : 'entries'}
+           in the ${what} for the week of <strong>${esc(auDate(from))}</strong>.
+           After that, anything you change shows to them straight away.`
+        : `There is nothing in the ${what} for the week of
+           <strong>${esc(auDate(from))}</strong> yet. Approving it tells staff
+           that is the answer, rather than that you haven't finished.`,
+      confirmText: 'Approve for staff',
+    });
+    if (!go) return;
+
+    try {
+      await api('/week/publish', {
+        method: 'POST', body: { kind, from, published: !data.published },
+      });
+      toast(data.published ? 'Withdrawn from staff' : 'Approved — staff can see it');
+      rerender();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
 }
 
 function wirePlanningTabs(root) {
@@ -570,28 +652,35 @@ addEventListener('keydown', (e) => {
 /**
  * In-app replacement for window.confirm, so every prompt matches the app's
  * theme instead of dropping a browser chrome dialog on top of it.
+ *
  * Resolves false on cancel, true on confirm, or { checked } when `checkbox`
- * is supplied.
+ * is supplied - a string for one extra question, or a list of them where an
+ * action genuinely has two separate consequences to decide about. `checked`
+ * matches whichever was asked for: a boolean, or a list of them.
  */
 function ask({
   title, body = '', confirmText = 'Confirm', cancelText = 'Cancel',
   danger = false, checkbox = null,
 }) {
+  const extras = checkbox == null ? [] : [checkbox].flat();
+
   return new Promise((resolve) => {
     const bg = openSheet(`
       <div class="sheet-head"><strong>${esc(title)}</strong></div>
       <div class="pad stack">
         ${body ? `<p class="dialog-body">${body}</p>` : ''}
-        ${checkbox ? `<label class="check-row" data-extra>
+        ${extras.map((label) => `<label class="check-row" data-extra>
             <input type="checkbox">
-            <span class="grow small">${checkbox}</span>
-          </label>` : ''}
+            <span class="grow small">${label}</span>
+          </label>`).join('')}
         <button class="${danger ? 'destroy' : 'primary'} wide" data-ok>${esc(confirmText)}</button>
         <button class="wide" data-cancel>${esc(cancelText)}</button>
       </div>`);
 
-    const box = bg.querySelector('[data-extra] input');
-    if (box) box.onchange = () => box.closest('.check-row').classList.toggle('on', box.checked);
+    const boxes = [...bg.querySelectorAll('[data-extra] input')];
+    boxes.forEach((box) => {
+      box.onchange = () => box.closest('.check-row').classList.toggle('on', box.checked);
+    });
 
     let settled = false;
     const observer = new MutationObserver(() => {
@@ -605,7 +694,11 @@ function ask({
       resolve(value);
     };
 
-    bg.querySelector('[data-ok]').onclick = () => done(checkbox ? { checked: box.checked } : true);
+    const answers = () => (Array.isArray(checkbox)
+      ? boxes.map((b) => b.checked)
+      : boxes[0].checked);
+    bg.querySelector('[data-ok]').onclick = () =>
+      done(extras.length ? { checked: answers() } : true);
     bg.querySelector('[data-cancel]').onclick = () => done(false);
     bg.onclick = (e) => { if (e.target === bg) done(false); };
     observer.observe(document.body, { childList: true });
@@ -1194,7 +1287,7 @@ async function renderCleanerHome() {
   // stays a today-only job, so anything but today is read-only here.
   const day = viewDay();
   const isToday = day === state.config.today;
-  const [{ buildings }, roster] = await Promise.all([
+  const [{ buildings, planPublished }, roster] = await Promise.all([
     api(`/overview?day=${day}`),
     // null, not an empty roster: a failed request must not be mistaken for
     // "you aren't on today", which is a thing the screen now says out loud.
@@ -1217,6 +1310,9 @@ async function renderCleanerHome() {
   // "you're not on today" off the back of that would be a lie with
   // consequences, so an unapproved week says so instead.
   const rosterDraft = Boolean(roster) && roster.published === false;
+  // Same again for the plan: a week the office hasn't approved arrives empty,
+  // and "nothing scheduled" is not what that means.
+  const planDraft = planPublished === false;
 
   // Everybody rostered on this day, one entry each however many shifts they
   // have. The server hands a cleaner their colleagues' names without the
@@ -1247,7 +1343,7 @@ async function renderCleanerHome() {
           ? `<b class="num">${isToday ? left : todays.length}</b>
              ${(isToday ? left : todays.length) === 1 ? 'building' : 'buildings'}
              ${isToday ? 'left to clean' : 'on this day'}`
-          : '<b>Nothing scheduled</b>'}</p>
+          : planDraft ? '<b>Plan not out yet</b>' : '<b>Nothing scheduled</b>'}</p>
         ${todays.length ? `<div class="meter lg ${pct === 100 ? 'full' : ''}">
           <i style="width:${pct}%"></i></div>
           <p class="tiny muted gap-top-sm">${doneCount} of ${todays.length} done</p>` : ''}
@@ -1291,10 +1387,14 @@ async function renderCleanerHome() {
         <span class="num">${isToday ? `${left} left` : `${todays.length}`}</span></h2>
       ${todays.map((b) => jobTile(b, isToday)).join('')}
     </div>` : `<div class="card"><div class="empty">
-      <b>Nothing scheduled${isToday ? ' today' : ' this day'}</b>
-      ${isToday
-        ? 'Pick any building below and start whenever you like.'
-        : 'Nothing is on the plan for this day.'}
+      <b>${planDraft
+        ? 'The plan isn\'t out yet'
+        : `Nothing scheduled${isToday ? ' today' : ' this day'}`}</b>
+      ${planDraft
+        ? 'The office hasn\'t approved this week. Pick any building below if you want to get started.'
+        : isToday
+          ? 'Pick any building below and start whenever you like.'
+          : 'Nothing is on the plan for this day.'}
     </div></div>`}
 
     ${rest.length ? `<div class="card">
@@ -1375,6 +1475,9 @@ async function renderSchedule() {
 
   const isWeekend = (d) => [0, 6].includes(asDate(d).getUTCDay());
 
+  // Standing jobs, keyed the way the grid asks about them.
+  const repeats = new Set((data.repeats ?? []).map((r) => `${r.buildingId}:${r.weekday}`));
+
   const cell = (b, day) => {
     const c = data.cells[`${b.id}:${day}`] ?? {};
     const scheduled = Boolean(c.scheduled);
@@ -1398,6 +1501,9 @@ async function renderSchedule() {
           ${scheduled ? `<span class="typetag t-${type}"
             title="${esc(typeLabel(type))}">${typeTag(type)}</span>` : ''}
           ${c.completedAt ? `<span class="tickmark">${svgIcon('check')}</span>` : ''}
+          ${repeats.has(`${b.id}:${weekdayIndex(day)}`)
+            ? `<span class="repeatmark" title="Repeats every ${esc(DAY_FULL[weekdayIndex(day)])}"
+                >${svgIcon('repeat')}</span>` : ''}
         </div>
         ${scheduled
           ? `<span class="printonly celltype">${esc(typeShort(type))}</span>` : ''}
@@ -1415,10 +1521,31 @@ async function renderSchedule() {
         ${canEdit ? '' : 'disabled'}>${inner}</button></td>`;
   };
 
+  // Same as the roster: a week the office hasn't approved is withheld from
+  // staff on the server, so the grid a cleaner would get here is every
+  // building with nothing under it - which reads as "no cleaning this week".
+  const held = !data.canPublish && !data.published;
+
   app.innerHTML = `
     ${planningTabs('schedule')}
     <div class="card noprint"><div class="pad">${weekNav(from)}</div></div>
 
+    ${approvalCard(data, 'plan')}
+
+    ${data.repeatsMissing ? `<div class="card noprint">
+      <div class="banner info">
+        <strong>${data.repeatsMissing} repeating
+        ${data.repeatsMissing === 1 ? 'job is' : 'jobs are'} not on this week yet.</strong>
+        Adding them fills the empty days only — anything you have already
+        decided stays as it is.
+      </div>
+      <div class="pad"><button class="wide approve" id="applyrepeats">
+        ${svgIcon('copy')} Add the repeating jobs</button></div>
+    </div>` : ''}
+
+    ${held ? `<div class="card"><div class="empty">
+      <b>Nothing to show yet</b>
+      The plan for this week is still being worked on.</div></div>` : `
     <div class="card" id="printarea">
       <h1 class="printonly print-title">Cleaning Plan - Week Commencing ${esc(auDate(from))}</h1>
       <div class="grid-wrap">
@@ -1475,11 +1602,29 @@ async function renderSchedule() {
       ${canEdit
         ? 'Tap any square to put that building on the plan and pick Full Clean or Check. Give it an order only when one matters — numbered jobs lead the day\'s list.'
         : 'This is the plan. The office sets it — tap a building on your home screen to start cleaning.'}
-    </p>`;
+    </p>`}`;
 
   wirePlanningTabs(app);
   wireWeekNav(app, renderSchedule);
-  $('#print').onclick = () => window.print();
+  wireApproval(app, {
+    data, kind: 'plan', what: 'plan', from,
+    count: Object.values(data.cells).filter((c) => c.scheduled).length,
+    rerender: renderSchedule,
+  });
+
+  $('#applyrepeats')?.addEventListener('click', async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      const res = await api('/schedule/repeats/apply', { method: 'POST', body: { from } });
+      toast(`${res.added} repeating job${res.added === 1 ? '' : 's'} added`);
+      renderSchedule();
+    } catch (e) {
+      toast(e.message, true);
+      ev.currentTarget.disabled = false;
+    }
+  });
+
+  $('#print')?.addEventListener('click', () => window.print());
 
   app.querySelectorAll('[data-grouptoggle]').forEach((head) => {
     const key = head.dataset.grouptoggle;
@@ -1507,6 +1652,12 @@ function openScheduleEditor(data, buildingId, day) {
   const cell = data.cells[`${buildingId}:${day}`] ?? {};
   const scheduled = Boolean(cell.scheduled);
   let cleanType = cell.cleanType ?? 'full';
+
+  // A standing arrangement is set here, next to the one-off it usually starts
+  // as: "put it on this Saturday" and "and every Saturday" are one thought.
+  const weekday = weekdayIndex(day);
+  const repeat = (data.repeats ?? []).find(
+    (r) => r.buildingId === buildingId && r.weekday === weekday);
 
   const sheet = openSheet(`
     <div class="sheet-head">
@@ -1544,6 +1695,15 @@ function openScheduleEditor(data, buildingId, day) {
         <input id="note" maxlength="200" value="${esc(cell.note ?? '')}"
           placeholder="Group arriving 2pm — finish by 1pm"></label>
 
+      <label class="switch-row">
+        <input type="checkbox" id="repeat" ${repeat ? 'checked' : ''}>
+        <span class="grow">
+          <strong>Every ${esc(DAY_FULL[weekday])}</strong>
+          <span class="small muted">Saved as a standing job. Future weeks are
+            filled from it, and a week already on the plan is left alone.</span>
+        </span>
+      </label>
+
       <p class="err" id="err"></p>
       <button class="primary wide" id="save">${scheduled ? 'Save changes' : 'Add to schedule'}</button>
       ${scheduled ? '<button class="wide danger" id="clear">Remove from schedule</button>' : ''}
@@ -1562,19 +1722,29 @@ function openScheduleEditor(data, buildingId, day) {
 
   sheet.querySelector('#save').onclick = async (ev) => {
     ev.currentTarget.disabled = true;
+    const wantRepeat = sheet.querySelector('#repeat').checked;
+    const body = {
+      buildingId, day, cleanType,
+      // Blank means blank: a new job is created with no priority set.
+      priority: sheet.querySelector('#prio').value.trim() || null,
+      checkin: sheet.querySelector('#checkin').checked,
+      note: sheet.querySelector('#note').value,
+    };
+
     try {
-      await api('/schedule', {
-        method: 'POST',
-        body: {
-          buildingId, day, cleanType,
-          // Blank means blank: a new job is created with no priority set.
-          priority: sheet.querySelector('#prio').value.trim() || null,
-          checkin: sheet.querySelector('#checkin').checked,
-          note: sheet.querySelector('#note').value,
-        },
-      });
+      await api('/schedule', { method: 'POST', body });
+      // The standing arrangement carries the same answers as the day it was
+      // set from, so "every Saturday" means every Saturday like this one.
+      if (wantRepeat || repeat) {
+        await api('/schedule/repeat', {
+          method: 'POST',
+          body: { ...body, weekday, repeat: wantRepeat },
+        });
+      }
       closeSheet();
-      toast('Schedule updated');
+      toast(wantRepeat
+        ? `Scheduled, and every ${DAY_FULL[weekday]} from now on`
+        : 'Schedule updated');
       renderSchedule();
     } catch (e) {
       sheet.querySelector('#err').textContent = e.message;
@@ -1584,6 +1754,17 @@ function openScheduleEditor(data, buildingId, day) {
 
   sheet.querySelector('#clear')?.addEventListener('click', async () => {
     const workDone = (cell.done ?? 0) > 0 || Boolean(cell.completedAt);
+    // Two separate consequences, so two separate questions: taking a day off
+    // the plan is not the same as calling off a standing arrangement, and
+    // silently doing the second would put the job back next week.
+    const extras = [
+      workDone ? `Also wipe that day's ticks, photos and sign-off
+        <span class="tiny muted">Only for the
+          ${esc(typeLabel(cell.cleanType ?? 'full'))} checklist. Goes back to 0 done.</span>` : null,
+      repeat ? `Also stop it repeating every ${esc(DAY_FULL[weekday])}
+        <span class="tiny muted">Otherwise it comes back on the plan next week.</span>` : null,
+    ];
+
     const res = await ask({
       title: 'Remove from schedule?',
       body: workDone
@@ -1595,20 +1776,24 @@ function openScheduleEditor(data, buildingId, day) {
            ${esc(dayLabel(day).toLowerCase())}.`,
       confirmText: 'Remove',
       danger: true,
-      checkbox: workDone
-        ? `Also wipe that day's ticks, photos and sign-off
-           <span class="tiny muted">Only for the
-             ${esc(typeLabel(cell.cleanType ?? 'full'))} checklist. Goes back to 0 done.</span>`
-        : null,
+      checkbox: extras.filter(Boolean),
     });
     if (!res) return;
 
-    await api('/schedule/clear', {
-      method: 'POST',
-      body: { buildingId, day, clearProgress: Boolean(res.checked) },
-    });
+    // The answers come back in the order they were asked, and either question
+    // may not have been asked at all.
+    const answers = [res.checked].flat();
+    const clearProgress = Boolean(extras[0] && answers.shift());
+    const stopRepeat = Boolean(extras[1] && answers.shift());
+
+    await api('/schedule/clear', { method: 'POST', body: { buildingId, day, clearProgress } });
+    if (stopRepeat) {
+      await api('/schedule/repeat', {
+        method: 'POST', body: { buildingId, weekday, repeat: false },
+      });
+    }
     closeSheet();
-    toast(res.checked ? 'Removed and progress cleared' : 'Removed from schedule');
+    toast(clearProgress ? 'Removed and progress cleared' : 'Removed from schedule');
     renderSchedule();
   });
 }
@@ -1691,8 +1876,6 @@ async function renderBuilding(id, wantType) {
       <span class="oneshot-mark">${svgIcon('check')}</span>
       <p class="oneshot-lead"></p>
       ${locked ? '' : '<button class="primary oneshot-btn" id="complete"></button>'}
-      ${state.user.role === 'admin' ? `<p class="tiny muted oneshot-hint">
-        Add a checklist under Checklists if this one ever needs one.</p>` : ''}
     </div>` : `
     <div class="card" id="items">${data.items.map((t) => taskRow(t, locked)).join('')}</div>
     <p class="tiny muted center">
@@ -2210,9 +2393,13 @@ async function renderIssues(status = 'open') {
              data-photo="${esc(i.photo_key)}">` : ''}
           <div class="tiny muted">Reported by ${esc(i.reported_by)} on ${esc(auDate(i.day))}
             ${i.resolved_at ? ` · resolved by ${esc(i.resolved_by)}` : ''}</div>
-          ${canResolve ? `<div class="gap-top-sm">
+          ${canResolve ? `<div class="gap-top-sm row tight wrap">
             <button class="sm" data-r="${i.id}" data-reopen="${status === 'resolved'}">
-              ${status === 'resolved' ? 'Reopen' : 'Mark resolved'}</button></div>` : ''}
+              ${status === 'resolved' ? 'Reopen' : 'Mark resolved'}</button>
+            <!-- Resolving is how a report normally ends and keeps the record.
+                 Deleting is for the ones that should never have been one. -->
+            <button class="sm ghost" data-del="${i.id}"
+              title="Delete this report">${svgIcon('trash')} Delete</button></div>` : ''}
         </div>`).join('')
         : `<div class="empty"><b>Nothing ${status === 'open' ? 'outstanding' : 'here yet'}</b>
            ${status === 'open' ? "Everything reported so far has been dealt with." : ''}</div>`}
@@ -2225,6 +2412,28 @@ async function renderIssues(status = 'open') {
   app.querySelectorAll('[data-s]').forEach((b) => {
     b.onclick = () => renderIssues(b.dataset.s);
   });
+  app.querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = async () => {
+      const report = items.find((i) => i.id === Number(b.dataset.del));
+      const go = await ask({
+        title: 'Delete this report?',
+        body: `<strong>${esc(report.building)}</strong> — ${esc(report.detail)}
+          <br><br>It goes for good, photo and all. If it was a real fault that
+          has been dealt with, mark it resolved instead — that keeps the record.`,
+        confirmText: 'Delete it',
+        danger: true,
+      });
+      if (!go) return;
+      try {
+        await api('/maintenance/delete', { method: 'POST', body: { id: report.id } });
+        toast('Report deleted');
+        renderIssues(status);
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+
   app.querySelectorAll('[data-r]').forEach((b) => {
     b.onclick = async () => {
       try {
@@ -2760,34 +2969,7 @@ async function renderRoster() {
           .join('; ')}${conflicts.length > 4 ? `; and ${conflicts.length - 4} more` : ''}.
       </div></div>` : ''}
 
-    ${data.canPublish ? `
-    <!-- Whether this week counts yet. A draft is the office thinking out
-         loud; approving it is the moment it becomes a promise, so the state
-         and the button that changes it sit together above the grid. -->
-    <div class="card noprint">
-      <div class="banner ${data.published ? 'done' : 'warn'}">
-        ${data.published
-          ? `<strong>Approved — staff can see this week.</strong>
-             ${esc(data.publishedBy ?? '')}${data.publishedAt
-               ? ` on ${esc(auDate(data.publishedAt.slice(0, 10)))}` : ''}.
-             Anything you change now shows to them straight away.`
-          : `<strong>Draft — staff can't see this week yet.</strong>
-             Move shifts around as much as you like. Approve it when it's settled.`}
-      </div>
-      <div class="pad">
-        <button class="${data.published ? '' : 'primary'} wide approve" id="publish">
-          ${data.published
-            ? `${svgIcon('back')} Withdraw from staff`
-            : `${svgIcon('check')} Approve for staff`}</button>
-      </div>
-    </div>` : data.published ? '' : `
-    <div class="card noprint">
-      <div class="banner info">
-        <strong>This week's roster isn't out yet.</strong>
-        The office is still working on it. Nothing here is final until they
-        approve it.
-      </div>
-    </div>`}
+    ${approvalCard(data, 'roster')}
 
     ${held ? '' : `
     <!-- The roster keeps the wider sheet: its squares carry start and finish
@@ -2835,37 +3017,9 @@ async function renderRoster() {
   $('#csv')?.addEventListener('click', () =>
     download(`/roster/export?from=${from}`, `roster-week-${auDate(from)}.csv`));
 
-  $('#publish')?.addEventListener('click', async () => {
-    const shifts = data.shifts.length;
-    const go = await ask(data.published ? {
-      title: 'Withdraw this week?',
-      body: `Staff stop seeing the week of
-        <strong>${esc(auDate(from))}</strong> until you approve it again.
-        None of the shifts change.`,
-      confirmText: 'Withdraw it',
-      danger: true,
-    } : {
-      title: 'Approve this week?',
-      body: shifts
-        ? `Staff will see all <strong>${shifts}</strong> shift${shifts === 1 ? '' : 's'}
-           for the week of <strong>${esc(auDate(from))}</strong>. After that, anything
-           you change shows to them straight away.`
-        : `There are no shifts in the week of <strong>${esc(auDate(from))}</strong> yet.
-           Approving it tells staff that is the answer, rather than that you
-           haven't finished.`,
-      confirmText: 'Approve for staff',
-    });
-    if (!go) return;
-
-    try {
-      await api('/roster/publish', {
-        method: 'POST', body: { from, published: !data.published },
-      });
-      toast(data.published ? 'Withdrawn from staff' : 'Approved — staff can see it');
-      renderRoster();
-    } catch (e) {
-      toast(e.message, true);
-    }
+  wireApproval(app, {
+    data, kind: 'roster', what: 'roster', from,
+    count: data.shifts.length, rerender: renderRoster,
   });
 
   $('#copyweek')?.addEventListener('click', async () => {

@@ -162,15 +162,37 @@ const TABLES = [
      updated_at TEXT    NOT NULL
    )`,
 
-  // A week of the roster is a draft until somebody approves it. No row means
-  // draft: cleaners are shown nothing for that week, so the office can move
-  // shifts around for as long as it takes without anyone making plans around
-  // a version that is about to change. Approving is per week rather than
-  // global because that is the unit the roster is actually built in.
-  `CREATE TABLE IF NOT EXISTS roster_published (
-     week_start   TEXT PRIMARY KEY,
+  // A week of the plan or the roster is a draft until somebody approves it.
+  // No row means draft: cleaners are shown nothing for that week, so the
+  // office can move things around for as long as it takes without anyone
+  // making plans around a version that is about to change. Per week, because
+  // that is the unit both of them are actually built in, and per kind,
+  // because which buildings need cleaning and who is in are settled at
+  // different times by different people.
+  `CREATE TABLE IF NOT EXISTS published_weeks (
+     kind         TEXT NOT NULL CHECK (kind IN ('plan', 'roster')),
+     week_start   TEXT NOT NULL,
      published_at TEXT NOT NULL,
-     published_by TEXT NOT NULL
+     published_by TEXT NOT NULL DEFAULT '',
+     PRIMARY KEY (kind, week_start)
+   )`,
+
+  // A building that gets the same clean on the same weekday every week -
+  // the Saturday changeover, the Monday check. Kept apart from `schedule`
+  // rather than written years ahead into it: a standing arrangement that
+  // changes should change from the next week onwards, not retrospectively,
+  // and a week already on the plan is a fact rather than a prediction.
+  `CREATE TABLE IF NOT EXISTS schedule_repeat (
+     id          INTEGER PRIMARY KEY,
+     building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+     weekday     INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+     clean_type  TEXT    NOT NULL DEFAULT 'full',
+     priority    INTEGER,
+     checkin     INTEGER NOT NULL DEFAULT 0,
+     note        TEXT,
+     created_by  TEXT    NOT NULL,
+     created_at  TEXT    NOT NULL,
+     UNIQUE (building_id, weekday)
    )`,
 
   // What somebody can work in one particular week, overriding the standing
@@ -209,6 +231,7 @@ const INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_roster_day ON roster (day, start_time)`,
   `CREATE INDEX IF NOT EXISTS idx_roster_user ON roster (user_id, day)`,
   `CREATE INDEX IF NOT EXISTS idx_availability_weeks ON availability_weeks (week_start)`,
+  `CREATE INDEX IF NOT EXISTS idx_schedule_repeat ON schedule_repeat (weekday)`,
 ];
 
 
@@ -506,6 +529,39 @@ async function ensureFlatChecklist(db) {
 async function dropRetiredTables(db) {
   await db.prepare('DROP TABLE IF EXISTS schedule_assignees').run();
   await db.prepare('DROP TABLE IF EXISTS areas').run();
+  await db.prepare('DROP TABLE IF EXISTS roster_published').run();
+}
+
+/**
+ * Approving a week is new. Every week that already has a plan or a roster in
+ * it was, by definition, already being worked from - so those weeks are
+ * carried across as approved rather than vanishing from every cleaner's phone
+ * the moment this deploys. Only the weeks built from here on need approving.
+ *
+ * `published_by` is left empty on the way through: nobody approved these, and
+ * putting a name to it would be inventing one.
+ */
+async function ensureWeekApprovals(db) {
+  // The Monday of a date's week: forward to Sunday, then back six days. Same
+  // arithmetic as the front end, done where the rows are.
+  const monday = "date(day, 'weekday 0', '-6 days')";
+
+  // An earlier build of this had a roster-only table. Anything approved there
+  // stays approved.
+  const legacy = await tableSql(db, 'roster_published');
+  if (legacy) {
+    await db.prepare(
+      `INSERT OR IGNORE INTO published_weeks (kind, week_start, published_at, published_by)
+       SELECT 'roster', week_start, published_at, published_by FROM roster_published`,
+    ).run();
+  }
+
+  for (const [kind, table] of [['plan', 'schedule'], ['roster', 'roster']]) {
+    await db.prepare(
+      `INSERT OR IGNORE INTO published_weeks (kind, week_start, published_at, published_by)
+       SELECT '${kind}', ${monday}, datetime('now'), '' FROM ${table} GROUP BY ${monday}`,
+    ).run();
+  }
 }
 
 /* --------------------------------------------------------- checklist sync */
@@ -673,7 +729,7 @@ const COLUMNS = [
  * indexes and columns hash themselves; those four are code, so they need a
  * hand.
  */
-const MIGRATIONS_TAG = '2026-09-optional-priority';
+const MIGRATIONS_TAG = '2026-09-week-approvals';
 
 /** What a fully migrated database of this version looks like. */
 const schemaStamp = () =>
@@ -696,7 +752,9 @@ async function buildSchema(db) {
   await ensureStatusCleanTypes(db);
   await ensureOptionalPriority(db);
   await ensureFlatChecklist(db);
-  // Last: the flatten above is the final reader of `areas`.
+  await ensureWeekApprovals(db);
+  // Last: the flatten above is the final reader of `areas`, and the approval
+  // backfill above is the last reader of the roster-only publish table.
   await dropRetiredTables(db);
 
   await db.batch(INDEXES.map((sql) => db.prepare(sql)));
