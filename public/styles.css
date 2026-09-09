@@ -1026,6 +1026,63 @@ textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
 .actionbar .primary { flex: 1; min-height: 46px; }
 .actionbar .ghost { flex: none; border-color: var(--line); }
 
+/* The bar's only button when the job's own button is the screen above it. */
+.actionbar .wide { flex: 1; min-height: 46px; }
+
+/* ------------------------------------------- a building with nothing to tick */
+
+/* Some buildings are a single job, and a checklist of one line saying "clean
+   it" helps nobody. The screen for them is the button that ends the job:
+   thumb-sized on a phone, and on a laptop a target you can hit without
+   aiming. */
+.oneshot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s6) var(--s4);
+  text-align: center;
+}
+
+.oneshot-mark {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.oneshot-mark .ico { width: 26px; height: 26px; vertical-align: 0; stroke-width: 2; }
+
+.oneshot-lead {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--ink-2);
+  font-size: 15.5px;
+  line-height: 1.45;
+}
+
+/* Wide enough to be the obvious thing to press, capped so it doesn't become a
+   slab across a desktop window. */
+.oneshot-btn { width: 100%; max-width: 360px; min-height: 52px; font-size: 16px; }
+
+.oneshot-hint { margin: 0; max-width: 34ch; }
+
+/* Signed off: the same card, in the colour the rest of the app uses for done.
+   Reopening is a correction, so it stops being the loudest thing on screen. */
+.oneshot.is-done .oneshot-mark { background: var(--done-wash); color: var(--done); }
+
+.oneshot.is-done .oneshot-btn {
+  background: none;
+  border-color: var(--line);
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.oneshot.is-done .oneshot-btn:hover { background: var(--hover); }
+
 /* ----------------------------------------------------------- item photos */
 
 .shots {
@@ -1620,7 +1677,13 @@ code.phrase {
    furniture goes and the type steps down. Elements are removed rather than
    hidden so nothing leaves a gap. */
 @media print {
-  @page { size: A4 landscape; margin: 11mm; }
+  /* Buildings run down the page, not across it, so portrait is simply more
+     rows per sheet - there are seven day columns either way. The roster is
+     the exception: its squares carry start and finish times, which need the
+     wider sheet, so it asks for a landscape page of its own. */
+  @page { size: A4 portrait; margin: 9mm 8mm; }
+  @page rostersheet { size: A4 landscape; margin: 9mm 8mm; }
+  #printarea.print-landscape { page: rostersheet; }
 
   header.bar, nav.nav, .fab, .toast, .testbar, .noprint, .sheet-bg,
   .card-toggle, .legend, .actionbar { display: none !important; }
@@ -1630,8 +1693,8 @@ code.phrase {
 
   .printonly { display: block; }
 
-  .print-title { font-size: 14pt; font-weight: 700; letter-spacing: .02em; margin: 0 0 7pt; text-align: center; }
-  .print-foot { font-size: 8pt; color: #444; margin: 7pt 0 0; text-align: center; }
+  .print-title { font-size: 13pt; font-weight: 700; letter-spacing: .02em; margin: 0 0 5pt; text-align: center; }
+  .print-foot { font-size: 7.5pt; color: #444; margin: 5pt 0 0; text-align: center; }
 
   main > .card:not(#printarea) { display: none !important; }
   main > .tabs, main > .row, main > p { display: none !important; }
@@ -1640,19 +1703,45 @@ code.phrase {
   .grid-wrap { overflow: visible !important; }
 
   /* The min-width that makes the grid scroll on a phone would push it off the
-     side of the page here; paper has a fixed width and no scrollbar. */
-  table.sched { width: 100%; min-width: 0; font-size: 9pt; }
-  table.sched th, table.sched td { border-color: #999 !important; padding: 4pt 3pt; }
+     side of the page here; paper has a fixed width and no scrollbar. Fixed
+     layout is what makes it space-efficient: left to itself the browser hands
+     a column with a long note half the sheet, and the other six get slivers. */
+  table.sched {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+    font-size: 8pt;
+  }
+
+  table.sched th, table.sched td { border-color: #999 !important; padding: 2pt 2.5pt; }
   table.sched thead th { background: #eee !important; color: #000; position: static !important; }
-  table.sched th.rowhead { position: static !important; background: #fff !important; width: 20%; font-size: 9.5pt; }
-  table.sched th.rowhead small { color: #555; }
+
+  /* The name column takes what it needs and no more - every millimetre it
+     gives back is shared between the seven days. Fixed layout reads its
+     widths off the first row, so the size has to be set on the header cell:
+     a width on the row headings below it would be ignored. */
+  table.sched thead th.corner { width: 27%; }
+  table.sched.roster thead th.corner { width: 17%; }
+
+  table.sched th.rowhead {
+    position: static !important;
+    background: #fff !important;
+    font-size: 8.5pt;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+  table.sched th.rowhead small { color: #555; font-size: 7pt; }
+
+  /* A plan that runs onto a second page needs its days named there too. */
+  table.sched thead { display: table-header-group; }
+
   td.today-col, td.weekend, .cell.rcell.off-day { background: #fff !important; }
 
-  .cell.rcell { min-height: 0; background: #fff !important; box-shadow: none; border: none; padding: 2pt; }
-  .shift b { font-size: 9.5pt; color: #000; }
+  .cell.rcell { min-height: 0; background: #fff !important; box-shadow: none; border: none; padding: 1pt; }
+  .shift b { font-size: 9pt; color: #000; }
   .shift .tiny { color: #444; }
   .shift .warnmark { color: #000; }
-  .offtext { color: #666; font-size: 8.5pt; }
+  .offtext { color: #666; font-size: 8pt; }
 
   /* The "+" and the preference star are on-screen affordances - there is
      nothing to tap on paper, and they'd read as marks that mean something. */
@@ -1667,24 +1756,49 @@ code.phrase {
   /* A group folded shut on screen is still part of the week. Printing the
      plan with buildings silently missing would be worse than useless. */
   table.sched tr[data-group] { display: table-row !important; }
-  .grouphead-row th { padding: 5pt 3pt 2pt !important; }
-  .grouphead-row .grouphead { font-size: 9pt; font-weight: 700; color: #000; padding: 0; }
+  .grouphead-row th { padding: 4pt 2.5pt 1pt !important; }
+  .grouphead-row .grouphead {
+    font-size: 8.5pt; font-weight: 700; color: #000;
+    padding: 0; min-height: 0; background: none;
+  }
   .grouphead-row .chev, .grouphead-row .num { display: none !important; }
 
+  /* A heading stranded at the foot of a page belongs to nothing. */
+  .grouphead-row { break-after: avoid; }
+
   /* Colour is how the two cleans tell themselves apart on screen; on paper,
-     which is often greyscale, the word does it instead. */
-  .cell.on { background: #fff !important; border: none; box-shadow: none; min-height: 0; }
+     which is often greyscale, the word does it instead. The tinted fills and
+     coloured outlines print as muddy boxes, so every square is plain white
+     and the writing inside it carries the meaning. */
+  .cell, .cell.on, .cell.on.t-check, .cell.complete {
+    background: #fff !important;
+    border: none;
+    box-shadow: none !important;
+  }
   .cell .typetag, .cell .plus, .cell .mini { display: none !important; }
+
+  /* An unscheduled day is a blank square. On screen it is a 54px tap target;
+     on paper that target is dead space, and with seven of them a row it is
+     what stops a page holding more buildings. */
+  .cell { min-height: 0; padding: 0; gap: 1pt; }
+  .cell-top { gap: 2pt; }
   /* Ink, not pink: the plan gets printed on a mono printer. */
-  .checkmark { background: #000 !important; color: #fff !important; font-size: 7.5pt; }
+  .checkmark { background: #000 !important; color: #fff !important; font-size: 6.5pt; }
   .prio.checkin { box-shadow: none !important; }
+  /* The screen badge is a fixed 24px so it stays a tap-sized dot; on paper
+     that height sets the height of every row it appears in. */
   .cell .prio {
     background: #000 !important; color: #fff !important;
-    font-size: 8pt; min-width: 13pt; padding: 0 2pt;
+    font-size: 7.5pt; min-width: 11pt; height: auto; padding: 0 1.5pt;
+    line-height: 1.25;
   }
-  .cell .celltype { font-size: 8.5pt; color: #000; display: block; margin-top: 1pt; }
-  .cell .names { font-size: 7.5pt; color: #444; white-space: normal; overflow: visible; }
+  .cell .celltype { font-size: 8pt; color: #000; display: block; margin-top: 0; line-height: 1.1; }
+  .cell .names {
+    font-size: 6.5pt; color: #444; line-height: 1.15;
+    white-space: normal; overflow: visible; overflow-wrap: anywhere;
+  }
   .cell .tickmark { color: #000; }
+  .cell .tickmark .ico { width: 8pt; height: 8pt; }
 
   /* On screen a note is clipped to keep the row tight; on paper nothing
      should be silently cut out of a document people work from. */
