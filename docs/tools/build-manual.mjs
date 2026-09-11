@@ -5,14 +5,17 @@
  *   node docs/tools/build-manual.mjs
  *   node docs/tools/build-manual.mjs --pdf-only    # skip the screenshots
  *
- * The screenshots are taken from the real front end running against the
- * stand-in API in mock-server.mjs, so they can never drift into showing a
- * screen the app does not have.
+ * The words come from content.mjs, shared with the Word version. The
+ * screenshots are taken from the real front end running against the stand-in
+ * API in mock-server.mjs, so they can never drift into showing a screen the
+ * app does not have.
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { startServer } from './mock-server.mjs';
+import { CONTACTS, PAGES, SUBTITLE, TITLE } from './content.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DOCS = path.resolve(HERE, '..');
@@ -23,6 +26,8 @@ const BASE = 'http://127.0.0.1:8787';
 const EXECUTABLE = process.env.CHROMIUM_PATH || undefined;
 
 const CLEANER = { id: 3, name: 'Casey Miller', role: 'cleaner' };
+
+/* ------------------------------------------------------------ screenshots */
 
 async function screenshots(browser) {
   const ctx = await browser.newContext({
@@ -45,42 +50,7 @@ async function screenshots(browser) {
     await settle();
   };
 
-  /** Blue numbered circles, anchored to real elements so they can't drift. */
-  const annotate = (marks) => page.evaluate((list) => {
-    document.querySelectorAll('.callout').forEach((n) => n.remove());
-    const cardLeft = document.querySelector('main .card').getBoundingClientRect().left;
-    for (const { sel, text, within, n } of list) {
-      const scope = within
-        ? [...document.querySelectorAll('.tile')].find((t) => t.textContent.includes(within))
-        : document;
-      if (!scope) continue;
-      const el = text
-        ? [...scope.querySelectorAll(sel)].find((e) => e.textContent.includes(text))
-        : scope.querySelector(sel);
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      const badge = document.createElement('div');
-      badge.className = 'callout';
-      badge.textContent = n;
-      Object.assign(badge.style, {
-        position: 'absolute',
-        left: `${cardLeft - 14}px`,
-        top: `${r.top + scrollY + r.height / 2 - 14}px`,
-        width: '28px',
-        height: '28px',
-        borderRadius: '50%',
-        background: '#1d5fd0',
-        color: '#fff',
-        font: '700 16px/28px system-ui, sans-serif',
-        textAlign: 'center',
-        boxShadow: '0 0 0 3px #fff',
-        zIndex: '60',
-      });
-      document.body.append(badge);
-    }
-  }, marks);
-
-  /* Signing in: the names, then the pad. */
+  /* Logging in: the names, then the pad. */
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
   await settle();
   await shot('sign-in-names');
@@ -101,50 +71,16 @@ async function screenshots(browser) {
   await page.reload({ waitUntil: 'networkidle' });
   await settle(1200);
   await shot('todays-list-plain');
-  await annotate([
-    { sel: '.periodnav', n: '1' },
-    { sel: '.headline', n: '2' },
-    { sel: '.banner.info', n: '3' },
-    { sel: '.card h2', text: 'To clean today', n: '4' },
-  ]);
-  await settle(300);
-  await shot('todays-list');
-
-  await page.evaluate(() => window.scrollTo(0, 560));
-  await settle(400);
-  await annotate([
-    { sel: '.pill.idle', within: 'Manor', n: '5' },
-    { sel: '.tile-count', within: 'Manor', n: '6' },
-    { sel: '.pill.done', within: 'Staff Toilet', n: '7' },
-  ]);
-  await settle(300);
-  await shot('todays-list-more');
-
-  // The badges live on <body>, which survives a change of screen, and the
-  // scroll position survives with it. Both go before anything else is taken.
-  await page.evaluate(() => {
-    document.querySelectorAll('.callout').forEach((n) => n.remove());
-    window.scrollTo(0, 0);
-  });
 
   /* A building with no checklist: one button is the whole job. */
   await go('/#/b/2');
   await shot('building');
-
-  /* The three tabs, on their own. Taken here, where the tab bar has empty
-     page behind it: it is translucent, so anywhere else it captures a ghost
-     of whatever it was sitting over. */
-  await (await page.$('#nav')).screenshot({ path: path.join(SHOTS, 'tabs.png') });
 
   await page.click('#complete');
   await settle(600);
   await shot('confirm');
   await page.click('[data-cancel]');
   await settle(400);
-
-  /* The same screen once it has been signed off. */
-  await go('/#/b/3');
-  await shot('signed-off');
 
   /* Reporting something. */
   await go('/#/b/2');
@@ -155,22 +91,110 @@ async function screenshots(browser) {
   await settle(300);
   await shot('report');
 
-  await go('/#/issues');
-  await shot('reports-list');
-
-  /* The week, as a cleaner sees it. */
-  await go('/#/roster');
-  await settle(600);
-  await shot('roster');
-
   await ctx.close();
 }
 
+/* ------------------------------------------------------------- the pages */
+
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]
+));
+
+const imageBlock = (images) => `<div class="shots${images.length > 1 ? ' two' : ''}">
+    ${images.map(([name, caption]) => `<figure>
+      <img src="manual/${name}.png" alt="${esc(caption)}">
+      <figcaption>${esc(caption)}</figcaption>
+    </figure>`).join('')}
+  </div>`;
+
+const pageHTML = (page, index) => `<section class="page">
+  ${index === 0 ? `<p class="mark">${esc(TITLE)}</p>` : ''}
+  <h1>${esc(page.title)}</h1>
+  ${page.address ? `<p class="address">The app is at:
+    <span class="write-in"></span></p>` : ''}
+  <ol>${page.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
+  ${imageBlock(page.images)}
+  ${page.note ? `<p class="note">${esc(page.note)}</p>` : ''}
+  ${page.contacts ? `<div class="contacts">${CONTACTS.map(([label, number]) =>
+    `<p><span>${esc(label)}</span><b>${esc(number)}</b></p>`).join('')}</div>` : ''}
+</section>`;
+
+const documentHTML = () => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${esc(TITLE)} — ${esc(SUBTITLE)}</title>
+<style>
+/* Generated by docs/tools/build-manual.mjs — edit the words in content.mjs. */
+@page { size: A4 portrait; margin: 0; }
+
+body {
+  margin: 0;
+  font: 13pt/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #16191f;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.page {
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  padding: 22mm 20mm;
+  page-break-after: always;
+  overflow: hidden;
+}
+.page:last-child { page-break-after: auto; }
+
+.mark { margin: 0 0 4mm; font-size: 12pt; color: #6b7280; }
+h1 { margin: 0 0 8mm; font-size: 30pt; line-height: 1.1; }
+
+.address { margin: 0 0 6mm; font-size: 13pt; }
+.write-in {
+  display: inline-block;
+  min-width: 80mm;
+  border-bottom: 1px solid #9aa3b0;
+}
+
+ol { margin: 0 0 8mm; padding-left: 9mm; font-size: 15pt; }
+ol li { margin-bottom: 4mm; padding-left: 2mm; }
+
+.shots { display: flex; justify-content: center; gap: 12mm; }
+.shots figure { margin: 0; text-align: center; }
+.shots img {
+  display: block;
+  width: 76mm;
+  border: 1px solid #dfe3e9;
+  border-radius: 3mm;
+}
+.shots.two img { width: 65mm; }
+figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
+
+.note {
+  margin: 8mm 0 0;
+  font-size: 13pt;
+  color: #4a5261;
+}
+
+.contacts { display: flex; gap: 10mm; margin-top: 8mm; }
+.contacts p { margin: 0; font-size: 13pt; }
+.contacts span { color: #6b7280; }
+.contacts b { margin-left: 3mm; font-size: 16pt; }
+</style>
+</head>
+<body>
+${PAGES.map(pageHTML).join('\n')}
+</body>
+</html>
+`;
+
 async function pdf(browser) {
+  const html = path.join(DOCS, 'cleaner-manual.html');
+  fs.writeFileSync(html, documentHTML());
+
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
-  await page.goto(`file://${path.join(DOCS, 'cleaner-manual.html')}`,
-    { waitUntil: 'networkidle' });
+  await page.goto(`file://${html}`, { waitUntil: 'networkidle' });
   await page.emulateMedia({ media: 'print' });
   await page.pdf({
     path: path.join(DOCS, 'cleaner-manual.pdf'),
