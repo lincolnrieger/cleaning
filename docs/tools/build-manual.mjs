@@ -15,11 +15,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { startServer } from './mock-server.mjs';
-import { CONTACTS, PAGES, SUBTITLE, TITLE } from './content.mjs';
+import { CONTACTS, COVER, PAGES, SUBTITLE, TITLE } from './content.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DOCS = path.resolve(HERE, '..');
 const SHOTS = path.join(DOCS, 'manual');
+const ICON = path.resolve(HERE, '../../public/icon-192.png');
 const BASE = 'http://127.0.0.1:8787';
 
 // Playwright's own download, or the browser this machine already has.
@@ -114,6 +115,8 @@ async function screenshots(browser) {
 
   await ctx.close();
 
+  fs.copyFileSync(ICON, path.join(SHOTS, 'icon.png'));
+
   /* The install bar, as each kind of phone sees it. */
   await installBar(browser, 'install-android');
   await installBar(browser, 'install-iphone', IPHONE_UA);
@@ -144,11 +147,24 @@ const imageBlock = (images) => `<div class="shots${images.length > 1 ? ' two' : 
     </figure>`).join('')}
   </div>`;
 
-const pageHTML = (page, index) => `<section class="page">
-  ${index === 0 ? `<p class="mark">${esc(TITLE)}</p>` : ''}
+const coverHTML = () => `<section class="page cover">
+  <img class="icon" src="manual/icon.png" alt="">
+  <p class="mark">${esc(COVER.kicker)}</p>
+  <h1 class="big">${esc(TITLE)}</h1>
+  <p class="sub">${esc(SUBTITLE)}</p>
+  <p class="blurb">${esc(COVER.blurb)}</p>
+
+  <p class="address">The app is at: <span class="write-in"></span></p>
+
+  <p class="inside-head">${esc(COVER.inside)}</p>
+  <ol class="inside">${PAGES.map((p) => `<li>${esc(p.title)}</li>`).join('')}</ol>
+
+  <div class="contacts">${CONTACTS.map(([label, number]) =>
+    `<p><span>${esc(label)}</span><b>${esc(number)}</b></p>`).join('')}</div>
+</section>`;
+
+const pageHTML = (page) => `<section class="page">
   <h1>${esc(page.title)}</h1>
-  ${page.address ? `<p class="address">The app is at:
-    <span class="write-in"></span></p>` : ''}
   <ol>${page.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
   ${imageBlock(page.images)}
   ${page.note ? `<p class="note">${esc(page.note)}</p>` : ''}
@@ -213,6 +229,19 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
   color: #4a5261;
 }
 
+.cover .icon { width: 24mm; height: 24mm; display: block; margin-bottom: 10mm; }
+.cover .mark { margin-bottom: 2mm; }
+h1.big { font-size: 42pt; margin-bottom: 3mm; }
+.cover .sub { margin: 0 0 8mm; font-size: 17pt; color: #4a5261; }
+.cover .blurb { margin: 0 0 14mm; font-size: 15pt; max-width: 150mm; }
+.cover .address { margin-bottom: 16mm; }
+/* Pinned to the foot of the page: the numbers are what somebody reaches for
+   when the guide is on a shelf, not something to read past. */
+.cover .contacts { position: absolute; left: 20mm; bottom: 22mm; }
+.inside-head { margin: 0 0 3mm; font-size: 12pt; color: #6b7280; }
+ol.inside { margin: 0; font-size: 14pt; }
+ol.inside li { margin-bottom: 3mm; }
+
 .contacts { display: flex; gap: 10mm; margin-top: 8mm; }
 .contacts p { margin: 0; font-size: 13pt; }
 .contacts span { color: #6b7280; }
@@ -220,6 +249,7 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
 </style>
 </head>
 <body>
+${coverHTML()}
 ${PAGES.map(pageHTML).join('\n')}
 </body>
 </html>

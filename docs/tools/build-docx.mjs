@@ -15,7 +15,7 @@ import {
   AlignmentType, BorderStyle, Document, HeadingLevel, ImageRun, LevelFormat,
   PageBreak, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType,
 } from 'docx';
-import { CONTACTS, PAGES, TITLE } from './content.mjs';
+import { CONTACTS, COVER, PAGES, SUBTITLE, TITLE } from './content.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DOCS = path.resolve(HERE, '..');
@@ -110,34 +110,54 @@ const contacts = () => new Table({
   })],
 });
 
-const children = [];
+/* The front page. */
+const children = [
+  new Paragraph({
+    spacing: { after: 240 },
+    children: [new ImageRun({
+      type: 'png',
+      data: fs.readFileSync(path.join(SHOTS, 'icon.png')),
+      transformation: { width: 68, height: 68 },
+    })],
+  }),
+  new Paragraph({
+    spacing: { after: 60 },
+    children: [new TextRun({ text: COVER.kicker, size: 24, color: GREY })],
+  }),
+  new Paragraph({
+    spacing: { after: 80 },
+    children: [new TextRun({ text: TITLE, bold: true, size: 72 })],
+  }),
+  new Paragraph({
+    spacing: { after: 240 },
+    children: [new TextRun({ text: SUBTITLE, size: 34, color: GREY })],
+  }),
+  new Paragraph({
+    spacing: { after: 360 },
+    children: [new TextRun({ text: COVER.blurb, size: 28 })],
+  }),
+  // A line to write the address on. Drawn as a paragraph border, because Word
+  // collapses the underlined run of spaces you would otherwise use.
+  new Paragraph({
+    spacing: { after: 40 },
+    children: [new TextRun({ text: 'The app is at:' })],
+  }),
+  new Paragraph({
+    spacing: { after: 400 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '9AA3B0' } },
+    children: [new TextRun({ text: ' ' })],
+  }),
+  new Paragraph({
+    spacing: { after: 120 },
+    children: [new TextRun({ text: COVER.inside, size: 22, color: GREY })],
+  }),
+  ...steps(PAGES.map((p) => p.title)),
+  contacts(),
+];
 
-PAGES.forEach((page, i) => {
-  if (i > 0) children.push(new Paragraph({ children: [new PageBreak()] }));
-
-  if (i === 0) {
-    children.push(new Paragraph({
-      spacing: { after: 120 },
-      children: [new TextRun({ text: TITLE, size: 24, color: GREY })],
-    }));
-  }
-
+PAGES.forEach((page) => {
+  children.push(new Paragraph({ children: [new PageBreak()] }));
   children.push(new Paragraph({ text: page.title, heading: HeadingLevel.HEADING_1 }));
-
-  if (page.address) {
-    // A line to write the address on. Drawn as a paragraph border, because
-    // Word collapses the underlined run of spaces you would otherwise use.
-    children.push(new Paragraph({
-      spacing: { after: 40 },
-      children: [new TextRun({ text: 'The app is at:' })],
-    }));
-    children.push(new Paragraph({
-      spacing: { after: 280 },
-      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '9AA3B0' } },
-      children: [new TextRun({ text: ' ' })],
-    }));
-  }
-
   children.push(...steps(page.steps));
   children.push(...images(page.images));
 

@@ -55,6 +55,19 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
   color: #4a5261;
 }
 
+.cover .icon { width: 24mm; height: 24mm; display: block; margin-bottom: 10mm; }
+.cover .mark { margin-bottom: 2mm; }
+h1.big { font-size: 42pt; margin-bottom: 3mm; }
+.cover .sub { margin: 0 0 8mm; font-size: 17pt; color: #4a5261; }
+.cover .blurb { margin: 0 0 14mm; font-size: 15pt; max-width: 150mm; }
+.cover .address { margin-bottom: 16mm; }
+/* Pinned to the foot of the page: the numbers are what somebody reaches for
+   when the guide is on a shelf, not something to read past. */
+.cover .contacts { position: absolute; left: 20mm; bottom: 22mm; }
+.inside-head { margin: 0 0 3mm; font-size: 12pt; color: #6b7280; }
+ol.inside { margin: 0; font-size: 14pt; }
+ol.inside li { margin-bottom: 3mm; }
+
 .contacts { display: flex; gap: 10mm; margin-top: 8mm; }
 .contacts p { margin: 0; font-size: 13pt; }
 .contacts span { color: #6b7280; }
@@ -62,11 +75,22 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
 </style>
 </head>
 <body>
+<section class="page cover">
+  <img class="icon" src="manual/icon.png" alt="">
+  <p class="mark">Woodhouse Basecamp</p>
+  <h1 class="big">The cleaning app</h1>
+  <p class="sub">How to use it</p>
+  <p class="blurb">It tells you what to clean today, and it tells the office when you have finished.</p>
+
+  <p class="address">The app is at: <span class="write-in"></span></p>
+
+  <p class="inside-head">What is in here</p>
+  <ol class="inside"><li>Logging in</li><li>Putting it on your phone</li><li>What to clean today</li><li>When you finish a building</li><li>If something is broken</li><li>Who is working this week</li><li>Saying when you can work</li></ol>
+
+  <div class="contacts"><p><span>Office</span><b>0402 930 714</b></p><p><span>Maintenance</span><b>0437 316 386</b></p></div>
+</section>
 <section class="page">
-  <p class="mark">The cleaning app</p>
   <h1>Logging in</h1>
-  <p class="address">The app is at:
-    <span class="write-in"></span></p>
   <ol><li>Open the app on your phone.</li><li>Tap your name.</li><li>Tap your PIN. The last number logs you in.</li></ol>
   <div class="shots two">
     <figure>
@@ -81,9 +105,7 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
   
 </section>
 <section class="page">
-  
   <h1>Putting it on your phone</h1>
-  
   <ol><li>Open the app in your phone’s browser.</li><li>On an iPhone: tap the Share button, then Add to Home Screen.</li><li>On Android: tap Install on the bar under the names.</li></ol>
   <div class="shots two">
     <figure>
@@ -98,9 +120,7 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
   
 </section>
 <section class="page">
-  
   <h1>What to clean today</h1>
-  
   <ol><li>The app opens on today’s list.</li><li>Start at number 1 and work down.</li><li>Tap a building to open it.</li></ol>
   <div class="shots">
     <figure>
@@ -112,9 +132,7 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
   
 </section>
 <section class="page">
-  
   <h1>When you finish a building</h1>
-  
   <ol><li>Tap the blue button.</li><li>Tap Yes, all done.</li><li>That is it. The office can see it is finished.</li></ol>
   <div class="shots two">
     <figure>
@@ -129,9 +147,7 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
   
 </section>
 <section class="page">
-  
   <h1>If something is broken</h1>
-  
   <ol><li>Tap Report.</li><li>Say where it is and what is wrong.</li><li>Tap Send.</li></ol>
   <div class="shots">
     <figure>
@@ -143,9 +159,7 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
   
 </section>
 <section class="page">
-  
   <h1>Who is working this week</h1>
-  
   <ol><li>Tap Roster at the bottom of the screen.</li><li>Your row shows the days you are on and your hours.</li><li>Tap the arrows to look at another week.</li></ol>
   <div class="shots">
     <figure>
@@ -157,9 +171,7 @@ figcaption { margin-top: 2mm; font-size: 11pt; color: #6b7280; }
   
 </section>
 <section class="page">
-  
   <h1>Saying when you can work</h1>
-  
   <ol><li>Tap Roster, then My availability at the top.</li><li>Tick the days you can work. Add hours if they matter.</li><li>Tap Save as my usual week.</li></ol>
   <div class="shots">
     <figure>

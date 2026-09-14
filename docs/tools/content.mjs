@@ -10,6 +10,14 @@
 export const TITLE = 'The cleaning app';
 export const SUBTITLE = 'How to use it';
 
+/** The front page. Its list of what's inside is built from PAGES below. */
+export const COVER = {
+  kicker: 'Woodhouse Basecamp',
+  blurb: 'It tells you what to clean today, and it tells the office when you '
+    + 'have finished.',
+  inside: 'What is in here',
+};
+
 export const CONTACTS = [
   ['Office', '0402 930 714'],
   ['Maintenance', '0437 316 386'],
@@ -18,9 +26,6 @@ export const CONTACTS = [
 export const PAGES = [
   {
     title: 'Logging in',
-    // Only the first page carries the site address, which differs per camp and
-    // is written in by hand.
-    address: true,
     steps: [
       'Open the app on your phone.',
       'Tap your name.',
