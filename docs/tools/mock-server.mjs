@@ -145,6 +145,25 @@ const rosterFor = (from, count) => {
   };
 };
 
+/** One cleaner's own availability, as the "My availability" screen wants it. */
+const availabilityMine = (from) => {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
+  const weekday = (preferred = false) => ({ from: '08:00', to: '16:00', preferred });
+  return {
+    from,
+    days,
+    today: TODAY,
+    usual: {
+      days: [weekday(true), weekday(), weekday(), weekday(), weekday(), null, null],
+      idealHours: 25,
+    },
+    week: null,
+    setBy: null,
+    rosterPublished: true,
+    rostered: [1, 1, 1, 1, 1, 0, 0],
+  };
+};
+
 const maintenance = {
   items: [
     {
@@ -202,6 +221,9 @@ export function startServer(port = 8787) {
           url.searchParams.get('from') || TODAY,
           Number(url.searchParams.get('days') || 1),
         ));
+      }
+      if (route === '/availability/mine') {
+        return json(res, availabilityMine(url.searchParams.get('from') || TODAY));
       }
       if (route === '/building') return json(res, buildingPayload(url.searchParams.get('id')));
       if (route === '/maintenance') return json(res, maintenance);

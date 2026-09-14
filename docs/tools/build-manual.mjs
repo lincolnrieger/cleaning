@@ -27,17 +27,25 @@ const EXECUTABLE = process.env.CHROMIUM_PATH || undefined;
 
 const CLEANER = { id: 3, name: 'Casey Miller', role: 'cleaner' };
 
+const PHONE = {
+  viewport: { width: 390, height: 844 },
+  deviceScaleFactor: 3,
+  isMobile: true,
+  hasTouch: true,
+  locale: 'en-AU',
+  timezoneId: 'Australia/Adelaide',
+};
+
+// The app words its "add me to your home screen" bar differently on an iPhone,
+// where Safari has no one-tap install. Taking that shot through an iPhone user
+// agent means the guide shows each phone the bar it will actually get.
+const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) '
+  + 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+
 /* ------------------------------------------------------------ screenshots */
 
 async function screenshots(browser) {
-  const ctx = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    deviceScaleFactor: 3,
-    isMobile: true,
-    hasTouch: true,
-    locale: 'en-AU',
-    timezoneId: 'Australia/Adelaide',
-  });
+  const ctx = await browser.newContext(PHONE);
   const page = await ctx.newPage();
   const settle = (ms = 800) => page.waitForTimeout(ms);
   const shot = (name) => page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
@@ -91,6 +99,35 @@ async function screenshots(browser) {
   await settle(300);
   await shot('report');
 
+  /* The week, and the days a cleaner says they can work. */
+  await go('/#/roster');
+  await settle(600);
+  await shot('roster');
+
+  await go('/#/availability');
+  await settle(600);
+  // Far enough down that the day rows lead the picture, rather than the
+  // tail of the paragraph above them.
+  await page.evaluate(() => window.scrollTo(0, 385));
+  await settle(400);
+  await shot('availability');
+
+  await ctx.close();
+
+  /* The install bar, as each kind of phone sees it. */
+  await installBar(browser, 'install-android');
+  await installBar(browser, 'install-iphone', IPHONE_UA);
+}
+
+/** The sign-in screen, where the bar offering to add the app to the home
+    screen sits. Its wording comes from the browser, so this runs once per
+    kind of phone. */
+async function installBar(browser, name, userAgent) {
+  const ctx = await browser.newContext({ ...PHONE, ...(userAgent ? { userAgent } : {}) });
+  const page = await ctx.newPage();
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
   await ctx.close();
 }
 

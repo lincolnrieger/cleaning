@@ -1,7 +1,8 @@
 # The cleaner's guide
 
-Four pages. Logging in, what to clean, marking a building done, reporting
-something broken. That is the whole job, so that is the whole guide.
+Seven pages. Logging in, putting the app on the phone, what to clean, marking
+a building done, reporting something broken, who is on this week, and saying
+which days you can work. One job per page.
 
 | | For |
 |---|---|

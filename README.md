@@ -8,9 +8,10 @@ builds the week's roster.
 browser, no software to install and no commands to run.
 
 **To hand to a cleaner, print
-[docs/cleaner-manual.pdf](docs/cleaner-manual.pdf)** — four pages on logging
-in, reading the day's list, marking a building done and reporting something
-broken. There's an editable Word copy at
+[docs/cleaner-manual.pdf](docs/cleaner-manual.pdf)** — seven pages on logging
+in, adding the app to a phone, reading the day's list, marking a building
+done, reporting a problem, the roster and setting availability. There's an
+editable Word copy at
 [docs/cleaner-manual.docx](docs/cleaner-manual.docx), and
 [notes on rebuilding both](docs/README.md) when a screen changes.
 

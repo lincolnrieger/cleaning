@@ -34,6 +34,21 @@ export const PAGES = [
   },
 
   {
+    title: 'Putting it on your phone',
+    steps: [
+      'Open the app in your phone’s browser.',
+      'On an iPhone: tap the Share button, then Add to Home Screen.',
+      'On Android: tap Install on the bar under the names.',
+    ],
+    images: [
+      ['install-iphone', 'On an iPhone.'],
+      ['install-android', 'On Android.'],
+    ],
+    note: 'You only do this once. The app then has its own icon, like any '
+      + 'other app, and you never have to find the link again.',
+  },
+
+  {
     title: 'What to clean today',
     steps: [
       'The app opens on today’s list.',
@@ -44,7 +59,9 @@ export const PAGES = [
       ['todays-list-plain', 'Today’s list.'],
     ],
     note: 'Check means a quick tidy and re-stock. Full Clean means the whole '
-      + 'clean. A green Done means someone has already finished that building.',
+      + 'clean. A green Done means someone has already finished that building. '
+      + 'The arrows at the top show another day, and every other building is '
+      + 'under Other buildings at the bottom.',
   },
 
   {
@@ -74,6 +91,36 @@ export const PAGES = [
     ],
     note: 'Use it for lost property too. The office sees it straight away. '
       + 'You do not have to wait for an answer.',
+  },
+
+  {
+    title: 'Who is working this week',
+    steps: [
+      'Tap Roster at the bottom of the screen.',
+      'Your row shows the days you are on and your hours.',
+      'Tap the arrows to look at another week.',
+    ],
+    images: [
+      ['roster', 'The week, with your hours on it.'],
+    ],
+    note: 'The office writes the roster. If a shift looks wrong, ring them. '
+      + 'A week that is not out yet will say so instead of showing you a '
+      + 'half-finished one.',
+  },
+
+  {
+    title: 'Saying when you can work',
+    steps: [
+      'Tap Roster, then My availability at the top.',
+      'Tick the days you can work. Add hours if they matter.',
+      'Tap Save as my usual week.',
+    ],
+    images: [
+      ['availability', 'Tick a day, and add hours if they matter.'],
+    ],
+    note: 'Tap the star on a day you would rather work. Use Save for this '
+      + 'week only if it is a one-off. Saving does not move a shift you '
+      + 'already have, so ring the office if one needs to change.',
     contacts: true,
   },
 ];
