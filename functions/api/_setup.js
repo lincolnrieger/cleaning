@@ -302,7 +302,13 @@ async function ensureColumn(db, table, column, definition) {
   // No rows means no such table - a table this version has dropped, on a
   // database old enough to still have had it. Nothing to add a column to.
   if (!results.length || results.some((c) => c.name === column)) return;
-  await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+  try {
+    await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+  } catch (err) {
+    // Two cold starts upgrading at once: the other one added it between our
+    // look and our ALTER. That is the outcome we wanted, not a failed setup.
+    if (!/duplicate column/i.test(String(err?.message ?? err))) throw err;
+  }
 }
 
 /** The stored CREATE TABLE statement, or '' when there is no such table. */

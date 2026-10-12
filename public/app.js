@@ -3951,7 +3951,7 @@ function orderSheet({ title, hint, items, save, onDone, numbered = false }) {
     let to = from;
 
     row.classList.add('dragging');
-    row.setPointerCapture?.(ev.pointerId);
+    if (row.setPointerCapture) row.setPointerCapture(ev.pointerId);
 
     const onMove = (e) => {
       const dy = e.clientY - startY + (rows.scrollTop - startScroll);
