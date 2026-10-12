@@ -1485,25 +1485,12 @@ button.dayhead:hover { background: var(--hover); color: var(--accent); }
 }
 .dayhead-hint .ico { width: 11px; height: 11px; }
 
-/* --------------------------------------------- carry over from yesterday */
+/* ------------------------------ incomplete cleans from the last planned day */
 
-.carryover { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
-
-.carry-row {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  padding: 8px var(--s4);
-  border-top: 1px solid var(--line-2);
-}
-.carry-row .grow { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.carry-row .tiny { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-
-.carry-row button.iconbtn { width: var(--tap); height: var(--tap); }
-button.carry-yes { color: var(--done); border-color: color-mix(in srgb, var(--done) 40%, var(--line)); }
-button.carry-yes:hover { background: var(--done-wash); }
-button.carry-no { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
-button.carry-no:hover { background: var(--danger-wash); }
+.incomplete { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.incomplete > h2 { background: var(--warn-wash); color: var(--warn); }
+.incomplete > h2 .grow { display: inline-flex; align-items: center; gap: 6px; }
+.incomplete > h2 .num { color: var(--warn); }
 
 /* ------------------------------------------------------ people (admin) */
 
@@ -2178,3 +2165,63 @@ table.sched th.rowhead .num.over { color: var(--warn); font-weight: 700; }
 /* Beats `.check-row .grow > .tiny`, which would otherwise mute the one line
    on that row that needs to stand out. */
 .warntext, .check-row .grow > .tiny.warntext { color: var(--warn); }
+
+/* ------------------------------------------------ a cleaner's own week */
+
+/* One big row per day: tap anywhere on it to switch between can and can't.
+   Hours sit beside it as a second, smaller button, only once the day is on. */
+.mydays { display: grid; gap: 8px; }
+
+.myday {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.myday-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: var(--s3);
+  min-height: 56px;
+  padding: 0 var(--s3);
+  text-align: left;
+  color: var(--muted);
+  background: var(--sunken);
+}
+
+.myday-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--line-2);
+  color: var(--faint);
+}
+
+.myday-name { flex: 1; font-size: 16px; font-weight: 650; color: var(--ink-2); line-height: 1.2; }
+.myday-name small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
+.myday-state { font-size: 13px; font-weight: 600; }
+
+.myday.on .myday-toggle {
+  background: var(--done-wash);
+  border-color: color-mix(in srgb, var(--done) 40%, var(--line));
+  color: var(--done);
+}
+.myday.on .myday-mark { background: var(--done); color: #fff; }
+.myday.on .myday-name { color: var(--ink); }
+
+.myday-hours {
+  flex: 0 0 auto;
+  min-width: 104px;
+  min-height: 56px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+
+.custom-hours summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 6px 0; }
+.custom-hours input[type="time"] { flex: 1; min-width: 0; }

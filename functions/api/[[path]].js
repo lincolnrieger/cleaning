@@ -447,7 +447,9 @@ function require(user, ...roles) {
 const canRead = (user) => require(user, 'cleaner', 'office', 'viewer', 'admin');
 // Read-only office screens: the plan, the roster, reports and exports.
 const canSeeOffice = (user) => require(user, 'office', 'viewer', 'admin');
-const canTick = (user) => require(user, 'cleaner', 'admin');
+// The office can sign a building off too - somebody rings in to say it's done,
+// or they did it themselves. Only the view-only account can't.
+const canTick = (user) => require(user, 'cleaner', 'office', 'admin');
 
 /* ----------------------------------------------------------- rate limiting */
 
@@ -1150,16 +1152,17 @@ const routes = {
   },
 
   /**
-   * Jobs from the last planned day that never got signed off, for the office
-   * to carry onto today or let go. Only the most recent planned day in the
-   * last week is looked at: Monday morning asks about Friday, not about every
-   * day that ever slipped.
+   * Incomplete cleans: jobs from the last planned day that never got signed
+   * off. Only the most recent planned day in the last week is looked at, so
+   * Monday morning shows what was left on Friday rather than every day that
+   * ever slipped.
    *
-   * A job drops off this list once it is on today's plan, once it has been
-   * signed off since, or once somebody has said to leave it.
+   * Nothing to approve - it is simply flagged to everyone until it is done.
+   * A job drops off once it has been signed off since (today included) or is
+   * on today's plan anyway, where it already shows in the day's list.
    */
   'GET /carryover': async (_req, env, { user }) => {
-    canSeeOffice(user);
+    canRead(user);
     const today = localDay(env);
 
     const last = await env.DB.prepare(
@@ -1167,6 +1170,13 @@ const routes = {
     ).bind(today, addDays(today, -7)).first();
     const from = last?.day;
     if (!from) return json({ today, from: null, missed: [] });
+
+    // A week the office never approved was never the plan as far as a
+    // cleaner is concerned, so it can't have left anything unfinished either.
+    if (user.role === 'cleaner') {
+      const published = await publishedWeeks(env, 'plan', [weekStart(from)]);
+      if (!published.has(weekStart(from))) return json({ today, from: null, missed: [] });
+    }
 
     const { results } = await env.DB.prepare(
       `SELECT s.building_id, s.clean_type, s.priority, s.note, b.name, b.grp
@@ -1178,8 +1188,6 @@ const routes = {
              AND st.day >= ?1 AND st.day <= ?2)
          AND NOT EXISTS (SELECT 1 FROM schedule t
            WHERE t.building_id = s.building_id AND t.day = ?2)
-         AND NOT EXISTS (SELECT 1 FROM carryover_dismissed d
-           WHERE d.building_id = s.building_id AND d.day = ?1)
        ORDER BY s.priority IS NULL, s.priority, b.sort_order, b.name`,
     ).bind(from, today).all();
 
@@ -1204,56 +1212,6 @@ const routes = {
         ticked: ticked.get(r.building_id) ?? 0,
       })),
     });
-  },
-
-  /**
-   * Answers the morning-after question for one building: put it on today's
-   * plan (add: true) or leave it (add: false). Adding copies the clean that
-   * was planned and puts it at the end of today's numbered jobs.
-   */
-  'POST /carryover': async (req, env, { user }) => {
-    require(user, 'office', 'admin');
-    const { buildingId, from, add } = await req.json();
-    const id = Number(buildingId);
-    const today = localDay(env);
-    if (!isDay(from) || from >= today) throw new HttpError(400, 'Pick the day it was missed.');
-
-    const missed = await env.DB.prepare(
-      'SELECT clean_type, note FROM schedule WHERE building_id = ? AND day = ?',
-    ).bind(id, from).first();
-    if (!missed) throw new HttpError(404, 'That job is no longer on the plan for that day.');
-
-    if (!add) {
-      await env.DB.prepare(
-        `INSERT INTO carryover_dismissed (building_id, day, dismissed_by, dismissed_at)
-         VALUES (?, ?, ?, ?) ON CONFLICT(building_id, day) DO NOTHING`,
-      ).bind(id, from, user.name, now()).run();
-      return json({ ok: true, added: false });
-    }
-
-    const last = await env.DB.prepare(
-      'SELECT MAX(priority) AS p FROM schedule WHERE day = ?',
-    ).bind(today).first();
-    const label = `Carried over from ${DAY_NAMES[weekdayIndex(from)]}`;
-    const note = clean(missed.note ? `${label} — ${missed.note}` : label, 200);
-
-    await env.DB.prepare(
-      `INSERT INTO schedule
-         (building_id, day, clean_type, priority, checkin, note, created_by, created_at)
-       VALUES (?, ?, ?, ?, 0, ?, ?, ?)
-       ON CONFLICT(building_id, day) DO NOTHING`,
-    ).bind(
-      id, today, typeOf(missed.clean_type),
-      last?.p ? schedulePriority(last.p + 1) : null,
-      note, user.name, now(),
-    ).run();
-
-    await logActivity(env, {
-      day: today, buildingId: id, kind: 'scheduled',
-      detail: `${typeLabel(typeOf(missed.clean_type))} (carried over)`,
-      userName: user.name,
-    });
-    return json({ ok: true, added: true });
   },
 
   'GET /activity': async (req, env, { user, url }) => {
@@ -1365,7 +1323,7 @@ const routes = {
       items,
       completed: status ?? null,
       issues,
-      readOnly: ['office', 'viewer'].includes(user.role),
+      readOnly: user.role === 'viewer',
     });
   },
 
@@ -2341,7 +2299,6 @@ const routes = {
       env.DB.prepare('DELETE FROM building_status WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM maintenance WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM activity WHERE building_id = ?').bind(bid),
-      env.DB.prepare('DELETE FROM carryover_dismissed WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM buildings WHERE id = ?').bind(bid),
     ]);
 
@@ -2386,7 +2343,6 @@ const routes = {
       env.DB.prepare('DELETE FROM building_status'),
       env.DB.prepare('DELETE FROM maintenance'),
       env.DB.prepare('DELETE FROM activity'),
-      env.DB.prepare('DELETE FROM carryover_dismissed'),
       env.DB.prepare('DELETE FROM buildings'),
     ]);
 
@@ -2689,7 +2645,7 @@ const routes = {
     const tables = [
       'schedule', 'schedule_repeat', 'roster', 'published_weeks', 'availability_weeks',
       'task_photos', 'task_log',
-      'activity', 'building_status', 'maintenance', 'login_attempts', 'carryover_dismissed',
+      'activity', 'building_status', 'maintenance', 'login_attempts',
     ];
     await env.DB.batch(tables.map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
 
