@@ -13,20 +13,20 @@ browser, no software to install and no commands to run.
 
 | | Cleaner | Office | View only | Admin |
 |---|---|---|---|---|
-| Tick items off a checklist | ✅ | — | — | ✅ |
-| Attach photos to checklist items | ✅ | — | — | ✅ |
-| Sign a building off as complete | ✅ | — | — | ✅ |
+| Tick items off a checklist | ✅ | ✅ | — | ✅ |
+| Attach photos to checklist items | ✅ | ✅ | — | ✅ |
+| Sign a building off as complete | ✅ | ✅ | — | ✅ |
 | Report something that needs fixing | ✅ | ✅ | — | ✅ |
 | Camp-wide progress overview | ✅ | ✅ | ✅ | ✅ |
 | See the week's building plan and staff roster | read-only | ✅ | read-only | ✅ |
 | Plan which buildings get cleaned when, and in what order | — | ✅ | — | ✅ |
-| Carry yesterday's unfinished buildings onto today | — | ✅ | — | ✅ |
+| See incomplete cleans from the last planned day | ✅ | ✅ | ✅ | ✅ |
 | Print the week's cleaning plan | — | ✅ | ✅ | ✅ |
 | Build and print the staff roster | — | ✅ | print only | ✅ |
 | See everyone's availability on one screen | — | ✅ | ✅ | ✅ |
 | Set anyone's availability (days **and** times) | — | ✅ | — | ✅ |
 | Record preferred days and ideal hours | — | ✅ | — | ✅ |
-| Open an individual building's detail | ✅ | read-only | read-only | ✅ |
+| Open an individual building's detail | ✅ | ✅ | read-only | ✅ |
 | Mark a maintenance issue resolved | — | ✅ | — | ✅ |
 | Download a day's record as CSV | — | ✅ | ✅ | ✅ |
 | Add people, set PINs, change roles, delete accounts | — | — | — | ✅ |
@@ -241,6 +241,21 @@ required" just says photo storage isn't set up.
 
 ## Staff availability
 
+### A cleaner's own availability
+
+**Planning → My availability** asks one question: *when can you work?* Seven
+big rows, one per day — tap a day to switch it between **can** (green tick)
+and **can't**. Each working day has an hours button that defaults to **Any
+time**; tapping it offers *Mornings*, *Afternoons*, *Day shift*, or exact
+times. One **Save** button.
+
+At the top, **Every week** changes their normal week; **Just one week** lets
+them pick a week (say they're away) without touching any other. Preferred days
+and ideal hours aren't asked here — the office sets those, and a cleaner
+saving their days leaves them as they were.
+
+### The office's view
+
 **Planning → Availability** is every person's whole week on one screen — you
 never have to open people one at a time.
 
@@ -366,15 +381,15 @@ If somebody else adds or removes a job on that day while your list is open,
 saving is refused with "reload and try again" rather than writing a stale
 order.
 
-### Carrying over what didn't get done
+### Incomplete cleans
 
-Each morning the office overview opens with **Not finished yesterday**: every
-building on the last planned day (up to a week back — Monday looks at Friday)
-that wasn't signed off for the clean that was planned. Each has a **✓** to add
-it to today's plan — same clean, a note saying *Carried over from Friday*, at
-the end of today's numbered jobs — and a **✗** to let it go. Either answer
-takes it off the card; **Add all** does the lot. Something already on today's
-plan, or signed off since, never appears. View-only accounts don't see it.
+Anything on the last planned day (up to a week back — Monday looks at Friday)
+that wasn't signed off for the clean that was planned is flagged
+automatically as **Incomplete cleans** — on a cleaner's home screen between
+*Who else is on today* and *To clean today*, and at the top of the office
+overview. There is nothing to approve: tap one to open it on the checklist
+that was planned and finish it, and it drops off the list once it's signed
+off. A building that is already on today's plan isn't repeated there.
 
 **The plan says what needs cleaning and in what order — not who does it.**
 Who's in on a given day is the roster's job, and cleaners sort the buildings

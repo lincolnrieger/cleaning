@@ -27,6 +27,8 @@ const state = {
   openSections: new Set(),    // secondary lists (e.g. "not scheduled") expanded open
   availFilter: { q: '', day: 'all', status: 'all', from: '', to: '' },
   rosterOfficeOpen: null, // office rows on the roster; null = open only if rostered
+  myAvailMode: null,      // a cleaner's availability: 'usual' or 'week'
+  incomplete: null,       // buildingId -> day it was left unfinished
 };
 
 // Chrome/Edge/Android hold this event back until asked for it. Capturing it
@@ -1047,9 +1049,8 @@ async function renderOverview() {
   const isToday = day === state.config.today;
   const [{ buildings }, carry] = await Promise.all([
     api(`/overview?day=${day}`),
-    // Only this morning's question, and only for someone who can answer it.
-    // A failure here costs the card, never the overview.
-    isToday && canChange() ? api('/carryover').catch(() => null) : null,
+    // Only ever about today. A failure here costs the card, never the overview.
+    isToday ? api('/carryover').catch(() => null) : null,
   ]);
   if (!live()) return;
   chrome({ title: 'Overview', section: '', wide: true });
@@ -1070,7 +1071,6 @@ async function renderOverview() {
   // building is on today's list.
   totals.issues = buildings.reduce((n, b) => n + b.open_issues, 0);
 
-  const pct = totals.total ? Math.round((totals.done / totals.total) * 100) : 0;
   const outstanding = runSheet.filter((b) => !b.completed_at).length;
   const stale = rest.filter((b) => staleDays(b, day) >= 7);
   const fullCount = runSheet.filter((b) => b.cleanType === 'full').length;
@@ -1080,7 +1080,7 @@ async function renderOverview() {
   app.innerHTML = `
     <div class="card"><div class="pad tight">${dayNav(day)}</div></div>
 
-    ${carryoverCard(carry)}
+    ${incompleteCard(carry)}
 
     <div class="card">
       <div class="pad">
@@ -1094,12 +1094,12 @@ async function renderOverview() {
       ${runSheet.length ? `<div class="stats">
         <div class="stat ${outstanding ? 'is-warn' : 'is-done'}">
           <b class="num">${outstanding}</b><span>still to clean</span></div>
-        <div class="stat"><b class="num">${pct}%</b><span>of tasks ticked</span></div>
+        <div class="stat ${totals.signed ? 'is-done' : ''}"><b class="num">${totals.signed}</b>
+          <span>${plural(totals.signed, 'building')} cleaned${isToday ? ' today' : ''}</span></div>
         <div class="stat ${totals.issues ? 'is-warn' : ''}">
           <b class="num">${totals.issues}</b><span>open ${plural(totals.issues, 'issue')}</span></div>
       </div>` : ''}
       ${runSheet.length ? `<div class="pad tight small muted center">
-        ${totals.done} of ${totals.total} tasks —
         ${fullCount} full ${plural(fullCount, 'clean')},
         ${runSheet.length - fullCount} ${plural(runSheet.length - fullCount, 'check')}
       </div>` : totals.issues ? `<div class="pad tight small muted center">
@@ -1137,76 +1137,37 @@ async function renderOverview() {
   wireTiles();
   wireDayNav(app, renderOverview);
   wireSectionToggles(app, renderOverview);
-  wireCarryover(app, carry);
   poll(renderOverview, 30000);
 }
 
 /**
- * The morning-after question: these were on the last planned day and never
- * got signed off - put each on today, or leave it? A tick adds it to the end
- * of today's list; a cross drops it from this card for good.
+ * Incomplete cleans: what the last planned day left unfinished, flagged until
+ * somebody signs it off. Nothing to approve - each row opens that building on
+ * the checklist that was planned, ready to finish today.
  */
-function carryoverCard(carry) {
+function incompleteCard(carry, canOpen = true) {
+  // Remembered so the building's own screen can say why it's being cleaned
+  // today, rather than warning that nobody scheduled it.
+  state.incomplete = new Map((carry?.missed ?? []).map((m) => [m.buildingId, carry.from]));
   if (!carry?.missed?.length) return '';
   const when = carry.from === addDays(carry.today, -1)
     ? 'yesterday' : DAY_FULL[weekdayIndex(carry.from)];
-  return `<div class="card carryover">
-    <h2><span class="grow">Not finished ${esc(when)}</span>
+  return `<div class="card incomplete">
+    <h2><span class="grow">${svgIcon('warning')} Incomplete cleans</span>
       <span class="num">${carry.missed.length}</span></h2>
-    <p class="pad tight small muted">Add any of these to today's plan with the
-      tick, or let them go with the cross.</p>
-    ${carry.missed.map((m) => `<div class="carry-row" data-carry="${m.buildingId}">
-      <span class="grow">
-        <strong>${esc(m.name)}</strong>
-        <span class="tiny muted">${typePill(m.cleanType)}
-          ${m.ticked ? `${m.ticked} ticked, not signed off` : 'not started'}${
-          m.note ? ` · ${esc(m.note)}` : ''}</span>
+    <p class="pad tight small muted">Not finished ${esc(when)} — still to do.</p>
+    ${carry.missed.map((m) => `<button class="tile"
+        ${canOpen && canDrillIn() ? `data-b="${m.buildingId}" data-type="${esc(m.cleanType)}"` : 'disabled'}>
+      <span class="tile-main">
+        <span class="tile-title"><span class="name">${esc(m.name)}</span></span>
+        <span class="tile-meta">${typePill(m.cleanType)}
+          <span class="grow">${m.ticked ? `${m.ticked} ticked, not signed off` : 'not started'}${
+            m.note ? ` · ${esc(m.note)}` : ''}</span></span>
       </span>
-      <button class="iconbtn carry-yes" data-carryadd="${m.buildingId}"
-        title="Add to today" aria-label="Add ${esc(m.name)} to today">${svgIcon('check')}</button>
-      <button class="iconbtn carry-no" data-carryskip="${m.buildingId}"
-        title="Leave it" aria-label="Don't add ${esc(m.name)}">${svgIcon('close')}</button>
-    </div>`).join('')}
-    ${carry.missed.length > 1 ? `<div class="pad tight">
-      <button class="wide" id="carryall">${svgIcon('check')} Add all
-        ${carry.missed.length} to today</button></div>` : ''}
+      <span class="tile-end"><span class="pill late">Incomplete</span></span>
+      ${canOpen && canDrillIn() ? svgIcon('chevron', 'lg tile-chev') : ''}
+    </button>`).join('')}
   </div>`;
-}
-
-function wireCarryover(root, carry) {
-  if (!carry?.missed?.length) return;
-  const answer = (buildingId, add) => api('/carryover', {
-    method: 'POST', body: { buildingId, from: carry.from, add },
-  });
-
-  const one = (attr, add) => root.querySelectorAll(`[${attr}]`).forEach((b) => {
-    b.onclick = async () => {
-      const id = Number(b.getAttribute(attr));
-      b.closest('.carry-row').querySelectorAll('button').forEach((x) => { x.disabled = true; });
-      try {
-        await answer(id, add);
-        const name = carry.missed.find((m) => m.buildingId === id)?.name ?? 'Building';
-        toast(add ? `${name} added to today` : `${name} left off`);
-        renderOverview();
-      } catch (e) {
-        toast(e.message, true);
-        renderOverview();
-      }
-    };
-  });
-  one('data-carryadd', true);
-  one('data-carryskip', false);
-
-  root.querySelector('#carryall')?.addEventListener('click', async (ev) => {
-    ev.currentTarget.disabled = true;
-    try {
-      for (const m of carry.missed) await answer(m.buildingId, true);
-      toast(`${carry.missed.length} added to today — reorder them under Planning`);
-    } catch (e) {
-      toast(e.message, true);
-    }
-    renderOverview();
-  });
 }
 
 /**
@@ -1415,11 +1376,12 @@ async function renderCleanerHome() {
   // stays a today-only job, so anything but today is read-only here.
   const day = viewDay();
   const isToday = day === state.config.today;
-  const [{ buildings, planPublished }, roster] = await Promise.all([
+  const [{ buildings, planPublished }, roster, carry] = await Promise.all([
     api(`/overview?day=${day}`),
     // null, not an empty roster: a failed request must not be mistaken for
     // "you aren't on today", which is a thing the screen now says out loud.
     api(`/roster?from=${day}&days=1`).catch(() => null),
+    isToday ? api('/carryover').catch(() => null) : null,
   ]);
   if (!live()) return;
   chrome({ title: 'Buildings', section: '' });
@@ -1508,6 +1470,8 @@ async function renderCleanerHome() {
       </div>` : `<div class="empty"><b>Nobody rostered</b>
         No shifts are on the roster for this day.</div>`}
     </div>` : ''}
+
+    ${incompleteCard(carry)}
 
     ${todays.length ? `<div class="card">
       <h2><span class="grow">${isToday ? 'To clean today' : 'On this day'}</span>
@@ -2034,7 +1998,10 @@ async function renderBuilding(id, wantType) {
         <strong>The office scheduled a ${esc(typeLabel(data.scheduledType))} here.</strong>
         You're on the ${esc(typeLabel(type))} checklist.
       </div>` : ''}
-      ${unplanned ? `<div class="banner warn">
+      ${unplanned && day === state.config.today && state.incomplete?.has(id) ? `<div class="banner warn">
+        <strong>Incomplete clean.</strong> This was left unfinished on
+        ${esc(DAY_FULL[weekdayIndex(state.incomplete.get(id))])} — finish it today.
+      </div>` : unplanned ? `<div class="banner warn">
         <strong>The office did not schedule this building for
         ${esc(dayLabel(day).toLowerCase())}.</strong>
       </div>` : ''}
@@ -2071,7 +2038,7 @@ async function renderBuilding(id, wantType) {
 
     <div class="card" id="issues" hidden><h2>Open issues here</h2><div id="issuelist"></div></div>
 
-    ${locked ? '<p class="note center">Read-only — only cleaners can tick items.</p>' : `
+    ${locked ? '<p class="note center">Read-only — this account cannot tick items.</p>' : `
       <!-- The action that ends the job stays in reach instead of sitting
            below sixty items. With nothing to tick it has already been made
            the screen itself, so the bar carries reporting alone. -->
@@ -3002,9 +2969,23 @@ async function renderAvailability() {
 
 /**
  * The person with the exam on Thursday is the person who knows about the
- * exam. This is their own week, theirs to change: one set of seven rows,
- * saved either as the week on screen or as what they usually do.
+ * exam, so this is theirs to change - and it has to be easy enough that they
+ * actually do. One question: which days can you work? Tap a day to switch it.
+ * Hours are optional and picked from a few common answers. One save button,
+ * and a plain choice of "every week" or "just this week".
+ *
+ * Preferred days and ideal hours stay the office's tools: they are carried
+ * through untouched on save, never asked about here.
  */
+
+/** Common answers to "what hours?", so nobody has to work a time picker. */
+const HOUR_CHOICES = [
+  ['', '', 'Any time'],
+  ['06:00', '12:00', 'Mornings'],
+  ['12:00', '18:00', 'Afternoons'],
+  ['08:00', '16:00', 'Day shift'],
+];
+
 async function renderMyAvailability() {
   const live = screen('#/availability');
   const from = weekFrom();
@@ -3012,81 +2993,168 @@ async function renderMyAvailability() {
   if (!live()) return;
   chrome({ title: 'My availability', section: planningSection() });
 
-  const weekOnly = Boolean(data.week);
-  const days = data.week ?? data.usual.days;
-  const shifts = data.rostered.reduce((n, c) => n + c, 0);
+  // Work on copies; nothing is sent until Save.
+  const copy = (days) => days.map((d) => (d ? { ...d } : null));
+  const draft = {
+    // Stays where they left it when they step to another week or save.
+    mode: state.myAvailMode ?? (data.week ? 'week' : 'usual'),
+    usual: copy(data.usual.days),
+    week: copy(data.week ?? data.usual.days),
+    dirty: false,
+  };
+  const weekLabel = `${dayOfMonth(data.days[0])} – ${dayOfMonth(data.days[6])}`;
 
-  app.innerHTML = `
-    ${planningTabs('availability')}
-    <div class="card"><div class="pad">${weekNav(from)}</div></div>
+  const draw = () => {
+    const days = draft[draft.mode];
+    app.innerHTML = `
+      ${planningTabs('availability')}
 
-    <div class="card">
-      <div class="banner ${weekOnly ? 'info' : 'plain'}">
-        ${weekOnly
-          ? `<strong>This week is set on its own.</strong>
-             Your usual week is still there underneath, and next week goes back to it.`
-          : '<strong>This is your usual week.</strong> Change it here and it applies to every week you haven\'t set on its own.'}
+      <div class="card">
+        <h2>When can you work?</h2>
+        <div class="pad stack">
+          <div class="seg" id="mode">
+            <button type="button" class="seg-btn" data-mode="usual"
+              aria-pressed="${draft.mode === 'usual'}">Every week</button>
+            <button type="button" class="seg-btn" data-mode="week"
+              aria-pressed="${draft.mode === 'week'}">Just one week</button>
+          </div>
+          ${draft.mode === 'week' ? `<div>${weekNav(from)}</div>
+            <p class="small muted">Only for <strong>${esc(weekLabel)}</strong> —
+              say if you're away or busy. Every other week stays the same.</p>`
+            : `<p class="small muted">Your normal week. Tap a day to change it.</p>
+              ${data.week ? `<p class="small warntext">${esc(weekLabel)} has its own days set —
+                change it under <strong>Just one week</strong>.</p>` : ''}`}
+
+          <div class="mydays">
+            ${days.map((entry, i) => {
+              const on = Boolean(entry);
+              const hours = on ? (timeRange(entry.from, entry.to) || 'Any time') : '';
+              const rostered = draft.mode === 'week' && data.rostered[i];
+              return `<div class="myday ${on ? 'on' : ''}">
+                <button type="button" class="myday-toggle" data-toggle="${i}"
+                  aria-pressed="${on}">
+                  <span class="myday-mark">${on ? svgIcon('check') : svgIcon('close')}</span>
+                  <span class="myday-name">${esc(DAY_FULL[i])}
+                    ${draft.mode === 'week' ? `<small>${esc(dayOfMonth(data.days[i]))}${
+                      rostered ? ' · on the roster' : ''}</small>` : ''}</span>
+                  ${on ? '' : '<span class="myday-state">Can\'t work</span>'}
+                </button>
+                ${on ? `<button type="button" class="myday-hours" data-hours="${i}"
+                  aria-label="${esc(DAY_FULL[i])} hours">${esc(hours)}</button>` : ''}
+              </div>`;
+            }).join('')}
+          </div>
+
+          <p class="err" id="err"></p>
+          <button class="primary wide" id="save" ${draft.dirty ? '' : 'disabled'}>
+            ${draft.dirty ? 'Save' : 'Saved'}</button>
+          ${draft.mode === 'week' && data.week ? `<button class="wide ghost" id="reset">
+            Use my normal week for ${esc(weekLabel)}</button>` : ''}
+        </div>
       </div>
-      ${data.rosterPublished ? `<p class="pad tight small muted">
-        You're rostered <b class="num">${shifts}</b> time${shifts === 1 ? '' : 's'}
-        that week. Changing your availability doesn't move a shift you already
-        have — tell the office if one needs to change.</p>` : `<p class="pad tight small muted">
-        That week's roster isn't out yet, so now is a good time to say what
-        you can do.</p>`}
-    </div>
 
-    <div class="card">
-      <div class="pad stack">
-        <p class="dialog-body">Tick the days you <strong>can</strong> work, and the hours
-          if they matter — leave them blank for a day with no set hours. Tap a star for a
-          day you'd <strong>rather</strong> work. A star never blocks anything; it just
-          puts you first when the office is picking someone.</p>
-        <div class="avlist">${availabilityRows(days)}</div>
-        ${availabilityPresets()}
+      ${draft.mode === 'week' && data.rosterPublished && data.rostered.some(Boolean)
+        ? `<p class="tiny muted center">Already on the roster that week? Changing this
+           doesn't move a shift — tell the office.</p>` : ''}`;
 
-        <label class="field"><span>Ideal hours a week (optional)</span>
-          <input id="avhours" type="number" min="1" max="80" step="0.5" inputmode="decimal"
-            value="${esc(data.usual.idealHours ?? '')}" placeholder="e.g. 25">
-          <span class="field-hint">What you'd like to average. Saved with your usual
-            week, and the office sees it against what you're actually rostered.</span></label>
+    wirePlanningTabs(app);
+    if (draft.mode === 'week') wireWeekNav(app, renderMyAvailability);
 
-        <p class="err" id="err"></p>
-        <button class="primary wide" id="saveweek">Save for this week only</button>
-        <button class="wide" id="saveall">Save as my usual week</button>
-        ${weekOnly
-          ? '<button class="wide" id="clearweek">Go back to my usual week</button>' : ''}
-      </div>
-    </div>`;
+    app.querySelectorAll('[data-mode]').forEach((b) => {
+      b.onclick = () => { draft.mode = state.myAvailMode = b.dataset.mode; draw(); };
+    });
 
-  wirePlanningTabs(app);
-  wireWeekNav(app, renderMyAvailability);
-  wireAvailabilityRows(app);
-  wireAvailabilityPresets(app);
+    app.querySelectorAll('[data-toggle]').forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.dataset.toggle);
+        const list = draft[draft.mode];
+        list[i] = list[i] ? null : { from: '', to: '', preferred: false };
+        draft.dirty = true;
+        draw();
+      };
+    });
 
-  const send = (build, done) => async (ev) => {
-    ev.currentTarget.disabled = true;
-    try {
-      await api('/availability', { method: 'POST', body: build() });
-      toast(done);
-      renderMyAvailability();
-    } catch (e) {
-      $('#err').textContent = e.message;
-      ev.currentTarget.disabled = false;
-    }
+    app.querySelectorAll('[data-hours]').forEach((b) => {
+      b.onclick = () => pickHours(Number(b.dataset.hours));
+    });
+
+    $('#save').onclick = async (ev) => {
+      ev.currentTarget.disabled = true;
+      try {
+        await api('/availability', {
+          method: 'POST',
+          body: draft.mode === 'week'
+            ? { weekFrom: from, days: draft.week }
+            : { days: draft.usual, idealHours: data.usual.idealHours },
+        });
+        toast(draft.mode === 'week' ? `Saved for ${weekLabel}` : 'Saved');
+        renderMyAvailability();
+      } catch (e) {
+        $('#err').textContent = e.message;
+        ev.currentTarget.disabled = false;
+      }
+    };
+
+    $('#reset')?.addEventListener('click', async () => {
+      try {
+        await api('/availability', { method: 'POST', body: { weekFrom: from, reset: true } });
+        toast('Back to your normal week');
+        renderMyAvailability();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
   };
 
-  $('#saveweek').onclick = send(() => ({
-    weekFrom: from,
-    days: readAvailabilityRows(app),
-  }), `Saved for the week of ${auDate(from)}`);
+  // A handful of big answers, and "set times" for anyone who needs exact ones.
+  function pickHours(i) {
+    const entry = draft[draft.mode][i];
+    const set = (fromT, toT) => {
+      draft[draft.mode][i] = { ...entry, from: fromT, to: toT };
+      draft.dirty = true;
+      closeSheet();
+      draw();
+    };
+    const sheet = openSheet(`
+      <div class="sheet-head"><strong>${esc(DAY_FULL[i])} — what hours?</strong></div>
+      <div class="pad stack">
+        ${HOUR_CHOICES.map(([f, t, label], k) => `<button class="bigchoice" data-choice="${k}"
+          ${entry.from === f && entry.to === t ? 'aria-pressed="true"' : ''}>
+          <strong>${esc(label)}</strong>
+          ${f ? `<span class="small muted">${esc(timeRange(f, t))}</span>` : ''}
+        </button>`).join('')}
+        <details class="custom-hours" ${entry.from && !HOUR_CHOICES.some(([f, t]) =>
+          f === entry.from && t === entry.to) ? 'open' : ''}>
+          <summary>Set exact times</summary>
+          <div class="row tight gap-top-sm">
+            <input type="time" id="hfrom" value="${esc(entry.from || '08:00')}" aria-label="From">
+            <span class="tiny muted">to</span>
+            <input type="time" id="hto" value="${esc(entry.to || '16:00')}" aria-label="To">
+          </div>
+          <p class="err" id="herr"></p>
+          <button class="primary wide gap-top-sm" id="hset">Use these times</button>
+        </details>
+        <button class="wide" id="hcancel">Cancel</button>
+      </div>`);
+    sheet.querySelectorAll('[data-choice]').forEach((b) => {
+      b.onclick = () => {
+        const [f, t] = HOUR_CHOICES[Number(b.dataset.choice)];
+        set(f, t);
+      };
+    });
+    sheet.querySelector('#hset').onclick = () => {
+      const f = sheet.querySelector('#hfrom').value;
+      const t = sheet.querySelector('#hto').value;
+      if (!f || !t || t <= f) {
+        sheet.querySelector('#herr').textContent = 'The finish needs to be after the start.';
+        return;
+      }
+      set(f, t);
+    };
+    sheet.querySelector('#hcancel').onclick = closeSheet;
+  }
 
-  $('#saveall').onclick = send(() => ({
-    days: readAvailabilityRows(app),
-    idealHours: $('#avhours').value,
-  }), 'Saved as your usual week');
-
-  $('#clearweek')?.addEventListener('click',
-    send(() => ({ weekFrom: from, reset: true }), 'Back to your usual week'));
+  draw();
 }
 
 /* ------------------------------------------------------- view: the roster */

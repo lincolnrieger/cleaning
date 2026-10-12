@@ -209,16 +209,6 @@ const TABLES = [
      UNIQUE (user_id, week_start)
    )`,
 
-  // A building the office looked at the morning after it was missed and said
-  // "no, leave it" about, so the same question isn't asked again all day.
-  `CREATE TABLE IF NOT EXISTS carryover_dismissed (
-     building_id  INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
-     day          TEXT    NOT NULL,
-     dismissed_by TEXT    NOT NULL,
-     dismissed_at TEXT    NOT NULL,
-     PRIMARY KEY (building_id, day)
-   )`,
-
   `CREATE TABLE IF NOT EXISTS login_attempts (
      ip       TEXT PRIMARY KEY,
      fails    INTEGER NOT NULL DEFAULT 0,
