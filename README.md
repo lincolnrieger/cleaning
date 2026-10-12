@@ -11,30 +11,44 @@ browser, no software to install and no commands to run.
 
 ## What each role sees
 
-| | Cleaner | Office | Admin |
-|---|---|---|---|
-| Tick items off a checklist | ✅ | — | ✅ |
-| Attach photos to checklist items | ✅ | — | ✅ |
-| Sign a building off as complete | ✅ | — | ✅ |
-| Report something that needs fixing | ✅ | ✅ | ✅ |
-| Camp-wide progress overview | ✅ | ✅ | ✅ |
-| See the week's building plan and staff roster | read-only | ✅ | ✅ |
-| Plan which buildings get cleaned when, and in what order | — | ✅ | ✅ |
-| Print the week's cleaning plan | — | ✅ | ✅ |
-| Build and print the staff roster | — | ✅ | ✅ |
-| See everyone's availability on one screen | — | ✅ | ✅ |
-| Set anyone's availability (days **and** times) | — | ✅ | ✅ |
-| Record preferred days and ideal hours | — | ✅ | ✅ |
-| Open an individual building's detail | ✅ | read-only | ✅ |
-| Mark a maintenance issue resolved | — | ✅ | ✅ |
-| Download a day's record as CSV | — | ✅ | ✅ |
-| Add people, set PINs, delete accounts | — | — | ✅ |
-| Edit buildings and their checklists | — | — | ✅ |
+| | Cleaner | Office | View only | Admin |
+|---|---|---|---|---|
+| Tick items off a checklist | ✅ | — | — | ✅ |
+| Attach photos to checklist items | ✅ | — | — | ✅ |
+| Sign a building off as complete | ✅ | — | — | ✅ |
+| Report something that needs fixing | ✅ | ✅ | — | ✅ |
+| Camp-wide progress overview | ✅ | ✅ | ✅ | ✅ |
+| See the week's building plan and staff roster | read-only | ✅ | read-only | ✅ |
+| Plan which buildings get cleaned when, and in what order | — | ✅ | — | ✅ |
+| Carry yesterday's unfinished buildings onto today | — | ✅ | — | ✅ |
+| Print the week's cleaning plan | — | ✅ | ✅ | ✅ |
+| Build and print the staff roster | — | ✅ | print only | ✅ |
+| See everyone's availability on one screen | — | ✅ | ✅ | ✅ |
+| Set anyone's availability (days **and** times) | — | ✅ | — | ✅ |
+| Record preferred days and ideal hours | — | ✅ | — | ✅ |
+| Open an individual building's detail | ✅ | read-only | read-only | ✅ |
+| Mark a maintenance issue resolved | — | ✅ | — | ✅ |
+| Download a day's record as CSV | — | ✅ | ✅ | ✅ |
+| Add people, set PINs, change roles, delete accounts | — | — | — | ✅ |
+| Set the order names appear in | — | — | — | ✅ |
+| Edit buildings and their checklists | — | — | — | ✅ |
+
+**View only** is for the shared office computer: it sees every office
+screen — the overview, the plan, the roster, availability, reports — and has
+no button that changes anything (the server refuses it too, not just the
+screen). Office staff who make changes each get their own **Office** account.
+It isn't listed on the roster or the availability grid, since it's a screen
+rather than a person who works shifts. Change anyone's role with **Role** on
+the People screen.
 
 ### Signing in
 
 **Tap your name, then your PIN.** The sign-in screen opens on a grid of
-everyone's names and initials badges; tapping one asks for *that person's*
+everyone's names and initials badges — **Cleaners** on top, **Office**
+underneath, each in the order an admin sets with **Reorder** on the People
+screen (drag the names into place). The same order is used on the roster and
+the availability grid. Whoever last signed in on that phone gets a highlighted
+tile; tapping one asks for *that person's*
 PIN, on a pad that shows the right number of slots and signs you in on the
 last digit. No typing, no username, and — because the PIN is checked against
 the person you picked — a fumbled digit can never sign you in as a colleague
@@ -266,11 +280,10 @@ Availability answers *can they*. Two more fields on the same sheet answer
   looking at, and turn amber once they're over it. No adding shifts up by
   hand to see who's short and who's had too much. **Office and admin only.**
 
-**A cleaner sees who is on, not when.** Their own row shows their times and
-their note; everyone else's day shows simply **On**. Enough to know who is
-about for a handover, without a colleague's hours or the weekly totals — and
-none of it is in the response their browser receives, so it isn't merely
-hidden.
+**A cleaner sees who is on and when.** *Who else is on today* on their home
+screen lists each colleague with their shift times. A colleague's shift note
+and everybody's weekly hour totals stay office-only — and they aren't in the
+response a cleaner's browser receives, so they aren't merely hidden.
 Both are optional, and neither can stop you doing anything — they sort and
 annotate. Availability is still the only thing that raises a conflict.
 
@@ -278,9 +291,11 @@ annotate. Availability is still the only thing that raises a conflict.
 
 ## The staff roster
 
-**Planning → Staff roster** is the week: staff down the side, days across the
-top. Tap any square to add a shift with a start time, finish time and an
-optional note.
+**Planning → Staff roster** is the week: staff down the side, days across
+the top. Cleaners come first; office staff sit underneath in a fold-away
+**Office staff** group, which starts open only when one of them has a shift
+that week (the printed roster always includes everyone). Tap any square to add
+a shift with a start time, finish time and an optional note.
 
 - The start and finish default to that person's availability for that day, so
   a normal shift is two taps.
@@ -336,6 +351,30 @@ the top. Tap any square to put that building on the plan for that day, **pick
 Full Clean or Check** (the sheet shows how many items each is), optionally
 give it a priority number, and add a note ("group arriving 2pm — finish by
 1pm").
+
+### Putting a day in order
+
+**Tap a day's heading** on the plan (it says *Order* under the date once a day
+has two or more jobs) and that day's buildings come up as a list. Drag each
+by its handle — or use the ▲▼ arrows — into the order they should be done,
+then **Save this order**. Every job is renumbered 1, 2, 3… top to bottom, so
+fitting a new building in third is one drag instead of renumbering everything
+after it. Adding a building from a square also has **Then put this day in
+order**, which opens the list straight after saving.
+
+If somebody else adds or removes a job on that day while your list is open,
+saving is refused with "reload and try again" rather than writing a stale
+order.
+
+### Carrying over what didn't get done
+
+Each morning the office overview opens with **Not finished yesterday**: every
+building on the last planned day (up to a week back — Monday looks at Friday)
+that wasn't signed off for the clean that was planned. Each has a **✓** to add
+it to today's plan — same clean, a note saying *Carried over from Friday*, at
+the end of today's numbered jobs — and a **✗** to let it go. Either answer
+takes it off the card; **Add all** does the lot. Something already on today's
+plan, or signed off since, never appears. View-only accounts don't see it.
 
 **The plan says what needs cleaning and in what order — not who does it.**
 Who's in on a given day is the roster's job, and cleaners sort the buildings

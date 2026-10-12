@@ -26,6 +26,7 @@ const state = {
   collapsedGroups: new Set(), // building groups folded shut on Schedule/Checklists
   openSections: new Set(),    // secondary lists (e.g. "not scheduled") expanded open
   availFilter: { q: '', day: 'all', status: 'all', from: '', to: '' },
+  rosterOfficeOpen: null, // office rows on the roster; null = open only if rostered
 };
 
 // Chrome/Edge/Android hold this event back until asked for it. Capturing it
@@ -358,6 +359,12 @@ const NAV = {
     ['schedule', 'Planning', 'calendar'],
     ['issues', 'Reports', 'clipboard'],
   ],
+  // The shared office computer: every office screen, nothing it can change.
+  viewer: [
+    ['', 'Overview', 'home'],
+    ['schedule', 'Planning', 'calendar'],
+    ['issues', 'Reports', 'clipboard'],
+  ],
   admin: [
     ['', 'Overview', 'home'],
     ['schedule', 'Planning', 'calendar'],
@@ -366,6 +373,18 @@ const NAV = {
     ['admin', 'People', 'people'],
   ],
 };
+
+/** What each role is called on screen. */
+const ROLE_LABELS = {
+  cleaner: 'Cleaner', office: 'Office', viewer: 'View only', admin: 'Admin',
+};
+const roleLabel = (role) => ROLE_LABELS[role] ?? role;
+
+/** Sees the office's screens - the overview, the whole plan and roster. */
+const officeSide = () => state.user.role !== 'cleaner';
+
+/** Can change the plan, the roster and reports. A view-only account can't. */
+const canChange = () => ['office', 'admin'].includes(state.user.role);
 
 function chrome({ title, back = false, section = '', wide = false }) {
   bar.hidden = !state.user;
@@ -388,7 +407,7 @@ function chrome({ title, back = false, section = '', wide = false }) {
   if (state.user) {
     $('#whoName').textContent = state.user.name;
     const role = $('#whoRole');
-    role.textContent = state.user.role;
+    role.textContent = roleLabel(state.user.role);
     role.className = `who-role ${state.user.role}`;
     const av = $('#whoAvatar');
     av.textContent = initials(state.user.name);
@@ -416,7 +435,7 @@ function chrome({ title, back = false, section = '', wide = false }) {
   // form itself or a building's own checklist, which already has its own
   // report button in context.
   const fab = $('#quickfab');
-  fab.hidden = !state.user || back;
+  fab.hidden = !state.user || back || state.user.role === 'viewer';
   fab.onclick = openQuickReport;
 }
 
@@ -446,6 +465,14 @@ function planningTabs(current) {
  * explanations of one idea is one too many.
  */
 function approvalCard(data, what) {
+  // The office computer sees where the week stands but has no button to change it.
+  if (!data.canPublish && officeSide()) {
+    return `<div class="card noprint"><div class="banner ${data.published ? 'done' : 'warn'}">
+      ${data.published
+        ? '<strong>Approved — staff can see this week.</strong>'
+        : `<strong>Draft — staff can't see this ${esc(what)} yet.</strong>`}
+    </div></div>`;
+  }
   if (!data.canPublish) {
     return data.published ? '' : `
     <div class="card noprint">
@@ -812,10 +839,22 @@ async function renderPeoplePicker() {
   }
   if (!people.length) return renderPinPad();
 
-  // Whoever used this phone last goes first. On a personal phone that is the
-  // owner, every time.
+  // Cleaners on top, the office underneath, each in the order an admin set
+  // under People - the server sends them that way. Whoever used this phone
+  // last is marked rather than moved, so the order stays the one people learn.
   const lastUid = Number(localStorage.getItem('bc.lastUid') || 0);
-  people.sort((a, b) => (b.id === lastUid) - (a.id === lastUid));
+  const sections = [
+    ['Cleaners', people.filter((p) => p.role === 'cleaner')],
+    ['Office', people.filter((p) => p.role !== 'cleaner')],
+  ].filter(([, list]) => list.length);
+
+  const tile = (p) => `<button class="persontile${p.id === lastUid ? ' last' : ''}"
+      data-uid="${p.id}" data-pin="${p.pinLength || 0}" data-name="${esc(p.name)}"
+      data-find="${esc(p.name.toLowerCase())}">
+    ${avatar(p.name, 'lg')}
+    <span class="ptname">${esc(firstName(p.name))}</span>
+    ${p.name === firstName(p.name) ? '' : `<span class="ptfull">${esc(p.name)}</span>`}
+  </button>`;
 
   app.innerHTML = `<p class="loginmark">Woodhouse Cleaning</p>
   <div class="login card wide-login">
@@ -823,15 +862,11 @@ async function renderPeoplePicker() {
     ${people.length > 10 ? `<div class="pad flush-bottom">
       <input id="findme" placeholder="Start typing your name…" autocomplete="off">
     </div>` : ''}
-    <div class="pad people-grid">
-      ${people.map((p) => `<button class="persontile" data-uid="${p.id}"
-          data-pin="${p.pinLength || 0}" data-name="${esc(p.name)}"
-          data-find="${esc(p.name.toLowerCase())}">
-        ${avatar(p.name, 'lg')}
-        <span class="ptname">${esc(firstName(p.name))}</span>
-        ${p.name === firstName(p.name) ? '' : `<span class="ptfull">${esc(p.name)}</span>`}
-      </button>`).join('')}
-    </div>
+    ${sections.map(([label, list]) => `<section class="login-section" data-section>
+      ${sections.length > 1 ? `<h3 class="login-sechead">${esc(label)}
+        <span class="num">${list.length}</span></h3>` : ''}
+      <div class="pad people-grid">${list.map(tile).join('')}</div>
+    </section>`).join('')}
     <p class="err center" id="err"></p>
   </div>
   ${installHintHTML()}`;
@@ -842,6 +877,10 @@ async function renderPeoplePicker() {
       const q = find.value.trim().toLowerCase();
       app.querySelectorAll('[data-find]').forEach((b) => {
         b.hidden = Boolean(q) && !b.dataset.find.includes(q);
+      });
+      // A heading with nobody left under it is just noise.
+      app.querySelectorAll('[data-section]').forEach((sec) => {
+        sec.hidden = !sec.querySelector('[data-find]:not([hidden])');
       });
     };
   }
@@ -1005,7 +1044,13 @@ function renderBootstrap() {
 async function renderOverview() {
   const live = screen();
   const day = viewDay();
-  const { buildings } = await api(`/overview?day=${day}`);
+  const isToday = day === state.config.today;
+  const [{ buildings }, carry] = await Promise.all([
+    api(`/overview?day=${day}`),
+    // Only this morning's question, and only for someone who can answer it.
+    // A failure here costs the card, never the overview.
+    isToday && canChange() ? api('/carryover').catch(() => null) : null,
+  ]);
   if (!live()) return;
   chrome({ title: 'Overview', section: '', wide: true });
 
@@ -1034,6 +1079,8 @@ async function renderOverview() {
 
   app.innerHTML = `
     <div class="card"><div class="pad tight">${dayNav(day)}</div></div>
+
+    ${carryoverCard(carry)}
 
     <div class="card">
       <div class="pad">
@@ -1090,7 +1137,76 @@ async function renderOverview() {
   wireTiles();
   wireDayNav(app, renderOverview);
   wireSectionToggles(app, renderOverview);
+  wireCarryover(app, carry);
   poll(renderOverview, 30000);
+}
+
+/**
+ * The morning-after question: these were on the last planned day and never
+ * got signed off - put each on today, or leave it? A tick adds it to the end
+ * of today's list; a cross drops it from this card for good.
+ */
+function carryoverCard(carry) {
+  if (!carry?.missed?.length) return '';
+  const when = carry.from === addDays(carry.today, -1)
+    ? 'yesterday' : DAY_FULL[weekdayIndex(carry.from)];
+  return `<div class="card carryover">
+    <h2><span class="grow">Not finished ${esc(when)}</span>
+      <span class="num">${carry.missed.length}</span></h2>
+    <p class="pad tight small muted">Add any of these to today's plan with the
+      tick, or let them go with the cross.</p>
+    ${carry.missed.map((m) => `<div class="carry-row" data-carry="${m.buildingId}">
+      <span class="grow">
+        <strong>${esc(m.name)}</strong>
+        <span class="tiny muted">${typePill(m.cleanType)}
+          ${m.ticked ? `${m.ticked} ticked, not signed off` : 'not started'}${
+          m.note ? ` · ${esc(m.note)}` : ''}</span>
+      </span>
+      <button class="iconbtn carry-yes" data-carryadd="${m.buildingId}"
+        title="Add to today" aria-label="Add ${esc(m.name)} to today">${svgIcon('check')}</button>
+      <button class="iconbtn carry-no" data-carryskip="${m.buildingId}"
+        title="Leave it" aria-label="Don't add ${esc(m.name)}">${svgIcon('close')}</button>
+    </div>`).join('')}
+    ${carry.missed.length > 1 ? `<div class="pad tight">
+      <button class="wide" id="carryall">${svgIcon('check')} Add all
+        ${carry.missed.length} to today</button></div>` : ''}
+  </div>`;
+}
+
+function wireCarryover(root, carry) {
+  if (!carry?.missed?.length) return;
+  const answer = (buildingId, add) => api('/carryover', {
+    method: 'POST', body: { buildingId, from: carry.from, add },
+  });
+
+  const one = (attr, add) => root.querySelectorAll(`[${attr}]`).forEach((b) => {
+    b.onclick = async () => {
+      const id = Number(b.getAttribute(attr));
+      b.closest('.carry-row').querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      try {
+        await answer(id, add);
+        const name = carry.missed.find((m) => m.buildingId === id)?.name ?? 'Building';
+        toast(add ? `${name} added to today` : `${name} left off`);
+        renderOverview();
+      } catch (e) {
+        toast(e.message, true);
+        renderOverview();
+      }
+    };
+  });
+  one('data-carryadd', true);
+  one('data-carryskip', false);
+
+  root.querySelector('#carryall')?.addEventListener('click', async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      for (const m of carry.missed) await answer(m.buildingId, true);
+      toast(`${carry.missed.length} added to today — reorder them under Planning`);
+    } catch (e) {
+      toast(e.message, true);
+    }
+    renderOverview();
+  });
 }
 
 /**
@@ -1180,7 +1296,8 @@ function compactRow(b, canOpen = true) {
 }
 
 /** True when this user is allowed to open an individual building's checklist. */
-const canDrillIn = () => state.user.role !== 'office' || !state.config.rollupOnly;
+const canDrillIn = () => !['office', 'viewer'].includes(state.user.role)
+  || !state.config.rollupOnly;
 
 function wireTiles() {
   app.querySelectorAll('[data-b]').forEach((el) => {
@@ -1326,8 +1443,7 @@ async function renderCleanerHome() {
   const planDraft = planPublished === false;
 
   // Everybody rostered on this day, one entry each however many shifts they
-  // have. The server hands a cleaner their colleagues' names without the
-  // times, which is exactly what a handover needs: who else is about.
+  // have, with when they're on - who is about, and until when.
   const crew = [];
   for (const sh of shifts ?? []) {
     let person = crew.find((c) => c.id === sh.user_id);
@@ -1538,7 +1654,7 @@ async function renderSchedule() {
   // Same as the roster: a week the office hasn't approved is withheld from
   // staff on the server, so the grid a cleaner would get here is every
   // building with nothing under it - which reads as "no cleaning this week".
-  const held = !data.canPublish && !data.published;
+  const held = state.user.role === 'cleaner' && !data.published;
 
   app.innerHTML = `
     ${planningTabs('schedule')}
@@ -1569,7 +1685,14 @@ async function renderSchedule() {
             ${data.days.map((d) => {
               const cls = [d === data.today ? 'is-today' : '', isWeekend(d) ? 'weekend' : '']
                 .filter(Boolean).join(' ');
-              return `<th class="${cls}">${esc(weekdayShort(d))}<small>${esc(dayOfMonth(d))}</small></th>`;
+              const jobs = dayJobs(data, d).length;
+              // The day's heading is the way into putting that day in order.
+              return `<th class="${cls}">${canEdit && jobs > 1
+                ? `<button class="dayhead" data-dayorder="${d}"
+                    title="Put ${esc(dayLabel(d))}'s jobs in order"
+                    >${esc(weekdayShort(d))}<small>${esc(dayOfMonth(d))}</small>
+                    <span class="dayhead-hint noprint">${svgIcon('list')} Order</span></button>`
+                : `${esc(weekdayShort(d))}<small>${esc(dayOfMonth(d))}</small>`}</th>`;
             }).join('')}
           </tr></thead>
           <tbody>
@@ -1614,7 +1737,7 @@ async function renderSchedule() {
 
     <p class="tiny muted center noprint">
       ${canEdit
-        ? 'Tap any square to put that building on the plan and pick Full Clean or Check. Give it an order only when one matters — numbered jobs lead the day\'s list.'
+        ? 'Tap any square to put that building on the plan and pick Full Clean or Check. Tap a day\'s heading to drag its jobs into the order they get done.'
         : 'This is the plan. The office sets it — tap a building on your home screen to start cleaning.'}
     </p>`}`;
 
@@ -1656,9 +1779,46 @@ async function renderSchedule() {
         openScheduleEditor(data, Number(bid), day);
       };
     });
+    app.querySelectorAll('[data-dayorder]').forEach((b) => {
+      b.onclick = () => openDayOrder(data, b.dataset.dayorder);
+    });
   }
 
   poll(renderSchedule, 45000);
+}
+
+/**
+ * One day's jobs in the order they are done: numbered ones first, in their
+ * order, then the rest in the buildings' own order - the same order the
+ * cleaners' list and the run sheet use.
+ */
+function dayJobs(data, day) {
+  return data.buildings
+    .map((b, i) => ({ b, i, c: data.cells[`${b.id}:${day}`] }))
+    .filter((x) => x.c?.scheduled)
+    .sort((x, y) => (x.c.priority ?? Infinity) - (y.c.priority ?? Infinity) || x.i - y.i);
+}
+
+/**
+ * Drag a day's jobs into order. Saving numbers every one of them 1, 2, 3...
+ * top to bottom, so putting a new building third is one drag rather than
+ * renumbering everything below it by hand.
+ */
+function openDayOrder(data, day, onDone = renderSchedule) {
+  const jobs = dayJobs(data, day);
+  orderSheet({
+    title: `${DAY_FULL[weekdayIndex(day)]} ${auDate(day)} — order`,
+    hint: 'Drag by the handle, or use the arrows. Top gets done first.',
+    numbered: true,
+    items: jobs.map(({ b, c }) => ({
+      id: b.id,
+      label: b.name,
+      extra: `${typePill(c.cleanType ?? 'full')}${c.checkin ? ` ${CHECKIN_PILL}` : ''} `,
+      sub: c.note ?? '',
+    })),
+    save: (ids) => api('/schedule/order', { method: 'POST', body: { day, ids } }),
+    onDone,
+  });
 }
 
 function openScheduleEditor(data, buildingId, day) {
@@ -1695,6 +1855,14 @@ function openScheduleEditor(data, buildingId, day) {
           placeholder="No priority set" value="${cell.priority ?? ''}">
         <span class="field-hint">Leave it blank and the job simply sits with the
           rest; numbered jobs lead the list, in order.</span></label>
+      <label class="switch-row">
+        <input type="checkbox" id="thenorder">
+        <span class="grow">
+          <strong>Then put ${esc(dayLabel(day).toLowerCase())} in order</strong>
+          <span class="small muted">Opens the day's jobs as a list you drag into
+            place once this is saved.</span>
+        </span>
+      </label>
 
       <label class="switch-row">
         <input type="checkbox" id="checkin" ${cell.checkin ? 'checked' : ''}>
@@ -1755,10 +1923,16 @@ function openScheduleEditor(data, buildingId, day) {
           body: { ...body, weekday, repeat: wantRepeat },
         });
       }
+      const thenOrder = sheet.querySelector('#thenorder').checked;
       closeSheet();
       toast(wantRepeat
         ? `Scheduled, and every ${DAY_FULL[weekday]} from now on`
         : 'Schedule updated');
+      if (thenOrder) {
+        // Fresh from the server, so the job just added is in the list.
+        const fresh = await api(`/schedule?from=${data.from}&days=7`);
+        openDayOrder(fresh, day);
+      }
       renderSchedule();
     } catch (e) {
       sheet.querySelector('#err').textContent = e.message;
@@ -2394,7 +2568,7 @@ async function renderIssues(status = 'open') {
   const { items } = await api(`/maintenance?status=${status}`);
   if (!live()) return;
   chrome({ title: 'Reports', section: 'issues' });
-  const canResolve = state.user.role !== 'cleaner';
+  const canResolve = canChange();
 
   app.innerHTML = `
     <div class="spread wrap">
@@ -2402,7 +2576,8 @@ async function renderIssues(status = 'open') {
         <button data-s="open" aria-current="${status === 'open'}">Open</button>
         <button data-s="resolved" aria-current="${status === 'resolved'}">Resolved</button>
       </div>
-      <button id="newreport">${svgIcon('plus')} New report</button>
+      ${state.user.role === 'viewer' ? ''
+        : `<button id="newreport">${svgIcon('plus')} New report</button>`}
     </div>
     <div class="card">
       ${items.length ? items.map((i) => `
@@ -2427,7 +2602,7 @@ async function renderIssues(status = 'open') {
 
   app.querySelectorAll('[data-photo]').forEach((img) => loadPhoto(img, img.dataset.photo));
 
-  $('#newreport').onclick = openQuickReport;
+  $('#newreport')?.addEventListener('click', openQuickReport);
 
   app.querySelectorAll('[data-s]').forEach((b) => {
     b.onclick = () => renderIssues(b.dataset.s);
@@ -2751,8 +2926,10 @@ async function renderAvailability() {
           <tbody>
             ${shown.map((p) => `<tr>
               <th class="rowhead">
-                <button class="linkish" data-edit="${p.id}">${esc(p.name)}</button>
-                <small>${esc(p.role)}${p.weekOnly
+                ${canChange()
+                  ? `<button class="linkish" data-edit="${p.id}">${esc(p.name)}</button>`
+                  : esc(p.name)}
+                <small>${esc(roleLabel(p.role))}${p.weekOnly
                   ? ' · <span class="weekonly">set for this week</span>' : ''}${hoursLabel(p)
                   ? ` · <span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
                   : ''}</small>
@@ -2784,7 +2961,7 @@ async function renderAvailability() {
         <span><i class="sw no"></i>Unavailable</span>
         <span><span class="prefstar">${svgIcon('star')}</span>Would rather work it</span>
         <span><i class="sw weekonly-sw"></i>Set for this week only</span>
-        <span>Tap a name to set days and hours</span>
+        ${canChange() ? '<span>Tap a name to set days and hours</span>' : ''}
       </div>
     </div>`;
 
@@ -2934,8 +3111,18 @@ async function renderRoster() {
   // Only people who are on the roster this week, plus (for the office) anyone
   // who could be - a table of thirty names with two shifts in it is unusable.
   const onRoster = new Set(data.shifts.map((s) => s.user_id));
-  const staff = canEdit ? data.staff : data.staff.filter((p) => onRoster.has(p.id));
+  const staff = officeSide() ? data.staff : data.staff.filter((p) => onRoster.has(p.id));
   const conflicts = data.shifts.filter((s) => s.flags.length);
+
+  // Cleaners are who the roster is mostly about, so they lead; the office
+  // folds away underneath. Already in order from the server - cleaners first,
+  // then as arranged under People.
+  const cleaners = staff.filter((p) => p.role === 'cleaner');
+  const office = staff.filter((p) => p.role !== 'cleaner');
+  // Folded until somebody opens it - unless an office person actually has a
+  // shift this week, which nobody should have to go looking for.
+  const officeOn = office.some((p) => onRoster.has(p.id));
+  const officeOpen = state.rosterOfficeOpen ?? officeOn;
 
   const cell = (person, day) => {
     const shifts = shiftsFor(person.id, day);
@@ -2974,7 +3161,26 @@ async function renderRoster() {
   // A draft week is withheld from staff server-side, so the grid a cleaner
   // would get here is every name with a dash under it - which reads as
   // "nobody is working this week" rather than "this isn't decided yet".
-  const held = !data.canPublish && !data.published;
+  const held = state.user.role === 'cleaner' && !data.published;
+
+  const staffRow = (p, group = '') => `<tr ${group ? `data-group="${group}"` : ''}
+      ${group && !officeOpen ? 'hidden' : ''}>
+    <th class="rowhead">${esc(p.name)}
+      <small>${officeSide() && hoursLabel(p)
+        ? `<span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
+        : esc(roleLabel(p.role))}</small></th>
+    ${data.days.map((d) => cell(p, d)).join('')}
+  </tr>`;
+
+  const groupHead = (key, label, count, open) => `<tr class="grouphead-row">
+    <th colspan="${1 + data.days.length}">
+      <div class="grouphead" data-rostergroup="${key}" role="button" tabindex="0"
+        aria-expanded="${open}">
+        ${key ? svgIcon('chevron', 'chev') : ''}
+        <span class="grow">${esc(label)}</span>
+        <span class="num">${count}</span>
+      </div>
+    </th></tr>`;
 
   app.innerHTML = `
     ${planningTabs('roster')}
@@ -3004,13 +3210,11 @@ async function renderRoster() {
               ${esc(DAY_NAMES[i])}<small>${esc(dayOfMonth(d))}</small></th>`).join('')}
           </tr></thead>
           <tbody>
-            ${staff.map((p) => `<tr>
-              <th class="rowhead">${esc(p.name)}
-                <small>${canEdit && hoursLabel(p)
-                  ? `<span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
-                  : esc(p.role)}</small></th>
-              ${data.days.map((d) => cell(p, d)).join('')}
-            </tr>`).join('') || `<tr><td colspan="8">
+            ${office.length && cleaners.length ? groupHead('', 'Cleaners', cleaners.length, true) : ''}
+            ${cleaners.map((p) => staffRow(p)).join('')}
+            ${office.length ? groupHead('office', 'Office staff', office.length, officeOpen) : ''}
+            ${office.map((p) => staffRow(p, 'office')).join('')}
+            ${staff.length ? '' : `<tr><td colspan="8">
               <div class="empty"><b>Nobody rostered this week</b>
               ${canEdit ? 'Tap a square to add a shift.' : ''}</div></td></tr>`}
           </tbody>
@@ -3020,8 +3224,8 @@ async function renderRoster() {
 
     <div class="row wrap noprint">
       <button id="print">${svgIcon('printer')} Print / save as PDF</button>
-      ${canEdit ? `<button id="csv">${svgIcon('download')} Download CSV</button>
-      <button id="copyweek">${svgIcon('copy')} Copy last week into this one</button>` : ''}
+      ${officeSide() ? `<button id="csv">${svgIcon('download')} Download CSV</button>` : ''}
+      ${canEdit ? `<button id="copyweek">${svgIcon('copy')} Copy last week into this one</button>` : ''}
     </div>
 
     <p class="tiny muted center noprint">
@@ -3032,6 +3236,17 @@ async function renderRoster() {
 
   wirePlanningTabs(app);
   wireWeekNav(app, renderRoster);
+
+  app.querySelectorAll('[data-rostergroup="office"]').forEach((head) => {
+    const toggle = () => {
+      state.rosterOfficeOpen = !officeOpen;
+      renderRoster();
+    };
+    head.onclick = toggle;
+    head.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    };
+  });
 
   $('#print')?.addEventListener('click', () => window.print());
   $('#csv')?.addEventListener('click', () =>
@@ -3596,17 +3811,21 @@ async function renderBuildingEditor(buildingId) {
 }
 
 /**
- * Generic reorder sheet: move rows with the buttons, save once. The whole
- * ordered list goes to the server, which refuses it if anything was added or
- * removed in the meantime rather than writing a stale order over the top.
+ * A list you put in order by dragging, then save once.
+ *
+ * Each row has a grip to drag by - pointer events, so the same code works
+ * with a finger on a phone and a mouse in the office - and the ▲▼ buttons
+ * for a one-step nudge, which is also the accessible way to do it. `items`
+ * are { id, label, sub?, extra? } where `extra` is trusted HTML (pills).
+ * `save(ids)` gets the ids top to bottom and throws to keep the sheet open.
  */
-function openReorder({ title, hint, items, kind, parentId, cleanType, onDone }) {
+function orderSheet({ title, hint, items, save, onDone, numbered = false }) {
   const order = [...items];
 
   const sheet = openSheet(`
     <div class="sheet-head"><strong>${esc(title)}</strong></div>
     <div class="pad stack">
-      <p class="dialog-body">${esc(hint)}</p>
+      ${hint ? `<p class="dialog-body">${esc(hint)}</p>` : ''}
       <div class="reorder" id="rows"></div>
       <p class="err" id="err"></p>
       <button class="primary wide" id="save">Save this order</button>
@@ -3614,11 +3833,22 @@ function openReorder({ title, hint, items, kind, parentId, cleanType, onDone }) 
     </div>`);
 
   const rows = sheet.querySelector('#rows');
+  const move = (from, to) => {
+    if (to < 0 || to >= order.length || from === to) return;
+    const [item] = order.splice(from, 1);
+    order.splice(to, 0, item);
+  };
+
   const draw = () => {
-    rows.innerHTML = order.map((item, i) => `<div class="reorder-row">
+    rows.innerHTML = order.map((item, i) => `<div class="reorder-row" data-i="${i}">
+      <span class="grip" data-grip aria-hidden="true" title="Drag to move">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"/></svg>
+      </span>
+      ${numbered ? `<span class="prio num">${i + 1}</span>` : ''}
       <span class="grow">
         <strong>${esc(item.label)}</strong>
-        ${item.sub ? `<span class="tiny muted">${esc(item.sub)}</span>` : ''}
+        ${item.sub || item.extra ? `<span class="tiny muted reorder-sub">${item.extra ?? ''}${
+          item.sub ? esc(item.sub) : ''}</span>` : ''}
       </span>
       <button class="iconbtn" data-up="${i}" ${i === 0 ? 'disabled' : ''}
         aria-label="Move up">${svgIcon('up')}</button>
@@ -3627,38 +3857,97 @@ function openReorder({ title, hint, items, kind, parentId, cleanType, onDone }) 
     </div>`).join('');
 
     rows.querySelectorAll('[data-up]').forEach((b) => {
-      b.onclick = () => {
-        const i = Number(b.dataset.up);
-        [order[i - 1], order[i]] = [order[i], order[i - 1]];
-        draw();
-      };
+      b.onclick = () => { const i = Number(b.dataset.up); move(i, i - 1); draw(); };
     });
     rows.querySelectorAll('[data-down]').forEach((b) => {
-      b.onclick = () => {
-        const i = Number(b.dataset.down);
-        [order[i + 1], order[i]] = [order[i], order[i + 1]];
-        draw();
-      };
+      b.onclick = () => { const i = Number(b.dataset.down); move(i, i + 1); draw(); };
+    });
+    rows.querySelectorAll('[data-grip]').forEach((grip) => {
+      grip.onpointerdown = (ev) => startDrag(ev, grip.closest('.reorder-row'));
     });
   };
+
+  // The row follows the pointer and the others step aside as its middle
+  // passes theirs; the order itself is only rewritten when it is let go.
+  // Measured per row, because a row with a note under it is taller.
+  function startDrag(ev, row) {
+    ev.preventDefault();
+    const from = Number(row.dataset.i);
+    const startY = ev.clientY;
+    const startScroll = rows.scrollTop;
+    const all = [...rows.children];
+    const rects = all.map((r) => r.getBoundingClientRect());
+    const gap = rects.length > 1 ? rects[1].top - rects[0].bottom : 0;
+    const room = rects[from].height + gap;
+    const mid = (r) => r.top + r.height / 2;
+    let to = from;
+
+    row.classList.add('dragging');
+    row.setPointerCapture?.(ev.pointerId);
+
+    const onMove = (e) => {
+      const dy = e.clientY - startY + (rows.scrollTop - startScroll);
+      row.style.transform = `translateY(${dy}px)`;
+      const centre = mid(rects[from]) + dy;
+      to = from;
+      rects.forEach((r, i) => {
+        if (i < from && centre < mid(r)) to = Math.min(to, i);
+        if (i > from && centre > mid(r)) to = Math.max(to, i);
+      });
+      all.forEach((r, i) => {
+        if (r === row) return;
+        let shift = 0;
+        if (from < to && i > from && i <= to) shift = -room;
+        if (from > to && i < from && i >= to) shift = room;
+        r.style.transform = shift ? `translateY(${shift}px)` : '';
+      });
+      // Keep the row in view in a long list.
+      const box = rows.getBoundingClientRect();
+      if (e.clientY < box.top + 30) rows.scrollTop -= 8;
+      else if (e.clientY > box.bottom - 30) rows.scrollTop += 8;
+    };
+    const onUp = () => {
+      row.removeEventListener('pointermove', onMove);
+      row.removeEventListener('pointerup', onUp);
+      row.removeEventListener('pointercancel', onUp);
+      move(from, to);
+      draw();
+    };
+    row.addEventListener('pointermove', onMove);
+    row.addEventListener('pointerup', onUp);
+    row.addEventListener('pointercancel', onUp);
+  }
+
   draw();
 
   sheet.querySelector('#cancel').onclick = closeSheet;
   sheet.querySelector('#save').onclick = async (ev) => {
-    ev.currentTarget.disabled = true;
+    const btn = ev.currentTarget;
+    btn.disabled = true;
     try {
-      await api('/admin/reorder', {
-        method: 'POST',
-        body: { kind, parentId, cleanType, ids: order.map((i) => i.id) },
-      });
+      await save(order.map((i) => i.id));
       closeSheet();
       toast('Order saved');
       onDone();
     } catch (e) {
       sheet.querySelector('#err').textContent = e.message;
-      ev.currentTarget.disabled = false;
+      btn.disabled = false;
     }
   };
+}
+
+/**
+ * Reorders a building's checklist or the buildings themselves. The whole
+ * ordered list goes to the server, which refuses it if anything was added or
+ * removed in the meantime rather than writing a stale order over the top.
+ */
+function openReorder({ title, hint, items, kind, parentId, cleanType, onDone }) {
+  orderSheet({
+    title, hint, items, onDone,
+    save: (ids) => api('/admin/reorder', {
+      method: 'POST', body: { kind, parentId, cleanType, ids },
+    }),
+  });
 }
 
 function editBuilding(b, onDone) {
@@ -3849,6 +4138,12 @@ async function renderAdmin() {
   ]);
   if (!live()) return;
 
+  // Same split as the sign-in screen, in the same order.
+  const peopleGroups = [
+    ['cleaner', 'Cleaners', users.filter((u) => u.role === 'cleaner')],
+    ['office', 'Office', users.filter((u) => u.role !== 'cleaner')],
+  ].filter(([, , list]) => list.length);
+
   app.innerHTML = `
     <div>
       <div class="card">
@@ -3859,6 +4154,7 @@ async function renderAdmin() {
             <select id="r">
               <option value="cleaner">Cleaner — ticks checklists</option>
               <option value="office">Office — sees the overview, sets the schedule and roster</option>
+              <option value="viewer">View only — sees everything the office does, changes nothing</option>
               <option value="admin">Admin — everything, including people</option>
             </select></label>
           <label class="field"><span>PIN (4-8 digits)</span>
@@ -3868,21 +4164,26 @@ async function renderAdmin() {
         </div>
       </div>
 
-      <div class="card">
-        <h2>Everyone — ${users.filter((u) => u.active).length} active</h2>
-        ${users.map((u) => `<div class="list-item people-row" data-off="${u.active ? 0 : 1}"
+      ${peopleGroups.map(([key, label, list]) => `<div class="card">
+        <h2><span class="grow">${esc(label)} — ${list.filter((u) => u.active).length} active</span>
+          ${list.filter((u) => u.active).length > 1 ? `<button class="sm" data-sortgroup="${key}"
+            title="The order names appear on the sign-in screen and the roster"
+            >${svgIcon('list')} Reorder</button>` : ''}</h2>
+        ${list.map((u) => `<div class="list-item people-row" data-off="${u.active ? 0 : 1}"
             data-id="${u.id}" data-name="${esc(u.name)}" data-role="${esc(u.role)}"
             data-active="${u.active}">
           <div class="row loose">
             ${avatar(u.name)}
             <span class="grow">
               <strong>${esc(u.name)}</strong>
-              <span class="tiny muted">${esc(u.role)}${u.active ? '' : ' · disabled'}</span>
+              <span class="tiny muted">${esc(roleLabel(u.role))}${u.active ? '' : ' · disabled'}</span>
             </span>
           </div>
-          <div class="people-avail">${esc(availabilitySummary(u))}</div>
+          <div class="people-avail">${u.role === 'viewer' ? 'Shared view-only account'
+            : esc(availabilitySummary(u))}</div>
           <div class="actions">
-            <button data-days>Availability</button>
+            ${u.role === 'viewer' ? '' : '<button data-days>Availability</button>'}
+            <button data-setrole>Role</button>
             <button data-pin>New PIN</button>
             <button data-tog>${u.active ? 'Disable' : 'Enable'}</button>
             <button class="danger" data-del
@@ -3890,11 +4191,12 @@ async function renderAdmin() {
               >Delete</button>
           </div>
         </div>`).join('')}
-        <p class="note pad">
-          PINs are stored hashed — they can be replaced, never read back.
-          Availability feeds the roster; see <strong>Planning, then Availability,</strong>
-          for everyone at once.</p>
-      </div>
+      </div>`).join('')}
+      <p class="note pad">
+        PINs are stored hashed — they can be replaced, never read back.
+        Availability feeds the roster; see <strong>Planning, then Availability,</strong>
+        for everyone at once. <strong>Reorder</strong> sets the order names
+        appear on the sign-in screen and the roster — cleaners always come first.</p>
     </div>
 
     <div class="card">
@@ -4060,6 +4362,62 @@ async function renderAdmin() {
   };
 
   const rowOf = (btn) => btn.closest('.people-row').dataset;
+
+  app.querySelectorAll('[data-sortgroup]').forEach((b) => {
+    b.onclick = () => {
+      const [, label, list] = peopleGroups.find(([key]) => key === b.dataset.sortgroup);
+      orderSheet({
+        title: `${label} — sign-in order`,
+        hint: 'Drag by the handle, or use the arrows. This is the order on the sign-in screen and the roster.',
+        items: list.filter((u) => u.active).map((u) => ({
+          id: u.id, label: u.name, sub: roleLabel(u.role),
+        })),
+        save: (ids) => api('/users/order', { method: 'POST', body: { ids } }),
+        onDone: renderAdmin,
+      });
+    };
+  });
+
+  app.querySelectorAll('[data-setrole]').forEach((b) => {
+    b.onclick = () => {
+      const row = rowOf(b);
+      const sheet = openSheet(`
+        <div class="sheet-head"><strong>${esc(row.name)} — role</strong></div>
+        <div class="pad stack">
+          ${Object.entries({
+            cleaner: 'Ticks checklists, sees their roster',
+            office: 'Sees the overview, sets the plan and roster',
+            viewer: 'Sees everything the office does, changes nothing',
+            admin: 'Everything, including people and checklists',
+          }).map(([role, what]) => `<button class="bigchoice" data-pickrole="${role}"
+            ${role === row.role ? 'aria-pressed="true"' : ''}>
+            <strong>${esc(roleLabel(role))}${role === row.role ? ' (now)' : ''}</strong>
+            <span class="small muted">${esc(what)}</span></button>`).join('')}
+          <p class="err" id="err"></p>
+          <button class="wide" id="cancel">Cancel</button>
+        </div>`);
+      sheet.querySelector('#cancel').onclick = closeSheet;
+      sheet.querySelectorAll('[data-pickrole]').forEach((pick) => {
+        pick.onclick = async () => {
+          if (pick.dataset.pickrole === row.role) return closeSheet();
+          try {
+            await api('/users', {
+              method: 'POST',
+              body: {
+                id: Number(row.id), name: row.name, role: pick.dataset.pickrole,
+                active: Number(row.active),
+              },
+            });
+            closeSheet();
+            toast(`${row.name} is now ${roleLabel(pick.dataset.pickrole)}`);
+            renderAdmin();
+          } catch (e) {
+            sheet.querySelector('#err').textContent = e.message;
+          }
+        };
+      });
+    };
+  });
 
   app.querySelectorAll('[data-days]').forEach((b) => {
     b.onclick = () => {

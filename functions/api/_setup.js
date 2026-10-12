@@ -209,6 +209,16 @@ const TABLES = [
      UNIQUE (user_id, week_start)
    )`,
 
+  // A building the office looked at the morning after it was missed and said
+  // "no, leave it" about, so the same question isn't asked again all day.
+  `CREATE TABLE IF NOT EXISTS carryover_dismissed (
+     building_id  INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+     day          TEXT    NOT NULL,
+     dismissed_by TEXT    NOT NULL,
+     dismissed_at TEXT    NOT NULL,
+     PRIMARY KEY (building_id, day)
+   )`,
+
   `CREATE TABLE IF NOT EXISTS login_attempts (
      ip       TEXT PRIMARY KEY,
      fails    INTEGER NOT NULL DEFAULT 0,
@@ -722,6 +732,14 @@ const COLUMNS = [
   // Guests arriving that day, carried through to the cleaner's list.
   ['schedule', 'checkin', 'INTEGER NOT NULL DEFAULT 0'],
   ['maintenance', 'location', "TEXT NOT NULL DEFAULT ''"],
+  // An office account that can see everything and change nothing - the shared
+  // computer in the office. A flag on an office row rather than a fourth
+  // role, because the role's CHECK constraint can only be widened by
+  // rebuilding `users`, and the roster and availability cascade off it.
+  ['users', 'view_only', 'INTEGER NOT NULL DEFAULT 0'],
+  // The order names appear in on the sign-in screen, the roster and the
+  // availability grid. Set by an admin; 0 for everyone sorts by name.
+  ['users', 'sort_order', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 /**
