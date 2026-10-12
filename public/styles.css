@@ -276,6 +276,7 @@ header.bar h1 {
 /* Role is a fact about permissions, so it gets one neutral treatment rather
    than three competing colours in the corner of every screen. */
 .who-role.admin { color: var(--accent); }
+.who-role.viewer { color: var(--warn); }
 
 /* Deterministic tone per person out of a small, flat set: enough to tell two
    cleaners apart in a dense grid, not so much that the screen turns into a
@@ -1414,7 +1415,7 @@ table.avail td.dimmed { opacity: .28; }
 .itemrow { padding: 10px var(--s4); }
 .itemrow strong { font-size: 14px; font-weight: 620; }
 
-.reorder { display: grid; gap: 5px; max-height: 46vh; overflow-y: auto; }
+.reorder { display: grid; gap: 5px; max-height: 56vh; overflow-y: auto; overscroll-behavior: contain; }
 
 .reorder-row {
   display: flex;
@@ -1423,7 +1424,86 @@ table.avail td.dimmed { opacity: .28; }
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: var(--r);
+  background: var(--card);
+  transition: transform .15s ease;
 }
+
+.reorder-row .grow { min-width: 0; }
+.reorder-row strong { display: block; }
+.reorder-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+/* The handle is the only part that starts a drag, so the list still scrolls
+   with a finger anywhere else - and touch-action stops the page scrolling
+   out from under the row being dragged. */
+.grip {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 36px;
+  margin-left: -6px;
+  color: var(--faint);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.grip .ico { stroke-width: 3.2; }
+
+.reorder-row.dragging {
+  position: relative;
+  z-index: 2;
+  transition: none;
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px rgb(0 0 0 / .16);
+  cursor: grabbing;
+}
+
+/* A day's heading on the plan doubles as the way into putting it in order. */
+button.dayhead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 100%;
+  min-height: 0;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+button.dayhead:hover { background: var(--hover); color: var(--accent); }
+.dayhead-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 9.5px;
+  color: var(--accent);
+}
+.dayhead-hint .ico { width: 11px; height: 11px; }
+
+/* --------------------------------------------- carry over from yesterday */
+
+.carryover { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+
+.carry-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 8px var(--s4);
+  border-top: 1px solid var(--line-2);
+}
+.carry-row .grow { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.carry-row .tiny { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+.carry-row button.iconbtn { width: var(--tap); height: var(--tap); }
+button.carry-yes { color: var(--done); border-color: color-mix(in srgb, var(--done) 40%, var(--line)); }
+button.carry-yes:hover { background: var(--done-wash); }
+button.carry-no { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
+button.carry-no:hover { background: var(--danger-wash); }
 
 /* ------------------------------------------------------ people (admin) */
 
@@ -1489,6 +1569,24 @@ table.avail td.dimmed { opacity: .28; }
   max-width: 100%;
   white-space: nowrap;
 }
+
+/* Cleaners, then the office, each under its own heading. */
+.login-sechead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: var(--s3) var(--s4) 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.login-section + .login-section { border-top: 1px solid var(--line-2); }
+
+/* Whoever used this phone last, marked rather than moved to the front. */
+.persontile.last { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 
 /* One name is the whole tile; no point repeating it underneath. */
 .persontile .ptname + .ptfull:only-of-type { display: none; }

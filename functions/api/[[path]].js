@@ -64,6 +64,26 @@ async function hmac(_env, message) {
 /** What a signed-in client is allowed to know about a person. */
 const pick = (u) => ({ id: u.id, name: u.name, role: u.role });
 
+/** Every role the app knows. 'viewer' is stored as an office row with view_only set. */
+const ROLES = ['cleaner', 'office', 'viewer', 'admin'];
+
+/**
+ * The role as the app sees it. A view-only office account reads as 'viewer'
+ * everywhere, so every existing `require(user, 'office', 'admin')` already
+ * keeps it away from anything that changes something.
+ */
+const ROLE_SQL = "CASE WHEN role = 'office' AND view_only = 1 THEN 'viewer' ELSE role END";
+
+/**
+ * The order people are listed in: cleaners first, then the office, each in
+ * the order an admin set under People and then by name. One definition, so
+ * the sign-in screen, the roster and the availability grid always agree.
+ */
+const STAFF_ORDER = "CASE WHEN role = 'cleaner' THEN 0 ELSE 1 END, sort_order, name";
+
+/** Anyone who sees the office's screens, whether or not they can change them. */
+const officeSide = (user) => user.role !== 'cleaner';
+
 const firstName = (name) => String(name).split(/[\s(]/)[0];
 
 const newToken = (env, uid) => sign(env, {
@@ -410,7 +430,7 @@ async function currentUser(request, env) {
   // Re-read the user each request so deactivating someone takes effect
   // immediately rather than when their token happens to expire.
   const row = await env.DB.prepare(
-    'SELECT id, name, role, active FROM users WHERE id = ?',
+    `SELECT id, name, ${ROLE_SQL} AS role, active FROM users WHERE id = ?`,
   ).bind(claims.uid).first();
   return row && row.active ? row : null;
 }
@@ -423,8 +443,10 @@ function require(user, ...roles) {
   return user;
 }
 
-// Office and admin can read anything; cleaners read and write.
-const canRead = (user) => require(user, 'cleaner', 'office', 'admin');
+// Everyone signed in can read; who can change what is checked route by route.
+const canRead = (user) => require(user, 'cleaner', 'office', 'viewer', 'admin');
+// Read-only office screens: the plan, the roster, reports and exports.
+const canSeeOffice = (user) => require(user, 'office', 'viewer', 'admin');
 const canTick = (user) => require(user, 'cleaner', 'admin');
 
 /* ----------------------------------------------------------- rate limiting */
@@ -607,7 +629,8 @@ const routes = {
    */
   'GET /people': async (_req, env) => {
     const { results } = await env.DB.prepare(
-      'SELECT id, name, role, pin_length AS pinLength FROM users WHERE active = 1 ORDER BY name',
+      `SELECT id, name, ${ROLE_SQL} AS role, pin_length AS pinLength FROM users
+       WHERE active = 1 ORDER BY ${STAFF_ORDER}`,
     ).all();
     return json({ people: results });
   },
@@ -623,7 +646,7 @@ const routes = {
 
     if (userId != null) {
       named = await env.DB.prepare(
-        'SELECT id, name, role, pin_hash FROM users WHERE id = ? AND active = 1',
+        `SELECT id, name, ${ROLE_SQL} AS role, pin_hash FROM users WHERE id = ? AND active = 1`,
       ).bind(Number(userId)).first();
 
       // Name plus PIN: the PIN is checked against the person who was picked,
@@ -642,7 +665,7 @@ const routes = {
       // No name given: the old PIN-is-the-identity path, kept so a phone
       // running a cached copy of the app can still sign in.
       user = await env.DB.prepare(
-        'SELECT id, name, role FROM users WHERE pin_hash = ? AND active = 1',
+        `SELECT id, name, ${ROLE_SQL} AS role FROM users WHERE pin_hash = ? AND active = 1`,
       ).bind(await hashPin(env, pin)).first();
     }
 
@@ -896,8 +919,8 @@ const routes = {
       today: localDay(env),
       buildings: buildings.results.map((b) => ({ ...b, sizes: sizeOf(b.id) })),
       cells,
-      canEdit: user.role !== 'cleaner',
-      canPublish: user.role !== 'cleaner',
+      canEdit: ['office', 'admin'].includes(user.role),
+      canPublish: ['office', 'admin'].includes(user.role),
       ...publishState(published, weekStart(from), weeks),
       // The standing arrangements, and how many of them this week is still
       // missing - the office should not have to compare two screens to find
@@ -1092,9 +1115,150 @@ const routes = {
     return json({ ok: true });
   },
 
+  /**
+   * Sets the order a whole day's jobs are done in, from a list of building
+   * ids top to bottom. Every job on the day is numbered 1, 2, 3... in that
+   * order, so slotting a new building in third is one drag rather than
+   * renumbering everything after it by hand.
+   *
+   * The list must be exactly what is on the day: if somebody added or removed
+   * a job while this screen was open, the order is refused rather than
+   * written over their change.
+   */
+  'POST /schedule/order': async (req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const { day, ids } = await req.json();
+    if (!isDay(day)) throw new HttpError(400, 'Pick a day.');
+    if (!Array.isArray(ids)) throw new HttpError(400, 'Nothing to reorder.');
+
+    const { results } = await env.DB.prepare(
+      'SELECT building_id FROM schedule WHERE day = ?',
+    ).bind(day).all();
+    const want = ids.map(Number);
+    const have = new Set(results.map((r) => r.building_id));
+    if (want.length !== have.size || new Set(want).size !== want.length
+      || want.some((id) => !have.has(id))) {
+      throw new HttpError(409, 'The plan for this day changed while you had it open — reload and try again.');
+    }
+
+    if (want.length) {
+      await env.DB.batch(want.map((id, i) => env.DB.prepare(
+        'UPDATE schedule SET priority = ? WHERE building_id = ? AND day = ?',
+      ).bind(schedulePriority(i + 1), id, day)));
+    }
+    return json({ ok: true });
+  },
+
+  /**
+   * Jobs from the last planned day that never got signed off, for the office
+   * to carry onto today or let go. Only the most recent planned day in the
+   * last week is looked at: Monday morning asks about Friday, not about every
+   * day that ever slipped.
+   *
+   * A job drops off this list once it is on today's plan, once it has been
+   * signed off since, or once somebody has said to leave it.
+   */
+  'GET /carryover': async (_req, env, { user }) => {
+    canSeeOffice(user);
+    const today = localDay(env);
+
+    const last = await env.DB.prepare(
+      'SELECT MAX(day) AS day FROM schedule WHERE day < ? AND day >= ?',
+    ).bind(today, addDays(today, -7)).first();
+    const from = last?.day;
+    if (!from) return json({ today, from: null, missed: [] });
+
+    const { results } = await env.DB.prepare(
+      `SELECT s.building_id, s.clean_type, s.priority, s.note, b.name, b.grp
+       FROM schedule s
+       JOIN buildings b ON b.id = s.building_id AND b.active = 1
+       WHERE s.day = ?1
+         AND NOT EXISTS (SELECT 1 FROM building_status st
+           WHERE st.building_id = s.building_id AND st.clean_type = s.clean_type
+             AND st.day >= ?1 AND st.day <= ?2)
+         AND NOT EXISTS (SELECT 1 FROM schedule t
+           WHERE t.building_id = s.building_id AND t.day = ?2)
+         AND NOT EXISTS (SELECT 1 FROM carryover_dismissed d
+           WHERE d.building_id = s.building_id AND d.day = ?1)
+       ORDER BY s.priority IS NULL, s.priority, b.sort_order, b.name`,
+    ).bind(from, today).all();
+
+    // How far each got, so "half done" and "never touched" read differently.
+    const { results: ticks } = await env.DB.prepare(
+      `SELECT t.building_id, COUNT(*) AS n FROM task_log l
+       JOIN tasks t ON t.id = l.task_id AND t.active = 1
+       WHERE l.day = ? AND l.done = 1 GROUP BY t.building_id`,
+    ).bind(from).all();
+    const ticked = new Map(ticks.map((r) => [r.building_id, r.n]));
+
+    return json({
+      today,
+      from,
+      missed: results.map((r) => ({
+        buildingId: r.building_id,
+        name: r.name,
+        grp: r.grp,
+        cleanType: typeOf(r.clean_type),
+        priority: r.priority,
+        note: r.note,
+        ticked: ticked.get(r.building_id) ?? 0,
+      })),
+    });
+  },
+
+  /**
+   * Answers the morning-after question for one building: put it on today's
+   * plan (add: true) or leave it (add: false). Adding copies the clean that
+   * was planned and puts it at the end of today's numbered jobs.
+   */
+  'POST /carryover': async (req, env, { user }) => {
+    require(user, 'office', 'admin');
+    const { buildingId, from, add } = await req.json();
+    const id = Number(buildingId);
+    const today = localDay(env);
+    if (!isDay(from) || from >= today) throw new HttpError(400, 'Pick the day it was missed.');
+
+    const missed = await env.DB.prepare(
+      'SELECT clean_type, note FROM schedule WHERE building_id = ? AND day = ?',
+    ).bind(id, from).first();
+    if (!missed) throw new HttpError(404, 'That job is no longer on the plan for that day.');
+
+    if (!add) {
+      await env.DB.prepare(
+        `INSERT INTO carryover_dismissed (building_id, day, dismissed_by, dismissed_at)
+         VALUES (?, ?, ?, ?) ON CONFLICT(building_id, day) DO NOTHING`,
+      ).bind(id, from, user.name, now()).run();
+      return json({ ok: true, added: false });
+    }
+
+    const last = await env.DB.prepare(
+      'SELECT MAX(priority) AS p FROM schedule WHERE day = ?',
+    ).bind(today).first();
+    const label = `Carried over from ${DAY_NAMES[weekdayIndex(from)]}`;
+    const note = clean(missed.note ? `${label} — ${missed.note}` : label, 200);
+
+    await env.DB.prepare(
+      `INSERT INTO schedule
+         (building_id, day, clean_type, priority, checkin, note, created_by, created_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+       ON CONFLICT(building_id, day) DO NOTHING`,
+    ).bind(
+      id, today, typeOf(missed.clean_type),
+      last?.p ? schedulePriority(last.p + 1) : null,
+      note, user.name, now(),
+    ).run();
+
+    await logActivity(env, {
+      day: today, buildingId: id, kind: 'scheduled',
+      detail: `${typeLabel(typeOf(missed.clean_type))} (carried over)`,
+      userName: user.name,
+    });
+    return json({ ok: true, added: true });
+  },
+
   'GET /activity': async (req, env, { user, url }) => {
     // Office-side reporting: cleaners see attribution on the checklist itself.
-    require(user, 'office', 'admin');
+    canSeeOffice(user);
     const day = dayParam(url, env);
     const { results } = await env.DB.prepare(
       `SELECT ac.id, ac.kind, ac.detail, ac.user_name, ac.created_at, b.name AS building
@@ -1108,7 +1272,7 @@ const routes = {
 
   'GET /building': async (req, env, { user, url }) => {
     canRead(user);
-    if (user.role === 'office' && env.OFFICE_ROLLUP_ONLY === '1') {
+    if (['office', 'viewer'].includes(user.role) && env.OFFICE_ROLLUP_ONLY === '1') {
       throw new HttpError(403, 'Individual checklists are visible to cleaners only.');
     }
 
@@ -1201,7 +1365,7 @@ const routes = {
       items,
       completed: status ?? null,
       issues,
-      readOnly: user.role === 'office',
+      readOnly: ['office', 'viewer'].includes(user.role),
     });
   },
 
@@ -1507,8 +1671,8 @@ const routes = {
   'GET /users': async (req, env, { user }) => {
     require(user, 'admin');
     const { results } = await env.DB.prepare(
-      `SELECT id, name, role, active, availability, created_at
-       FROM users ORDER BY active DESC, name`,
+      `SELECT id, name, ${ROLE_SQL} AS role, active, availability, sort_order, created_at
+       FROM users ORDER BY active DESC, ${STAFF_ORDER}`,
     ).all();
     return json({
       users: results.map((u) => {
@@ -1523,9 +1687,12 @@ const routes = {
     const { id, name, role, pin, active } = await req.json();
     const who = clean(name, 60);
     if (!who) throw new HttpError(400, 'Name is required.');
-    if (!['cleaner', 'office', 'admin'].includes(role)) {
+    if (!ROLES.includes(role)) {
       throw new HttpError(400, 'Pick a valid role.');
     }
+    // View-only is an office account that can't change anything; see ROLE_SQL.
+    const stored = role === 'viewer' ? 'office' : role;
+    const viewOnly = role === 'viewer' ? 1 : 0;
     if (pin && !/^\d{4,8}$/.test(pin)) throw new HttpError(400, 'PIN must be 4-8 digits.');
 
     // The PIN *is* the identity here, so two people sharing one would sign in
@@ -1551,8 +1718,9 @@ const routes = {
         }
       }
 
-      await env.DB.prepare('UPDATE users SET name = ?, role = ?, active = ? WHERE id = ?')
-        .bind(who, role, active ? 1 : 0, Number(id)).run();
+      await env.DB.prepare(
+        'UPDATE users SET name = ?, role = ?, view_only = ?, active = ? WHERE id = ?',
+      ).bind(who, stored, viewOnly, active ? 1 : 0, Number(id)).run();
       if (pin) {
         await env.DB.prepare('UPDATE users SET pin_hash = ?, pin_length = ? WHERE id = ?')
           .bind(await hashPin(env, pin), pin.length, Number(id)).run();
@@ -1564,9 +1732,30 @@ const routes = {
     }
 
     if (!/^\d{4,8}$/.test(pin || '')) throw new HttpError(400, 'PIN must be 4-8 digits.');
+    // A newcomer goes to the end of their list rather than jumping the queue
+    // an admin has arranged.
     await env.DB.prepare(
-      'INSERT INTO users (name, role, pin_hash, pin_length) VALUES (?, ?, ?, ?)',
-    ).bind(who, role, await hashPin(env, pin), pin.length).run();
+      `INSERT INTO users (name, role, view_only, pin_hash, pin_length, sort_order)
+       VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM users))`,
+    ).bind(who, stored, viewOnly, await hashPin(env, pin), pin.length).run();
+    return json({ ok: true });
+  },
+
+  /**
+   * The order people are listed in, as a list of ids. Only the people sent
+   * are renumbered, so cleaners and office staff are arranged separately
+   * without one list disturbing the other - cleaners always come first
+   * regardless (see STAFF_ORDER).
+   */
+  'POST /users/order': async (req, env, { user }) => {
+    require(user, 'admin');
+    const { ids } = await req.json();
+    if (!Array.isArray(ids) || !ids.length || ids.length > 500) {
+      throw new HttpError(400, 'Nothing to reorder.');
+    }
+    const order = [...new Set(ids.map(Number))].filter(Number.isInteger);
+    await env.DB.batch(order.map((id, i) =>
+      env.DB.prepare('UPDATE users SET sort_order = ? WHERE id = ?').bind(i + 1, id)));
     return json({ ok: true });
   },
 
@@ -1619,10 +1808,10 @@ const routes = {
    * else's is still the office's to set.
    */
   'POST /availability': async (req, env, { user }) => {
-    canRead(user);
+    require(user, 'cleaner', 'office', 'admin');
     const { userId, days, idealHours, weekFrom, reset } = await req.json();
     const target = userId ? Number(userId) : user.id;
-    if (user.role === 'cleaner' && target !== user.id) {
+    if (!['office', 'admin'].includes(user.role) && target !== user.id) {
       throw new HttpError(403, 'You can only change your own availability.');
     }
 
@@ -1715,16 +1904,17 @@ const routes = {
    * so the same table can show who is already carrying the week.
    */
   'GET /availability': async (_req, env, { user, url }) => {
-    require(user, 'office', 'admin');
+    canSeeOffice(user);
     const from = isDay(url.searchParams.get('from'))
       ? url.searchParams.get('from') : localDay(env);
     const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
 
     const week = weekStart(from);
     const [people, shifts, weekAvail] = await Promise.all([
+      // The shared view-only account is a screen, not a person who works shifts.
       env.DB.prepare(
         `SELECT id, name, role, availability FROM users
-         WHERE active = 1 ORDER BY name`,
+         WHERE active = 1 AND view_only = 0 ORDER BY ${STAFF_ORDER}`,
       ).all(),
       env.DB.prepare(
         `SELECT user_id, day, start_time, end_time FROM roster
@@ -1783,7 +1973,8 @@ const routes = {
          FROM roster WHERE day BETWEEN ? AND ? ORDER BY day, start_time, user_name`,
       ).bind(days[0], days[days.length - 1]).all(),
       env.DB.prepare(
-        `SELECT id, name, role, availability FROM users WHERE active = 1 ORDER BY name`,
+        `SELECT id, name, role, availability FROM users
+         WHERE active = 1 AND view_only = 0 ORDER BY ${STAFF_ORDER}`,
       ).all(),
       publishedWeeks(env, 'roster', weeks),
       weekAvailability(env, weeks),
@@ -1802,12 +1993,11 @@ const routes = {
       workedMinutes.set(r.user_id, (workedMinutes.get(r.user_id) ?? 0) + (span > 0 ? span : 0));
     }
 
-    // Hours are a management figure, not something a cleaner should be reading
-    // off a colleague's row - so they are left out of the response entirely
-    // rather than merely hidden by the front end. That covers both the weekly
-    // totals and, below, the times on somebody else's shift: a cleaner sees
-    // WHO is on each day, which is what a handover needs, and not when.
-    const canSeeHours = user.role !== 'cleaner';
+    // Weekly hours are a management figure, not something a cleaner should be
+    // reading off a colleague's row - so they are left out of the response
+    // entirely rather than merely hidden by the front end. Shift times are
+    // not: who is on until when is exactly what a handover needs.
+    const canSeeHours = officeSide(user);
 
     const week = weekStart(from);
     const staff = people.results.map((p) => {
@@ -1851,11 +2041,11 @@ const routes = {
       return { ...s, flags };
     });
 
-    // A cleaner keeps the times on their own shifts - they need to know when
-    // they start - and gets a colleague's day without its hours.
+    // A cleaner sees everybody's times, but a note on a colleague's shift
+    // ("dentist at 3") is between them and the office.
     const shown = canSeeHours ? withFlags : withFlags.map((s) => (s.user_id === user.id
       ? s
-      : { ...s, start_time: null, end_time: null, note: '' }));
+      : { ...s, note: '' }));
 
     return json({
       from,
@@ -1863,8 +2053,8 @@ const routes = {
       today: localDay(env),
       shifts: shown,
       staff,
-      canEdit: user.role !== 'cleaner',
-      canPublish: user.role !== 'cleaner',
+      canEdit: ['office', 'admin'].includes(user.role),
+      canPublish: ['office', 'admin'].includes(user.role),
       // The week the screen is showing, plus every week the span touches, so
       // a caller asking for a single day still learns whether that day counts.
       ...publishState(published, week, weeks),
@@ -2010,7 +2200,7 @@ const routes = {
   },
 
   'GET /roster/export': async (_req, env, { user, url }) => {
-    require(user, 'office', 'admin');
+    canSeeOffice(user);
     const from = isDay(url.searchParams.get('from'))
       ? url.searchParams.get('from') : localDay(env);
     const to = addDays(from, 6);
@@ -2151,6 +2341,7 @@ const routes = {
       env.DB.prepare('DELETE FROM building_status WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM maintenance WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM activity WHERE building_id = ?').bind(bid),
+      env.DB.prepare('DELETE FROM carryover_dismissed WHERE building_id = ?').bind(bid),
       env.DB.prepare('DELETE FROM buildings WHERE id = ?').bind(bid),
     ]);
 
@@ -2195,6 +2386,7 @@ const routes = {
       env.DB.prepare('DELETE FROM building_status'),
       env.DB.prepare('DELETE FROM maintenance'),
       env.DB.prepare('DELETE FROM activity'),
+      env.DB.prepare('DELETE FROM carryover_dismissed'),
       env.DB.prepare('DELETE FROM buildings'),
     ]);
 
@@ -2497,7 +2689,7 @@ const routes = {
     const tables = [
       'schedule', 'schedule_repeat', 'roster', 'published_weeks', 'availability_weeks',
       'task_photos', 'task_log',
-      'activity', 'building_status', 'maintenance', 'login_attempts',
+      'activity', 'building_status', 'maintenance', 'login_attempts', 'carryover_dismissed',
     ];
     await env.DB.batch(tables.map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
 
@@ -2513,7 +2705,7 @@ const routes = {
   },
 
   'GET /report': async (req, env, { user, url }) => {
-    require(user, 'office', 'admin');
+    canSeeOffice(user);
     const from = isDay(url.searchParams.get('from')) ? url.searchParams.get('from') : localDay(env);
     const to = isDay(url.searchParams.get('to')) ? url.searchParams.get('to') : localDay(env);
     const { results } = await env.DB.prepare(
