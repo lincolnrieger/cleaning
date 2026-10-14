@@ -1141,27 +1141,33 @@ async function renderOverview() {
 }
 
 /**
- * Incomplete cleans: what the last planned day left unfinished, flagged until
- * somebody signs it off. Nothing to approve - each row opens that building on
- * the checklist that was planned, ready to finish today.
+ * Incomplete cleans: what the last planned day left unfinished, and anything
+ * the office reopened since, flagged until somebody signs it off. Nothing to
+ * approve - each row opens that building on the checklist that was left,
+ * with its ticks so far, ready to finish today.
  */
 function incompleteCard(carry, canOpen = true) {
   // Remembered so the building's own screen can say why it's being cleaned
   // today, rather than warning that nobody scheduled it.
-  state.incomplete = new Map((carry?.missed ?? []).map((m) => [m.buildingId, carry.from]));
+  state.incomplete = new Map((carry?.missed ?? []).map((m) => [m.buildingId, m.from]));
   if (!carry?.missed?.length) return '';
-  const when = carry.from === addDays(carry.today, -1)
-    ? 'yesterday' : DAY_FULL[weekdayIndex(carry.from)];
+  const whenOf = (day) => (day === addDays(carry.today, -1)
+    ? 'yesterday' : DAY_FULL[weekdayIndex(day)]);
+  const days = new Set(carry.missed.map((m) => m.from));
   return `<div class="card incomplete">
     <h2><span class="grow">${svgIcon('warning')} Incomplete cleans</span>
       <span class="num">${carry.missed.length}</span></h2>
-    <p class="pad tight small muted">Not finished ${esc(when)} — still to do.</p>
+    <p class="pad tight small muted">${days.size === 1
+      ? `Not finished ${esc(whenOf(carry.missed[0].from))} — still to do.`
+      : 'Not finished — still to do.'}</p>
     ${carry.missed.map((m) => `<button class="tile"
         ${canOpen && canDrillIn() ? `data-b="${m.buildingId}" data-type="${esc(m.cleanType)}"` : 'disabled'}>
       <span class="tile-main">
         <span class="tile-title"><span class="name">${esc(m.name)}</span></span>
         <span class="tile-meta">${typePill(m.cleanType)}
-          <span class="grow">${m.ticked ? `${m.ticked} ticked, not signed off` : 'not started'}${
+          <span class="grow">${m.reopened ? 'reopened · ' : ''}${
+            days.size > 1 ? `${esc(whenOf(m.from))} · ` : ''}${
+            m.ticked ? `${m.ticked} ticked, not signed off` : 'not started'}${
             m.note ? ` · ${esc(m.note)}` : ''}</span></span>
       </span>
       <span class="tile-end"><span class="pill late">Incomplete</span></span>
@@ -1978,6 +1984,10 @@ async function renderBuilding(id, wantType) {
   // an explicit fact rather than the absence of a banner.
   const mismatch = data.scheduledType && data.scheduledType !== type;
   const unplanned = !data.scheduledType;
+  // Picked up from an earlier day: the server says so when it has carried
+  // that day's ticks over, which also covers opening the link cold.
+  const leftOn = data.carriedFrom
+    || (day === state.config.today ? state.incomplete?.get(id) : null);
   // No entries is a legitimate setup: some buildings are one job, and a list
   // of one line saying "clean it" helps nobody. There is nothing to measure,
   // so the progress line goes and the sign-off is the whole screen.
@@ -1998,9 +2008,10 @@ async function renderBuilding(id, wantType) {
         <strong>The office scheduled a ${esc(typeLabel(data.scheduledType))} here.</strong>
         You're on the ${esc(typeLabel(type))} checklist.
       </div>` : ''}
-      ${unplanned && day === state.config.today && state.incomplete?.has(id) ? `<div class="banner warn">
+      ${unplanned && leftOn ? `<div class="banner warn">
         <strong>Incomplete clean.</strong> This was left unfinished on
-        ${esc(DAY_FULL[weekdayIndex(state.incomplete.get(id))])} — finish it today.
+        ${esc(DAY_FULL[weekdayIndex(leftOn)])} — finish it today.
+        ${data.carriedFrom ? 'What was ticked then is already ticked here.' : ''}
       </div>` : unplanned ? `<div class="banner warn">
         <strong>The office did not schedule this building for
         ${esc(dayLabel(day).toLowerCase())}.</strong>
