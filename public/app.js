@@ -1141,8 +1141,9 @@ async function renderOverview() {
 }
 
 /**
- * Incomplete cleans: what the last planned day left unfinished, and anything
- * the office reopened since, flagged until somebody signs it off. Nothing to
+ * Incomplete cleans: what was left unfinished yesterday or on the last planned
+ * day - never signed off, signed off with items unticked, or reopened by the
+ * office - flagged until somebody signs it off. Nothing to
  * approve - each row opens that building on the checklist that was left,
  * with its ticks so far, ready to finish today.
  */
@@ -1165,15 +1166,27 @@ function incompleteCard(carry, canOpen = true) {
       <span class="tile-main">
         <span class="tile-title"><span class="name">${esc(m.name)}</span></span>
         <span class="tile-meta">${typePill(m.cleanType)}
-          <span class="grow">${m.reopened ? 'reopened · ' : ''}${
-            days.size > 1 ? `${esc(whenOf(m.from))} · ` : ''}${
-            m.ticked ? `${m.ticked} ticked, not signed off` : 'not started'}${
-            m.note ? ` · ${esc(m.note)}` : ''}</span></span>
+          <span class="grow">${incompleteWhy(m, days.size > 1 ? whenOf(m.from) : '')}</span></span>
       </span>
       <span class="tile-end"><span class="pill late">Incomplete</span></span>
       ${canOpen && canDrillIn() ? svgIcon('chevron', 'lg tile-chev') : ''}
     </button>`).join('')}
   </div>`;
+}
+
+/** One incomplete clean's line: why it is on the list and how far it got. */
+function incompleteWhy(m, when) {
+  const tally = m.total ? `${m.ticked} of ${m.total} ticked` : '';
+  const why = m.reason === 'short'
+    ? `signed off with only ${tally || 'some items ticked'}`
+    : m.ticked ? `${tally}, not signed off` : 'not started';
+  return [
+    m.reopened ? 'reopened' : '',
+    when,
+    why,
+    m.onToday ? 'on today\'s plan too' : '',
+    m.note ? m.note : '',
+  ].filter(Boolean).map(esc).join(' · ');
 }
 
 /**
