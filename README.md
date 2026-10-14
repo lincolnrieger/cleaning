@@ -20,7 +20,7 @@ browser, no software to install and no commands to run.
 | Camp-wide progress overview | ✅ | ✅ | ✅ | ✅ |
 | See the week's building plan and staff roster | read-only | ✅ | read-only | ✅ |
 | Plan which buildings get cleaned when, and in what order | — | ✅ | — | ✅ |
-| See incomplete cleans (last planned day, and reopened cleans) | ✅ | ✅ | ✅ | ✅ |
+| See incomplete cleans from yesterday / the last planned day | ✅ | ✅ | ✅ | ✅ |
 | Print the week's cleaning plan | — | ✅ | ✅ | ✅ |
 | Build and print the staff roster | — | ✅ | print only | ✅ |
 | See everyone's availability on one screen | — | ✅ | ✅ | ✅ |
@@ -383,22 +383,25 @@ order.
 
 ### Incomplete cleans
 
-Anything on the last planned day (up to a week back — Monday looks at Friday)
-that wasn't signed off for the clean that was planned is flagged
-automatically as **Incomplete cleans** — on a cleaner's home screen between
-*Who else is on today* and *To clean today*, and at the top of the office
-overview. There is nothing to approve: tap one to open it on the checklist
-that was planned and finish it, and it drops off the list once it's signed
-off. A building that is already on today's plan isn't repeated there.
+Anything left unfinished yesterday, or on the last planned day (up to a week
+back — Monday looks at Friday), is flagged automatically as **Incomplete
+cleans** — on a cleaner's home screen between *Who else is on today* and *To
+clean today*, and at the top of the office overview. That covers:
 
-Finishing one picks up where it was left: whatever was ticked (and any photos
-taken) on the day it was left is already ticked on the checklist, and what
-gets ticked today is added on top, so the "ticked" count on the list moves as
-the work is done. Unticking an item today unticks it.
+- a building on the plan that was never signed off;
+- a building signed off with items still unticked;
+- a building somebody started ticking and never signed off, planned or not;
+- a sign-off the office reopened, until somebody signs it off again.
 
-Reopening a sign-off from an earlier day (from yesterday, or back to the last
-planned day) puts that building on the list too, marked *reopened*, whether
-or not it was on the plan — until somebody signs it off again.
+Each row says which, and how many items were ticked. There is nothing to
+approve: tap one to open it and finish it, and it drops off the list once it's
+signed off. A building that is on today's plan as well still shows, marked
+*on today's plan too* — today's clean is what finishes it.
+
+Otherwise, finishing one picks up where it was left: whatever was ticked (and
+any photos taken) on that day is already ticked on the checklist, and what
+gets ticked today is added on top, so the count on the list moves as the work
+is done. Unticking an item today unticks it.
 
 **The plan says what needs cleaning and in what order — not who does it.**
 Who's in on a given day is the roster's job, and cleaners sort the buildings

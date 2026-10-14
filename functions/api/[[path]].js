@@ -327,16 +327,19 @@ const availabilityFor = (person, day, weeks) =>
 /* ---------------------------------------------------- incomplete cleans */
 
 /**
- * Jobs left unfinished on an earlier day: everything on the last planned day
- * (within the last week) that never got signed off, plus any clean the office
- * reopened since then that nobody has signed off again. Only the most recent
- * planned day is looked at, so Monday morning shows what was left on Friday
- * rather than every day that ever slipped.
+ * Jobs left unfinished on an earlier day, shown at the top of today until
+ * somebody signs them off. Looks at yesterday and the last planned day within
+ * the last week (so Monday morning shows what was left on Friday), and lists:
  *
- * Finishing one carries on where it was left: the checklist shows that day's
- * ticks, and anything ticked today is added on top. A job drops off once it
- * has been signed off since (today included) or is on today's plan anyway,
- * where it already shows in the day's list.
+ *  - anything on that plan that never got signed off;
+ *  - anything signed off with items still unticked;
+ *  - anything somebody started ticking and never signed off, planned or not;
+ *  - any clean the office reopened since, until it is signed off again.
+ *
+ * A job drops off once it has been signed off since (today included). One on
+ * today's plan as well still shows, flagged as such, since today's clean is
+ * what finishes it. Otherwise finishing one carries on where it was left: the
+ * checklist shows that day's ticks, with anything ticked today on top.
  */
 async function findIncomplete(env, user) {
   const today = localDay(env);
@@ -345,84 +348,141 @@ async function findIncomplete(env, user) {
   const last = await env.DB.prepare(
     'SELECT MAX(day) AS day FROM schedule WHERE day < ? AND day >= ?',
   ).bind(today, addDays(today, -7)).first();
-  let from = last?.day ?? null;
+  const from = last?.day ?? null;
 
   // A week the office never approved was never the plan as far as a cleaner
-  // is concerned, so it can't have left anything unfinished either.
+  // is concerned, so its plan can't have left anything unfinished either.
+  // What somebody actually started or signed off still counts.
+  let planVisible = Boolean(from);
   if (from && user.role === 'cleaner') {
     const published = await publishedWeeks(env, 'plan', [weekStart(from)]);
-    if (!published.has(weekStart(from))) from = null;
+    planVisible = published.has(weekStart(from));
   }
 
-  const missed = [];
-  if (from) {
-    const { results } = await env.DB.prepare(
-      `SELECT s.building_id, s.clean_type, s.priority, s.note, b.name, b.grp
+  const lookDays = from && from < yesterday ? [from, yesterday] : [yesterday];
+  const since = lookDays[0];
+  const [first, second = first] = lookDays;
+
+  const [planned, started, signed, reopens, todayPlan] = await env.DB.batch([
+    // On the plan, never signed off for the clean that was planned.
+    env.DB.prepare(
+      `SELECT s.building_id, s.day, s.clean_type, s.priority, s.note, b.name, b.grp
        FROM schedule s
        JOIN buildings b ON b.id = s.building_id AND b.active = 1
        WHERE s.day = ?1
          AND NOT EXISTS (SELECT 1 FROM building_status st
            WHERE st.building_id = s.building_id AND st.clean_type = s.clean_type
              AND st.day >= ?1 AND st.day <= ?2)
-         AND NOT EXISTS (SELECT 1 FROM schedule t
-           WHERE t.building_id = s.building_id AND t.day = ?2)
        ORDER BY s.priority IS NULL, s.priority, b.sort_order, b.name`,
-    ).bind(from, today).all();
-    for (const r of results) {
-      missed.push({
-        buildingId: r.building_id, name: r.name, grp: r.grp,
-        cleanType: typeOf(r.clean_type), priority: r.priority, note: r.note,
-        from, reopened: false,
-      });
-    }
+    ).bind(planVisible ? from : '', today),
+    // Ticked on a day and never signed off, planned or not.
+    env.DB.prepare(
+      `SELECT l.day, t.building_id, t.clean_type AS task_type,
+              s.clean_type AS planned_type, s.priority, s.note, b.name, b.grp
+       FROM task_log l
+       JOIN tasks t ON t.id = l.task_id AND t.active = 1
+       JOIN buildings b ON b.id = t.building_id AND b.active = 1
+       LEFT JOIN schedule s ON s.building_id = t.building_id AND s.day = l.day
+       WHERE l.day IN (?1, ?2) AND l.done = 1
+         AND NOT EXISTS (SELECT 1 FROM building_status st
+           WHERE st.building_id = t.building_id AND st.day >= l.day AND st.day <= ?3)
+       ORDER BY l.day DESC, b.sort_order, b.name`,
+    ).bind(first, second, today),
+    // Every sign-off in the window: for the short ones, and to tell what has
+    // been signed off again since.
+    env.DB.prepare(
+      `SELECT st.building_id, st.day, st.clean_type, s.priority, s.note, b.name, b.grp
+       FROM building_status st
+       JOIN buildings b ON b.id = st.building_id AND b.active = 1
+       LEFT JOIN schedule s ON s.building_id = st.building_id AND s.day = st.day
+       WHERE st.day >= ?1 AND st.day <= ?2
+       ORDER BY st.day DESC, b.sort_order, b.name`,
+    ).bind(since, today),
+    // Reopened by the office. The reopen is logged against the day of the
+    // clean itself, and its detail is the only record of which clean it was.
+    env.DB.prepare(
+      `SELECT a.building_id, a.day, a.detail, b.name, b.grp, s.priority, s.note
+       FROM activity a
+       JOIN buildings b ON b.id = a.building_id AND b.active = 1
+       LEFT JOIN schedule s ON s.building_id = a.building_id AND s.day = a.day
+       WHERE a.kind = 'reopened' AND a.day >= ?1 AND a.day < ?2
+       ORDER BY a.day DESC, a.id DESC`,
+    ).bind(since, today),
+    env.DB.prepare('SELECT building_id FROM schedule WHERE day = ?').bind(today),
+  ]);
+
+  const signedSince = (id, type, day) => signed.results.some((st) =>
+    st.building_id === id && st.clean_type === type && st.day > day);
+
+  const missed = [];
+  const add = (r, type, day, reason) => {
+    if (missed.some((m) => m.buildingId === r.building_id)) return;
+    missed.push({
+      buildingId: r.building_id, name: r.name, grp: r.grp,
+      cleanType: type, priority: r.priority ?? null, note: r.note ?? null,
+      from: day, reason, reopened: reason === 'reopened',
+    });
+  };
+
+  for (const r of planned.results) add(r, typeOf(r.clean_type), r.day, 'planned');
+
+  for (const r of reopens.results) {
+    const type = CLEAN_TYPES.find((t) => r.detail === `${typeLabel(t)} reopened`);
+    if (!type) continue;
+    const resigned = signed.results.some((st) => st.building_id === r.building_id
+      && st.clean_type === type && st.day >= r.day);
+    if (!resigned) add(r, type, r.day, 'reopened');
   }
 
-  // Reopened by the office: the sign-off was taken back, so as far as anyone
-  // knows it isn't clean. Planned or not, it goes on the list. The reopen is
-  // logged against the day of the clean itself, so that day is where it was
-  // left. The activity detail is the only record of which clean it was.
-  const since = from && from < yesterday ? from : yesterday;
-  const { results: reopens } = await env.DB.prepare(
-    `SELECT a.building_id, a.day, a.detail, b.name, b.grp, s.priority, s.note
-     FROM activity a
-     JOIN buildings b ON b.id = a.building_id AND b.active = 1
-     LEFT JOIN schedule s ON s.building_id = a.building_id AND s.day = a.day
-     WHERE a.kind = 'reopened' AND a.day >= ?1 AND a.day < ?2
-       AND NOT EXISTS (SELECT 1 FROM schedule t
-         WHERE t.building_id = a.building_id AND t.day = ?2)
-     ORDER BY a.day DESC, a.id DESC`,
-  ).bind(since, today).all();
-
-  if (reopens.length) {
-    const { results: signed } = await env.DB.prepare(
-      'SELECT building_id, day, clean_type FROM building_status WHERE day >= ? AND day <= ?',
-    ).bind(since, today).all();
-    for (const r of reopens) {
-      const type = CLEAN_TYPES.find((t) => r.detail === `${typeLabel(t)} reopened`);
-      if (!type || missed.some((m) => m.buildingId === r.building_id)) continue;
-      const signedSince = signed.some((st) => st.building_id === r.building_id
-        && st.clean_type === type && st.day >= r.day);
-      if (signedSince) continue;
-      missed.push({
-        buildingId: r.building_id, name: r.name, grp: r.grp,
-        cleanType: type, priority: r.priority, note: r.note,
-        from: r.day, reopened: true,
-      });
-    }
+  // Started and left: the plan says which clean it was; failing that, the
+  // items that were ticked do, with the Full Clean when they can't tell.
+  const startedBy = new Map();
+  for (const r of started.results) {
+    const key = `${r.day}|${r.building_id}`;
+    if (!startedBy.has(key)) startedBy.set(key, { r, types: new Set() });
+    startedBy.get(key).types.add(r.task_type);
+  }
+  for (const { r, types } of startedBy.values()) {
+    const type = r.planned_type ? typeOf(r.planned_type)
+      : types.has('check') && !types.has('full') ? 'check' : 'full';
+    add(r, type, r.day, 'started');
   }
 
-  // How far each got, counting today's ticks on top of the day it was left,
-  // so "half done" and "never touched" read differently and the count moves
-  // as somebody finishes it off.
+  // Signed off short: only on the days being looked at, and only if nobody
+  // has signed it off again since.
+  const short = signed.results.filter((st) => lookDays.includes(st.day)
+    && !signedSince(st.building_id, st.clean_type, st.day)
+    && !missed.some((m) => m.buildingId === st.building_id));
+
+  // How far each got. Today's ticks count on top of the day it was left,
+  // unless today's plan has it anyway - that is a fresh clean of its own.
+  const onToday = new Set(todayPlan.results.map((r) => r.building_id));
+  const progress = (id, type, day, withToday) => env.DB.prepare(
+    `SELECT COUNT(*) AS total,
+            COALESCE(SUM(COALESCE(l.done, c.done) = 1), 0) AS ticked
+     FROM tasks t
+     LEFT JOIN task_log l ON l.task_id = t.id AND l.day = ?2
+     LEFT JOIN task_log c ON c.task_id = t.id AND c.day = ?3
+     WHERE t.building_id = ?1 AND t.active = 1 AND ${typeMatch(4)}`,
+  ).bind(id, withToday ? today : '', day, type);
+
+  if (short.length) {
+    const counts = await env.DB.batch(short.map((st) =>
+      progress(st.building_id, typeOf(st.clean_type), st.day, false)));
+    short.forEach((st, i) => {
+      const { total, ticked } = counts[i].results[0];
+      if (ticked < total) add(st, typeOf(st.clean_type), st.day, 'short');
+    });
+  }
+
   if (missed.length) {
-    const counts = await env.DB.batch(missed.map((m) => env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM tasks t
-       LEFT JOIN task_log l ON l.task_id = t.id AND l.day = ?2
-       LEFT JOIN task_log c ON c.task_id = t.id AND c.day = ?3
-       WHERE t.building_id = ?1 AND t.active = 1 AND ${typeMatch(4)}
-         AND COALESCE(l.done, c.done) = 1`,
-    ).bind(m.buildingId, today, m.from, m.cleanType)));
-    missed.forEach((m, i) => { m.ticked = counts[i].results[0]?.n ?? 0; });
+    const counts = await env.DB.batch(missed.map((m) =>
+      progress(m.buildingId, m.cleanType, m.from, !onToday.has(m.buildingId))));
+    missed.forEach((m, i) => {
+      m.ticked = counts[i].results[0].ticked;
+      m.total = counts[i].results[0].total;
+      m.onToday = onToday.has(m.buildingId);
+    });
   }
 
   return { today, from: missed[0]?.from ?? from, missed };
