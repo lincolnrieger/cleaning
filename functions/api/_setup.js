@@ -547,6 +547,45 @@ async function dropRetiredTables(db) {
  * `published_by` is left empty on the way through: nobody approved these, and
  * putting a name to it would be inventing one.
  */
+/**
+ * Before finishing a missed clean also finished it on the day it was missed,
+ * that work was only recorded on the day it was done. This catches the past
+ * up: a planned clean with no sign-off on its day takes the next sign-off of
+ * the same clean within the following week, along with what was ticked then.
+ * Never overwrites anything, so running it again changes nothing.
+ */
+async function backfillMissedCleans(db) {
+  await db.prepare(
+    `INSERT OR IGNORE INTO building_status
+       (building_id, day, clean_type, completed_at, completed_by)
+     SELECT s.building_id, s.day, s.clean_type, st.completed_at, st.completed_by
+     FROM schedule s
+     JOIN building_status st ON st.building_id = s.building_id
+       AND st.clean_type = s.clean_type
+       AND st.day = (SELECT MIN(x.day) FROM building_status x
+         WHERE x.building_id = s.building_id AND x.clean_type = s.clean_type
+           AND x.day > s.day AND x.day <= date(s.day, '+7 days'))
+     WHERE NOT EXISTS (SELECT 1 FROM building_status y
+       WHERE y.building_id = s.building_id AND y.clean_type = s.clean_type
+         AND y.day = s.day)`,
+  ).run();
+
+  // The ticks behind each sign-off copied above: the copy shares its moment
+  // of sign-off with the original, which is how the two are told apart from
+  // a building that was simply cleaned on both days.
+  await db.prepare(
+    `INSERT OR IGNORE INTO task_log (task_id, day, done, user_id, user_name, updated_at)
+     SELECT l.task_id, a.day, 1, l.user_id, l.user_name, l.updated_at
+     FROM building_status a
+     JOIN building_status b ON b.building_id = a.building_id
+       AND b.clean_type = a.clean_type AND b.completed_at = a.completed_at
+       AND b.day > a.day
+     JOIN tasks t ON t.building_id = a.building_id
+       AND t.clean_type IN (a.clean_type, 'both')
+     JOIN task_log l ON l.task_id = t.id AND l.day = b.day AND l.done = 1`,
+  ).run();
+}
+
 async function ensureWeekApprovals(db) {
   // The Monday of a date's week: forward to Sunday, then back six days. Same
   // arithmetic as the front end, done where the rows are.
@@ -743,7 +782,7 @@ const COLUMNS = [
  * indexes and columns hash themselves; those four are code, so they need a
  * hand.
  */
-const MIGRATIONS_TAG = '2026-09-week-approvals';
+const MIGRATIONS_TAG = '2026-10-missed-cleans-backfill';
 
 /** What a fully migrated database of this version looks like. */
 const schemaStamp = () =>
@@ -767,6 +806,7 @@ async function buildSchema(db) {
   await ensureOptionalPriority(db);
   await ensureFlatChecklist(db);
   await ensureWeekApprovals(db);
+  await backfillMissedCleans(db);
   // Last: the flatten above is the final reader of `areas`, and the approval
   // backfill above is the last reader of the roster-only publish table.
   await dropRetiredTables(db);
