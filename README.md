@@ -299,6 +299,9 @@ Availability answers *can they*. Two more fields on the same sheet answer
 screen lists each colleague with their shift times. A colleague's shift note
 and everybody's weekly hour totals stay office-only — and they aren't in the
 response a cleaner's browser receives, so they aren't merely hidden.
+The office overview has the same card, *Who's on today*, above the run sheet
+for whichever day is being viewed — marked as a draft while that week's
+roster isn't approved yet.
 Both are optional, and neither can stop you doing anything — they sort and
 annotate. Availability is still the only thing that raises a conflict.
 

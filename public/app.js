@@ -1062,10 +1062,12 @@ async function renderOverview() {
   const live = screen();
   const day = viewDay();
   const isToday = day === state.config.today;
-  const [{ buildings }, carry] = await Promise.all([
+  const [{ buildings }, carry, roster] = await Promise.all([
     api(`/overview?day=${day}`),
     // Only ever about today. A failure here costs the card, never the overview.
     isToday ? api('/carryover').catch(() => null) : null,
+    // Who is on and when. Same again: no roster costs the card, nothing else.
+    api(`/roster?from=${day}&days=1`).catch(() => null),
   ]);
   if (!live()) return;
   chrome({ title: 'Overview', section: '', wide: true });
@@ -1121,6 +1123,13 @@ async function renderOverview() {
         ${totals.issues} open ${plural(totals.issues, 'issue')}
       </div>` : ''}
     </div>
+
+    ${roster ? crewCard(
+    (roster.shifts ?? []).filter((s) => s.day === day),
+    `Who's on${isToday ? ' today' : ''}`,
+    roster.published === false ? `<p class="pad tight tiny muted">Draft — staff
+      won't see this roster until it's approved.</p>` : '',
+  ) : ''}
 
     <div class="card">
       <h2><span class="grow">Run sheet</span>
@@ -1401,6 +1410,41 @@ function wireSectionToggles(root, rerender) {
   });
 }
 
+/**
+ * Everybody rostered on a day, one chip each however many shifts they have,
+ * with when they're on - who is about, and until when. You first, if you're
+ * on; everyone else by name.
+ */
+function crewCard(shifts, title, note = '') {
+  const crew = [];
+  for (const sh of shifts) {
+    let person = crew.find((c) => c.id === sh.user_id);
+    if (!person) { person = { id: sh.user_id, name: sh.user_name, times: [] }; crew.push(person); }
+    const when = timeRange(sh.start_time, sh.end_time);
+    if (when) person.times.push(when);
+  }
+  crew.sort((a, b) => (a.id === state.user.id ? -1 : b.id === state.user.id ? 1 : 0)
+    || a.name.localeCompare(b.name));
+
+  return `<div class="card">
+    <h2><span class="grow">${esc(title)}</span>
+      <span class="num">${crew.length}</span></h2>
+    ${note}
+    ${crew.length ? `<div class="pad tight crew-list">
+      ${crew.map((c) => `<span class="crew-chip${c.id === state.user.id ? ' me' : ''}">
+        ${avatar(c.name)}
+        <span class="crew-who">
+          <span class="crew-name">${esc(firstName(c.name))}${
+            c.id === state.user.id ? ' (you)' : ''}</span>
+          ${c.times.length
+            ? `<span class="tiny muted num">${c.times.map(esc).join(', ')}</span>` : ''}
+        </span>
+      </span>`).join('')}
+    </div>` : `<div class="empty"><b>Nobody rostered</b>
+      No shifts are on the roster for this day.</div>`}
+  </div>`;
+}
+
 /* ------------------------------------------------------ view: cleaner home */
 
 async function renderCleanerHome() {
@@ -1437,18 +1481,6 @@ async function renderCleanerHome() {
   // Same again for the plan: a week the office hasn't approved arrives empty,
   // and "nothing scheduled" is not what that means.
   const planDraft = planPublished === false;
-
-  // Everybody rostered on this day, one entry each however many shifts they
-  // have, with when they're on - who is about, and until when.
-  const crew = [];
-  for (const sh of shifts ?? []) {
-    let person = crew.find((c) => c.id === sh.user_id);
-    if (!person) { person = { id: sh.user_id, name: sh.user_name, times: [] }; crew.push(person); }
-    const when = timeRange(sh.start_time, sh.end_time);
-    if (when) person.times.push(when);
-  }
-  crew.sort((a, b) => (a.id === state.user.id ? -1 : b.id === state.user.id ? 1 : 0)
-    || a.name.localeCompare(b.name));
 
   const left = todays.length - doneCount;
   const pct = todays.length ? Math.round((doneCount / todays.length) * 100) : 0;
@@ -1488,22 +1520,8 @@ async function renderCleanerHome() {
       </div>` : ''}
     </div>
 
-    ${shifts && !rosterDraft ? `<div class="card">
-      <h2><span class="grow">Who else is on${isToday ? ' today' : ''}</span>
-        <span class="num">${crew.length}</span></h2>
-      ${crew.length ? `<div class="pad tight crew-list">
-        ${crew.map((c) => `<span class="crew-chip${c.id === state.user.id ? ' me' : ''}">
-          ${avatar(c.name)}
-          <span class="crew-who">
-            <span class="crew-name">${esc(firstName(c.name))}${
-              c.id === state.user.id ? ' (you)' : ''}</span>
-            ${c.times.length
-              ? `<span class="tiny muted num">${c.times.map(esc).join(', ')}</span>` : ''}
-          </span>
-        </span>`).join('')}
-      </div>` : `<div class="empty"><b>Nobody rostered</b>
-        No shifts are on the roster for this day.</div>`}
-    </div>` : ''}
+    ${shifts && !rosterDraft
+    ? crewCard(shifts, `Who else is on${isToday ? ' today' : ''}`) : ''}
 
     ${incompleteCard(carry)}
 
