@@ -20,7 +20,7 @@ browser, no software to install and no commands to run.
 | Camp-wide progress overview | ✅ | ✅ | ✅ | ✅ |
 | See the week's building plan and staff roster | read-only | ✅ | read-only | ✅ |
 | Plan which buildings get cleaned when, and in what order | — | ✅ | — | ✅ |
-| See incomplete cleans from the last planned day | ✅ | ✅ | ✅ | ✅ |
+| See incomplete cleans (last planned day, and reopened cleans) | ✅ | ✅ | ✅ | ✅ |
 | Print the week's cleaning plan | — | ✅ | ✅ | ✅ |
 | Build and print the staff roster | — | ✅ | print only | ✅ |
 | See everyone's availability on one screen | — | ✅ | ✅ | ✅ |
@@ -390,6 +390,15 @@ automatically as **Incomplete cleans** — on a cleaner's home screen between
 overview. There is nothing to approve: tap one to open it on the checklist
 that was planned and finish it, and it drops off the list once it's signed
 off. A building that is already on today's plan isn't repeated there.
+
+Finishing one picks up where it was left: whatever was ticked (and any photos
+taken) on the day it was left is already ticked on the checklist, and what
+gets ticked today is added on top, so the "ticked" count on the list moves as
+the work is done. Unticking an item today unticks it.
+
+Reopening a sign-off from an earlier day (from yesterday, or back to the last
+planned day) puts that building on the list too, marked *reopened*, whether
+or not it was on the plan — until somebody signs it off again.
 
 **The plan says what needs cleaning and in what order — not who does it.**
 Who's in on a given day is the roster's job, and cleaners sort the buildings
