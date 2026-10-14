@@ -403,6 +403,14 @@ any photos taken) on that day is already ticked on the checklist, and what
 gets ticked today is added on top, so the count on the list moves as the work
 is done. Unticking an item today unticks it.
 
+Finishing one also finishes it **on the day it was missed**: every item
+ticked today is ticked on that day too, and signing off today signs that day
+off as well (for the same clean — a Check today doesn't sign off a missed Full
+Clean). This works the same whether it was picked up from the list or is on
+today's plan again. So looking back at that day shows it done, with the
+weekday on anything finished later — "Sam · Tue 9:14 am" — so nobody mistakes
+it for done on time. Unticking or reopening today undoes it on both days.
+
 **The plan says what needs cleaning and in what order — not who does it.**
 Who's in on a given day is the roster's job, and cleaners sort the buildings
 out between themselves on the day. That's one less thing to keep in step, and
