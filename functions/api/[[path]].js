@@ -489,13 +489,22 @@ async function findIncomplete(env, user) {
 }
 
 /**
- * The earlier day a building's clean is being finished from, or null. Only
- * ever today, and only for the checklist that was left unfinished.
+ * The incomplete clean a building is carrying from an earlier day, or null.
+ * Only ever today: that is the one day it can be finished on.
  */
-async function carriedFrom(env, user, buildingId, day, type) {
+async function carriedFor(env, user, buildingId, day) {
   if (day !== localDay(env)) return null;
   const { missed } = await findIncomplete(env, user);
-  return missed.find((m) => m.buildingId === buildingId && m.cleanType === type)?.from ?? null;
+  return missed.find((m) => m.buildingId === buildingId) ?? null;
+}
+
+/**
+ * The earlier day a building's clean is being finished from, or null - only
+ * for the checklist that was left unfinished.
+ */
+async function carriedFrom(env, user, buildingId, day, type) {
+  const carry = await carriedFor(env, user, buildingId, day);
+  return carry?.cleanType === type ? carry.from : null;
 }
 
 /* ------------------------------------------- approving a week for staff */
@@ -1469,6 +1478,21 @@ const routes = {
          user_name = excluded.user_name, updated_at = excluded.updated_at`,
     ).bind(Number(taskId), day, done ? 1 : 0, user.id, user.name, ts).run();
 
+    // Finishing a clean left from an earlier day finishes it on that day too,
+    // so looking back at that day shows the work as done (and when). An item
+    // already ticked back then keeps who ticked it and when.
+    const carry = await carriedFor(env, user, task.building_id, day);
+    if (carry && (task.clean_type === 'both' || task.clean_type === carry.cleanType)) {
+      await env.DB.prepare(
+        `INSERT INTO task_log (task_id, day, done, user_id, user_name, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(task_id, day) DO UPDATE SET
+           done = excluded.done, user_id = excluded.user_id,
+           user_name = excluded.user_name, updated_at = excluded.updated_at
+         WHERE task_log.done != excluded.done`,
+      ).bind(Number(taskId), carry.from, done ? 1 : 0, user.id, user.name, ts).run();
+    }
+
     await logActivity(env, {
       day,
       buildingId: task.building_id,
@@ -1565,6 +1589,18 @@ const routes = {
     const type = typeOf(cleanType);
 
     if (undo) {
+      // A sign-off that also finished an earlier day's clean (same moment,
+      // same clean) is taken back there too, which puts it back on the
+      // incomplete list.
+      const row = await env.DB.prepare(
+        'SELECT completed_at FROM building_status WHERE building_id = ? AND day = ? AND clean_type = ?',
+      ).bind(id, day, type).first();
+      if (row) {
+        await env.DB.prepare(
+          `DELETE FROM building_status WHERE building_id = ? AND clean_type = ?
+             AND completed_at = ? AND day < ?`,
+        ).bind(id, type, row.completed_at, day).run();
+      }
       await env.DB.prepare(
         'DELETE FROM building_status WHERE building_id = ? AND day = ? AND clean_type = ?',
       ).bind(id, day, type).run();
@@ -1579,7 +1615,8 @@ const routes = {
     // hard block - a dead camera phone shouldn't strand a finished building -
     // but the office sees it was signed off short. A photo taken on the day an
     // unfinished clean was started still counts when it is finished today.
-    const carry = await carriedFrom(env, user, id, day, type);
+    const carried = await carriedFor(env, user, id, day);
+    const carry = carried?.cleanType === type ? carried.from : null;
     const { results: missing } = await env.DB.prepare(
       `SELECT t.id, t.item FROM tasks t
        WHERE t.building_id = ?1 AND t.active = 1
@@ -1601,6 +1638,24 @@ const routes = {
        ON CONFLICT(building_id, day, clean_type) DO UPDATE SET
          completed_at = excluded.completed_at, completed_by = excluded.completed_by`,
     ).bind(id, day, type, ts, user.name).run();
+
+    // Signing off finishes the earlier day's clean as well - whether it was
+    // picked up from the incomplete list or is on today's plan again - so
+    // that day shows it as cleaned. Only the same clean: a Check today
+    // doesn't make up for a Full Clean missed yesterday.
+    if (carry) {
+      await env.DB.prepare(
+        `INSERT INTO building_status (building_id, day, clean_type, completed_at, completed_by)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(building_id, day, clean_type) DO UPDATE SET
+           completed_at = excluded.completed_at, completed_by = excluded.completed_by`,
+      ).bind(id, carry, type, ts, user.name).run();
+      await logActivity(env, {
+        day: carry, buildingId: id, kind: 'completed',
+        detail: `${typeLabel(type)} complete — finished ${day.split('-').reverse().join('-')}`,
+        userName: user.name,
+      });
+    }
 
     await logActivity(env, {
       day, buildingId: id, kind: 'completed',

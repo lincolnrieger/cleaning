@@ -47,6 +47,21 @@ function time(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+/**
+ * The time something was done, with its weekday when that wasn't `day` - a
+ * clean finished the day after it was missed reads "Tue 9:14 am" when looking
+ * back at the day it was meant for, so nobody takes it as done on time.
+ */
+function timeOn(iso, day) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${
+    String(d.getDate()).padStart(2, '0')}`;
+  return !day || local === day
+    ? time(iso)
+    : `${d.toLocaleDateString([], { weekday: 'short' })} ${time(iso)}`;
+}
+
 /** Calendar maths on YYYY-MM-DD, in UTC so daylight saving can't shift a day. */
 function addDays(day, delta) {
   const d = new Date(`${day}T00:00:00Z`);
@@ -1210,7 +1225,7 @@ function overviewTile(b) {
   const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
   const status = b.completed_at
     ? `<span class="pill done">Signed off<span class="hide-narrow"> ${
-      esc(time(b.completed_at))}</span></span>`
+      esc(timeOn(b.completed_at, viewDay()))}</span></span>`
     : b.done
       ? '<span class="pill open">In progress</span>'
       : b.scheduled
@@ -1539,7 +1554,7 @@ async function renderCleanerHome() {
 function jobTile(b, canOpen = true) {
   const pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
   const status = b.completed_at
-    ? `<span class="pill done">Done ${esc(time(b.completed_at))}</span>`
+    ? `<span class="pill done">Done ${esc(timeOn(b.completed_at, viewDay()))}</span>`
     : b.done ? '<span class="pill open">In progress</span>'
              : '<span class="pill idle">Not started</span>';
 
@@ -2210,7 +2225,8 @@ function taskRow(t, locked) {
       <span class="grow">
         <span class="item">${esc(t.item)}</span>
         <span class="desc">${esc(t.description)}</span>
-        <span class="who">${t.done && t.by ? `${esc(t.by)} · ${esc(time(t.at))}` : ''}</span>
+        <span class="who">${t.done && t.by
+          ? `${esc(t.by)} · ${esc(timeOn(t.at, state.building?.day))}` : ''}</span>
       </span>
     </button>
     ${photoStrip(t, locked)}
@@ -2323,7 +2339,8 @@ function paintBuilding(data, locked) {
   if (data.completed) {
     signoff.innerHTML = `<span class="pill done">${svgIcon('check')} Signed off</span>
       <span class="muted"> ${esc(typeLabel(data.cleanType))} by
-      ${esc(data.completed.completed_by)} at ${esc(time(data.completed.completed_at))}</span>`;
+      ${esc(data.completed.completed_by)} at
+      ${esc(timeOn(data.completed.completed_at, data.day))}</span>`;
   }
 
   const issues = $('#issues');
@@ -2375,7 +2392,7 @@ async function refreshBuilding(id, day, type, locked, force = false) {
     el.classList.toggle('is-done', task.done);
     el.dataset.done = task.done ? '1' : '0';
     el.querySelector('.who').textContent =
-      task.done && task.by ? `${task.by} · ${time(task.at)}` : '';
+      task.done && task.by ? `${task.by} · ${timeOn(task.at, data.day)}` : '';
   }
   paintBuilding(data, locked);
 }
