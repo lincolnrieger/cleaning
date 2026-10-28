@@ -195,18 +195,19 @@ const TABLES = [
      UNIQUE (building_id, weekday)
    )`,
 
-  // What somebody can work in one particular week, overriding the standing
-  // pattern on users.availability. Same stored shape, so anything that can
-  // read one can read the other - a week off, a week of late starts, an
-  // extra Saturday - without that becoming their new normal.
-  `CREATE TABLE IF NOT EXISTS availability_weeks (
+  // What somebody can work on one particular date, overriding the standing
+  // pattern on users.availability for that day alone - an exam on Thursday,
+  // a fortnight away, one late start. `availability` is one day's entry as
+  // JSON: 'null' for can't work, or { from, to } (blank times: any time).
+  `CREATE TABLE IF NOT EXISTS availability_days (
      id           INTEGER PRIMARY KEY,
      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-     week_start   TEXT    NOT NULL,
+     day          TEXT    NOT NULL,
      availability TEXT    NOT NULL,
+     note         TEXT    NOT NULL DEFAULT '',
      updated_by   TEXT    NOT NULL,
      updated_at   TEXT    NOT NULL,
-     UNIQUE (user_id, week_start)
+     UNIQUE (user_id, day)
    )`,
 
   `CREATE TABLE IF NOT EXISTS login_attempts (
@@ -230,7 +231,7 @@ const INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_schedule_day ON schedule (day, priority)`,
   `CREATE INDEX IF NOT EXISTS idx_roster_day ON roster (day, start_time)`,
   `CREATE INDEX IF NOT EXISTS idx_roster_user ON roster (user_id, day)`,
-  `CREATE INDEX IF NOT EXISTS idx_availability_weeks ON availability_weeks (week_start)`,
+  `CREATE INDEX IF NOT EXISTS idx_availability_days ON availability_days (day)`,
   `CREATE INDEX IF NOT EXISTS idx_schedule_repeat ON schedule_repeat (weekday)`,
 ];
 
@@ -536,6 +537,59 @@ async function dropRetiredTables(db) {
   await db.prepare('DROP TABLE IF EXISTS schedule_assignees').run();
   await db.prepare('DROP TABLE IF EXISTS areas').run();
   await db.prepare('DROP TABLE IF EXISTS roster_published').run();
+  await db.prepare('DROP TABLE IF EXISTS availability_weeks').run();
+}
+
+/**
+ * One day of a stored week, reduced to what it means: 'off', 'any', or the
+ * hours. Reads every format users.availability has ever been stored in, so
+ * the comparison below never mistakes an old record for a change.
+ */
+function dayMeaning(raw, i) {
+  if (!raw || /^[01]{7}$/.test(raw)) return !raw || raw[i] === '1' ? 'any' : 'off';
+  try {
+    const stored = JSON.parse(raw);
+    const entry = (Array.isArray(stored) ? stored : stored?.days)?.[i];
+    if (!entry) return 'off';
+    return entry.from && entry.to ? `${entry.from}-${entry.to}` : 'any';
+  } catch {
+    return 'any';
+  }
+}
+
+/**
+ * Availability used to be overridden a whole week at a time. Each of those
+ * weeks becomes the individual days in it that actually differ from the
+ * person's usual week - which is what anybody setting one meant - so nothing
+ * anyone told the office is lost, and a day that matched their usual week
+ * goes on following it.
+ */
+async function ensureDayAvailability(db) {
+  if (!await tableSql(db, 'availability_weeks')) return;
+
+  const { results } = await db.prepare(
+    `SELECT w.user_id, w.week_start, w.availability AS week, w.updated_by, w.updated_at,
+            u.availability AS usual
+     FROM availability_weeks w JOIN users u ON u.id = w.user_id`,
+  ).all();
+
+  const inserts = [];
+  for (const r of results) {
+    for (let i = 0; i < 7; i += 1) {
+      const meaning = dayMeaning(r.week, i);
+      if (meaning === dayMeaning(r.usual, i)) continue;
+      const [from, to] = meaning === 'any' ? ['', ''] : meaning.split('-');
+      const entry = meaning === 'off' ? null : { from, to };
+      const day = new Date(`${r.week_start}T00:00:00Z`);
+      day.setUTCDate(day.getUTCDate() + i);
+      inserts.push(db.prepare(
+        `INSERT OR IGNORE INTO availability_days
+           (user_id, day, availability, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      ).bind(r.user_id, day.toISOString().slice(0, 10), JSON.stringify(entry),
+        r.updated_by, r.updated_at));
+    }
+  }
+  await runAll(db, inserts);
 }
 
 /**
@@ -782,7 +836,7 @@ const COLUMNS = [
  * indexes and columns hash themselves; those four are code, so they need a
  * hand.
  */
-const MIGRATIONS_TAG = '2026-10-missed-cleans-backfill';
+const MIGRATIONS_TAG = '2026-10-availability-by-day';
 
 /** What a fully migrated database of this version looks like. */
 const schemaStamp = () =>
@@ -807,8 +861,10 @@ async function buildSchema(db) {
   await ensureFlatChecklist(db);
   await ensureWeekApprovals(db);
   await backfillMissedCleans(db);
-  // Last: the flatten above is the final reader of `areas`, and the approval
-  // backfill above is the last reader of the roster-only publish table.
+  await ensureDayAvailability(db);
+  // Last: the flatten above is the final reader of `areas`, the approval
+  // backfill the last reader of the roster-only publish table, and the day
+  // conversion the last reader of the week-at-a-time availability.
   await dropRetiredTables(db);
 
   await db.batch(INDEXES.map((sql) => db.prepare(sql)));

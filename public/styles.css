@@ -526,7 +526,7 @@ button.iconbtn {
 button.iconbtn:hover { color: var(--ink); }
 
 /* A button that reads as a link, for a name that opens an editor. */
-button.linkish {
+button.linkish, a.linkish {
   border: none;
   background: none;
   padding: 0;
@@ -537,7 +537,8 @@ button.linkish {
   text-align: left;
 }
 
-button.linkish:hover { background: none; color: var(--accent); text-decoration: underline; }
+a.linkish { text-decoration: none; }
+button.linkish:hover, a.linkish:hover { background: none; color: var(--accent); text-decoration: underline; }
 
 /* ------------------------------------------------------------- inputs */
 
@@ -1330,12 +1331,9 @@ td.weekend { background: var(--sunken); }
 .legend i.sw.yes { background: var(--done-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--done) 40%, transparent); }
 .legend i.sw.no { background: var(--line-2); box-shadow: inset 0 0 0 1px var(--line); }
 .legend i.sw.done { background: var(--done-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--done) 40%, transparent); }
-.legend i.sw.weekonly-sw { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent); }
-
-/* Availability that belongs to one week rather than to how someone usually
-   works. Quiet, but it has to be visible at a glance: reading a one-off week
-   as somebody's new normal is how a roster ends up wrong for a month. */
-.weekonly { color: var(--accent); font-weight: 640; }
+.legend i.sw.changed-sw { background: var(--card); box-shadow: inset 0 0 0 2px var(--accent); }
+.legend i.sw.shift-sw { background: var(--ink-2); height: 3px; border-radius: 2px; }
+.legend.flat { border-top: none; padding: 0; gap: var(--s3); }
 
 /* --------------------------------------------------------- availability */
 
@@ -1347,34 +1345,23 @@ table.avail td { padding: 7px 6px; text-align: center; vertical-align: middle; }
 .avcell.no .tiny.clash { color: var(--warn); font-weight: 620; }
 table.avail td.dimmed { opacity: .28; }
 
-.avlist { display: grid; gap: 6px; }
-
-.avrow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  min-height: var(--tap);
+/* Each square of the grid is the button that changes that one day. */
+button.avcell {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  padding: 5px 4px;
+  border-color: transparent;
+  background: none;
+  font-size: 12.5px;
 }
-
-.avrow.on { background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.avrow .avday { display: flex; align-items: center; gap: var(--s2); width: 76px; flex: none; cursor: pointer; }
-.avrow .avday span { font-weight: 620; font-size: 13.5px; }
-.avrow input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; flex: none; accent-color: var(--accent); }
-.avtimes { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
-.avtimes input[type="time"] { min-height: 38px; padding: 0 8px; font-size: 15px; min-width: 0; }
-.avtimes input:disabled { opacity: .35; }
-
-/* A day name, two time fields and a star do not fit across a phone, and what
-   happens instead is that the last of them slides off the edge unseen. Below
-   this width the times take a line of their own. */
-@media (max-width: 470px) {
-  .avrow { flex-wrap: wrap; }
-  .avrow .avday { width: auto; flex: 1; }
-  .avtimes { flex-basis: 100%; order: 3; }
-}
+button.avcell:hover { border-color: var(--line); background: var(--hover); }
+button.avcell[disabled] { opacity: 1; }
+button.avcell[disabled]:hover { border-color: transparent; background: none; }
+/* Changed for that one day: outlined, so it reads at a glance without
+   taking a colour that already means something. */
+button.avcell.changed { border-color: var(--accent); }
+.avcell .avwhy { color: var(--accent); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The one button that hands a week to the staff. Full width where that is
    the only sensible size, capped on a desktop so it stops being a slab. */
@@ -2144,13 +2131,6 @@ button:disabled:active, .btn:disabled:active { transform: none; }
 .prefstar .ico { width: 12px; height: 12px; vertical-align: 0; fill: currentColor; stroke-width: 0; }
 .legend .prefstar { margin-right: 2px; }
 
-/* The star toggle in the availability sheet. */
-.avrow .star { margin-left: auto; }
-.avrow .star .ico { fill: none; }
-.avrow .star[aria-pressed="true"] { color: var(--accent); }
-.avrow .star[aria-pressed="true"] .ico { fill: currentColor; stroke-width: 0; }
-.avrow .star[disabled] { opacity: .3; }
-
 .avcell.preferred { color: var(--accent); }
 .avcell .prefstar { margin-right: 3px; vertical-align: -1px; }
 
@@ -2166,62 +2146,140 @@ table.sched th.rowhead .num.over { color: var(--warn); font-weight: 700; }
    on that row that needs to stand out. */
 .warntext, .check-row .grow > .tiny.warntext { color: var(--warn); }
 
-/* ------------------------------------------------ a cleaner's own week */
+/* --------------------------------------------- one person's availability */
 
-/* One big row per day: tap anywhere on it to switch between can and can't.
-   Hours sit beside it as a second, smaller button, only once the day is on. */
-.mydays { display: grid; gap: 8px; }
-
-.myday {
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
+/* A month at a time, Monday first, like a paper calendar on the fridge. Every
+   square is a button: the colour says can or can't, the text says the hours,
+   an outline says "changed for this day" and a bar along the bottom says
+   they're already on the roster. */
+.cal {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
 }
 
-.myday-toggle {
-  flex: 1 1 auto;
-  min-width: 0;
+.calhead {
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+  text-align: center;
+  padding-bottom: 2px;
+}
+
+button.calday {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  min-height: 58px;
+  padding: 6px 2px 8px;
+  border-radius: var(--r);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.calnum { font-size: 15px; font-weight: 650; line-height: 1; white-space: nowrap; }
+.callabel { font-size: 11px; line-height: 1.1; white-space: nowrap; }
+
+button.calday.yes { background: var(--done-wash); border-color: color-mix(in srgb, var(--done) 30%, var(--line)); color: var(--ink); }
+button.calday.yes .callabel { color: var(--done); }
+button.calday.no { background: var(--line-2); color: var(--muted); }
+button.calday.no .callabel { font-weight: 500; }
+button.calday:hover { filter: brightness(.97); }
+button.calday.changed { box-shadow: inset 0 0 0 2px var(--accent); border-color: var(--accent); }
+button.calday.today .calnum {
+  background: var(--ink); color: var(--card);
+  border-radius: 999px; padding: 2px 6px; margin-top: -2px;
+}
+button.calday.past, button.calday[disabled] { opacity: .45; cursor: default; filter: none; }
+/* Already somebody's to work from, so the calendar says so. */
+.calshift {
+  position: absolute;
+  left: 25%; right: 25%; bottom: 3px;
+  height: 3px; border-radius: 2px;
+  background: var(--ink-2);
+}
+button.calday.picked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--ring);
+}
+button.calday.picked .callabel { color: var(--accent-ink); }
+
+@media (max-width: 380px) {
+  .cal { gap: 3px; }
+  button.calday { min-height: 52px; }
+  .callabel { font-size: 10px; }
+}
+
+/* The bar that follows a selection of days: how many, and the one thing
+   to do with them. Sticks above the bottom nav so it is never scrolled away. */
+.selbar {
+  position: sticky;
+  bottom: calc(var(--s3) + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: 0 0 var(--s4);
+  padding: var(--s2) var(--s2) var(--s2) var(--s4);
+  border-radius: var(--r-lg);
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--lift);
+}
+@media (max-width: 767px) {
+  .selbar { bottom: calc(68px + env(safe-area-inset-bottom, 0px)); }
+}
+
+.changerow { display: flex; align-items: center; gap: var(--s3); }
+.changerow .grow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+
+/* The usual week: seven rows, each the button that changes that weekday. */
+.usualdays { display: grid; gap: 6px; }
+
+button.usualday {
   justify-content: flex-start;
   gap: var(--s3);
-  min-height: 56px;
+  min-height: 52px;
   padding: 0 var(--s3);
   text-align: left;
   color: var(--muted);
   background: var(--sunken);
 }
+button.usualday.on {
+  background: var(--done-wash);
+  border-color: color-mix(in srgb, var(--done) 30%, var(--line));
+}
+button.usualday[disabled] { opacity: 1; }
+.usualday-state { margin-left: auto; font-size: 14px; font-weight: 600; }
+button.usualday.on .usualday-state { color: var(--done); }
 
 .myday-mark {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   flex: none;
   border-radius: 50%;
   background: var(--line-2);
   color: var(--faint);
 }
+.usualday.on .myday-mark { background: var(--done); color: #fff; }
+.myday-name { font-size: 15.5px; font-weight: 650; color: var(--ink-2); line-height: 1.2; }
+.usualday.on .myday-name { color: var(--ink); }
 
-.myday-name { flex: 1; font-size: 16px; font-weight: 650; color: var(--ink-2); line-height: 1.2; }
-.myday-name small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
-.myday-state { font-size: 13px; font-weight: 600; }
-
-.myday.on .myday-toggle {
-  background: var(--done-wash);
-  border-color: color-mix(in srgb, var(--done) 40%, var(--line));
-  color: var(--done);
-}
-.myday.on .myday-mark { background: var(--done); color: #fff; }
-.myday.on .myday-name { color: var(--ink); }
-
-.myday-hours {
-  flex: 0 0 auto;
-  min-width: 104px;
-  min-height: 56px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink-2);
-}
-
+/* The answers for a day, two to a row on anything wider than a phone. */
+.daychoices { display: grid; gap: 8px; }
+@media (min-width: 420px) { .daychoices { grid-template-columns: 1fr 1fr; } }
+.bigchoice[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-wash); }
+.bigchoice.no strong { color: var(--danger); }
+.hoursbox { max-width: 120px; }
 
 .custom-hours summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 6px 0; }
 .custom-hours input[type="time"] { flex: 1; min-width: 0; }

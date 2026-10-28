@@ -241,56 +241,82 @@ required" just says photo storage isn't set up.
 
 ## Staff availability
 
-### A cleaner's own availability
+Availability works the way most rostering apps (Deputy, When I Work,
+Homebase, 7shifts) settled on, in two layers:
 
-**Planning → My availability** asks one question: *when can you work?* Seven
-big rows, one per day — tap a day to switch it between **can** (green tick)
-and **can't**. Each working day has an hours button that defaults to **Any
-time**; tapping it offers *Mornings*, *Afternoons*, *Day shift*, or exact
-times. One **Save** button.
+1. **A usual week** — which days someone can work, and between what hours.
+   Set once; it repeats every week.
+2. **Changes for particular dates** on top of it — an exam on Thursday, a
+   fortnight away, one late start. Each is a date of its own, so changing one
+   day never touches the rest of that week, and a holiday never becomes
+   somebody's new normal.
 
-At the top, **Every week** changes their normal week; **Just one week** lets
-them pick a week (say they're away) without touching any other. Preferred days
-and ideal hours aren't asked here — the office sets those, and a cleaner
-saving their days leaves them as they were.
+Every day has one answer, picked from a short list: **any time**,
+**mornings**, **afternoons**, **day shift**, **exact times**, or **can't
+work**. Picking it saves it — there's no separate Save button to forget.
+
+### One person's availability
+
+**Planning → My availability** for a cleaner, or **tap anyone's name** on the
+office's availability screen (or **Availability** on the People screen). It's
+the same screen either way, top to bottom:
+
+- **Calendar** — five weeks from this week, every day showing what it
+  actually is once changes are taken into account: green with the hours for
+  can work, grey for off, a blue outline for a day that's been changed, and a
+  bar along the bottom for a day they're already rostered. **Tap a day to
+  change just that day**, with an optional reason ("exam", "away").
+  **Change several days** lets you tap a run of days — a holiday, a week of
+  exams — and set them all at once.
+- **Coming up** — every change ahead, with runs of days grouped ("Tue 17 Nov –
+  Thu 19 Nov · can't work · *Uni exams*") and an **Undo** on each that puts
+  them back to the usual week. The office also sees who set it.
+- **Usual week** — seven rows; tap one to change that weekday for every week.
+  Dates already changed on the calendar keep their own answer.
+
+Days that have already gone can't be changed — they're the record of what was
+known at the time.
 
 ### The office's view
 
-**Planning → Availability** is every person's whole week on one screen — you
-never have to open people one at a time.
+**Planning → Availability** is every person's week on one screen — you never
+have to open people one at a time.
 
 | Staff | Mon | Tue | Wed | Thu | Fri |
 |---|---|---|---|---|---|
 | Casey | 8am–4pm | 8am–4pm | Unavailable | 9am–5pm | 8am–2pm |
 | Dana | 10am–6pm | Unavailable | 8am–4pm | 8am–4pm | 10am–4pm |
 
-Each cell also shows how many shifts that person already has that day, so you
-can see who's carrying the week while you're reading who's free.
+**Tap any square to change that one day** for that person; tap a name to open
+their calendar and usual week. A square changed for that day is outlined, with
+the reason underneath. Each square also shows how many shifts that person
+already has that day, and calls out a shift booked on a day they can't work.
 
 Filters across the top: **staff member**, **day**, **would rather work it**,
 **available/unavailable**, and **free between** two times — set 13:00 to 17:00
 and it dims everyone who can't cover that window.
 
-Tap a name to set their availability: a switch per day plus a start and finish
-time. Leave the times blank for a day they work with no set hours. Presets for
-**copy the first day down** and **clear all** save some typing. Times use the
-phone's native time picker.
+Office and admin can change anyone's availability; a cleaner can change only
+their own. The view-only account can look but not change.
 
 Nobody's availability is ever assumed closed: a person whose record predates
 this reads as available, not unavailable, so nobody silently drops off the
-roster.
+roster. Changes made under the old "just one week" option were carried
+across as the individual days in those weeks that differed from the usual
+week.
 
 ### Preferences — the soft stuff that makes rostering quicker
 
-Availability answers *can they*. Two more fields on the same sheet answer
+Availability answers *can they*. Two more settings answer
 *would they*, which is what you're actually weighing up when you build a week:
 
-- **Preferred days** — tap the star on any day they'd **rather** work. It
+- **Preferred days** — on a day of their usual week, switch on **Would rather
+  work this day** (office and admin only). It
   never blocks anything and never raises a warning. What it does is sort:
   open a square on the roster and the people who want that day are at the top
   of the list, labelled *would rather work it*, with anyone unavailable at the
   bottom.
-- **Ideal hours a week** — a target, e.g. 25. The availability grid and the
+- **Ideal hours a week** — a target, e.g. 25, under their usual week. The availability grid and the
   roster then show **"22h of 25h"** against each person for the week you're
   looking at, and turn amber once they're over it. No adding shifts up by
   hand to see who's short and who's had too much. **Office and admin only.**
