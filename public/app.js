@@ -27,7 +27,9 @@ const state = {
   openSections: new Set(),    // secondary lists (e.g. "not scheduled") expanded open
   availFilter: { q: '', day: 'all', status: 'all', from: '', to: '' },
   rosterOfficeOpen: null, // office rows on the roster; null = open only if rostered
-  myAvailMode: null,      // a cleaner's availability: 'usual' or 'week'
+  availFor: null,         // whose availability calendar is open ('me' or an id)
+  availStart: null,       // first week that calendar shows; null = this week
+  availSelect: null,      // days picked in "change several days", or null
   incomplete: null,       // buildingId -> day it was left unfinished
 };
 
@@ -108,9 +110,12 @@ const weekdayIndex = (day) => (asDate(day).getUTCDay() + 6) % 7;
  * Missing data reads as available rather than not - nobody should drop off
  * the roster because their record predates this.
  */
-const availabilityOn = (person, day) => (Array.isArray(person.availability)
-  ? person.availability[weekdayIndex(day)]
-  : { from: '', to: '' });
+const availabilityOn = (person, day) => {
+  if (person.onDay && day in person.onDay) return person.onDay[day];
+  return Array.isArray(person.availability)
+    ? person.availability[weekdayIndex(day)]
+    : { from: '', to: '' };
+};
 
 const worksOn = (person, day) => Boolean(availabilityOn(person, day));
 
@@ -2682,66 +2687,41 @@ async function download(path, filename) {
   }
 }
 
-/* ------------------------------------ availability editing (per person) */
+/* ---------------------------------------------- availability: shared pieces */
 
-/**
- * The seven rows of the availability sheet: a switch per day plus the hours.
- * Times are <input type="time">, which gives a native picker on a phone and
- * a keyboard-friendly field on the desktop, and always hands back HH:MM.
+/*
+ * How availability works, in the shape most rostering apps settled on:
+ *
+ *  - a USUAL WEEK, set once - which days, and between what hours;
+ *  - CHANGES FOR PARTICULAR DATES on top of it - an exam on Thursday, a
+ *    fortnight away, one late start - each a date of its own, so changing
+ *    one day never touches the rest of that week and a holiday never becomes
+ *    somebody's new normal.
+ *
+ * One answer per day, picked from a short list: any time, a common set of
+ * hours, exact times, or can't work. The cleaner's own screen and the
+ * office's view of any one person are the same screen.
  */
-function availabilityRows(days) {
-  return DAY_NAMES.map((name, i) => {
-    const entry = days?.[i] ?? null;
-    const on = Boolean(entry);
-    return `<div class="avrow ${on ? 'on' : ''}" data-avrow="${i}">
-      <label class="avday">
-        <input type="checkbox" ${on ? 'checked' : ''}>
-        <span>${name}</span>
-      </label>
-      <span class="avtimes">
-        <input type="time" class="avfrom" value="${esc(entry?.from ?? '')}"
-          ${on ? '' : 'disabled'} aria-label="${name} start">
-        <span class="tiny muted">to</span>
-        <input type="time" class="avto" value="${esc(entry?.to ?? '')}"
-          ${on ? '' : 'disabled'} aria-label="${name} finish">
-      </span>
-      <button type="button" class="iconbtn star" data-pref
-        aria-pressed="${Boolean(entry?.preferred)}" ${on ? '' : 'disabled'}
-        title="${name}: a day they would rather work"
-        aria-label="${name}: prefers this day">${svgIcon('star')}</button>
-    </div>`;
-  }).join('');
-}
 
-function wireAvailabilityRows(root) {
-  root.querySelectorAll('[data-avrow]').forEach((row) => {
-    const box = row.querySelector('input[type="checkbox"]');
-    const times = row.querySelectorAll('input[type="time"]');
-    const star = row.querySelector('[data-pref]');
-    box.onchange = () => {
-      row.classList.toggle('on', box.checked);
-      times.forEach((t) => { t.disabled = !box.checked; });
-      // Preferring a day you don't work is meaningless, so the star follows
-      // the switch off rather than being left set on a day that's gone.
-      star.disabled = !box.checked;
-      if (!box.checked) star.setAttribute('aria-pressed', 'false');
-    };
-    star.onclick = () => {
-      star.setAttribute('aria-pressed',
-        String(star.getAttribute('aria-pressed') !== 'true'));
-    };
-  });
-}
+/** Common answers to "what hours?", so nobody has to work a time picker. */
+const HOUR_CHOICES = [
+  ['', '', 'Any time'],
+  ['06:00', '12:00', 'Mornings'],
+  ['12:00', '18:00', 'Afternoons'],
+  ['08:00', '16:00', 'Day shift'],
+];
 
-/** Reads the sheet back into the 7 entries the API expects. */
-const readAvailabilityRows = (root) => [...root.querySelectorAll('[data-avrow]')].map((row) => {
-  if (!row.querySelector('input[type="checkbox"]').checked) return null;
-  return {
-    from: row.querySelector('.avfrom').value,
-    to: row.querySelector('.avto').value,
-    preferred: row.querySelector('[data-pref]').getAttribute('aria-pressed') === 'true',
+/** "8–4", "8:30–2" - hours small enough for a calendar square. */
+function compactRange(from, to) {
+  const h = (t) => {
+    const [hh, mm] = t.split(':').map(Number);
+    return `${hh % 12 || 12}${mm ? `:${String(mm).padStart(2, '0')}` : ''}`;
   };
-});
+  return from && to ? `${h(from)}–${h(to)}` : '';
+}
+
+const sameEntry = (a, b) => (!a && !b)
+  || Boolean(a && b && (a.from || '') === (b.from || '') && (a.to || '') === (b.to || ''));
 
 /** "Mon, Tue, Wed · 8am–4pm" style summary for a person's row. */
 function availabilitySummary(person) {
@@ -2764,115 +2744,440 @@ function availabilitySummary(person) {
 }
 
 /**
- * The two shortcuts every availability editor wants: set one day and push it
- * down the week, or start again from nothing. Shared, because the office's
- * sheet and a cleaner's own screen are the same seven rows.
+ * The one sheet every availability change goes through: a day of the usual
+ * week, one date, or several dates at once. Picking an answer saves it -
+ * there is no separate Save to forget.
+ *
+ *  - `current`  what the day(s) say now, to mark the matching answer
+ *  - `usual`    for dates: what the usual week says, offered as "back to usual"
+ *  - `changed`  for dates: whether any of them has its own answer to undo
+ *  - `note`     for dates: the reason, if one was given
+ *  - `preferred` office only, usual week only: the "would rather" star
+ *  - `save(entry, note)`, `reset()`, `prefer(on)` do the actual saving
  */
-function wireAvailabilityPresets(root) {
-  const rows = () => [...root.querySelectorAll('[data-avrow]')];
-  const setRow = (row, on, from = '', to = '') => {
-    const box = row.querySelector('input[type="checkbox"]');
-    box.checked = on;
-    row.classList.toggle('on', on);
-    row.querySelectorAll('input[type="time"]').forEach((t) => { t.disabled = !on; });
-    row.querySelector('.avfrom').value = from;
-    row.querySelector('.avto').value = to;
-    const star = row.querySelector('[data-pref]');
-    star.disabled = !on;
-    if (!on) star.setAttribute('aria-pressed', 'false');
+function openDayChoice({
+  title, sub = '', current, usual, changed = false, note = null,
+  preferred = null, save, reset, prefer,
+}) {
+  const isChoice = ([f, t]) => current && (current.from || '') === f && (current.to || '') === t;
+  const custom = current && current.from && !HOUR_CHOICES.some(isChoice);
+
+  const sheet = openSheet(`
+    <div class="sheet-head"><div><strong>${esc(title)}</strong>
+      ${sub ? `<div class="small muted">${esc(sub)}</div>` : ''}</div></div>
+    <div class="pad stack">
+      ${note !== null ? `<label class="field"><span>Reason (optional)</span>
+        <input id="dcnote" maxlength="120" value="${esc(note)}" autocomplete="off"
+          placeholder="Exam, appointment, away…"></label>` : ''}
+      <div class="daychoices">
+        ${HOUR_CHOICES.map(([f, t, label], k) => `<button class="bigchoice" data-choice="${k}"
+          aria-pressed="${Boolean(isChoice([f, t]))}">
+          <strong>${k ? esc(label) : 'Can work · any time'}</strong>
+          ${f ? `<span class="small muted">${esc(timeRange(f, t))}</span>` : ''}
+        </button>`).join('')}
+        <button class="bigchoice no" data-off aria-pressed="${current === null}">
+          <strong>Can't work</strong></button>
+      </div>
+      <details class="custom-hours" ${custom ? 'open' : ''}>
+        <summary>Set exact times</summary>
+        <div class="row tight gap-top-sm">
+          <input type="time" id="hfrom" value="${esc(current?.from || '08:00')}" aria-label="From">
+          <span class="tiny muted">to</span>
+          <input type="time" id="hto" value="${esc(current?.to || '16:00')}" aria-label="To">
+        </div>
+        <button class="primary wide gap-top-sm" id="hset">Use these times</button>
+      </details>
+      ${preferred !== null ? `<label class="switch-row">
+        <input type="checkbox" id="dcpref" ${preferred ? 'checked' : ''}
+          ${current === null ? 'disabled' : ''}>
+        <span class="grow"><strong>Would rather work this day</strong>
+          <span class="small muted">Never blocks anything — puts them first when
+            you're picking someone for the roster.</span></span>
+      </label>` : ''}
+      ${changed && reset ? `<button class="wide" id="dcreset">Back to usual${usual !== undefined
+        ? ` · ${esc(availabilityText(usual).toLowerCase())}` : ''}</button>` : ''}
+      <p class="err" id="dcerr"></p>
+      <button class="wide ghost" id="dccancel">Cancel</button>
+    </div>`);
+
+  const run = async (fn) => {
+    sheet.querySelectorAll('button, input').forEach((el) => { el.disabled = true; });
+    try {
+      await fn();
+      closeSheet();
+    } catch (e) {
+      sheet.querySelector('#dcerr').textContent = e.message;
+      sheet.querySelectorAll('button, input').forEach((el) => { el.disabled = false; });
+    }
+  };
+  const noteNow = () => sheet.querySelector('#dcnote')?.value.trim() ?? '';
+
+  sheet.querySelectorAll('[data-choice]').forEach((b) => {
+    b.onclick = () => {
+      const [from, to] = HOUR_CHOICES[Number(b.dataset.choice)];
+      run(() => save({ from, to }, noteNow()));
+    };
+  });
+  sheet.querySelector('[data-off]').onclick = () => run(() => save(null, noteNow()));
+  sheet.querySelector('#hset').onclick = () => {
+    const from = sheet.querySelector('#hfrom').value;
+    const to = sheet.querySelector('#hto').value;
+    if (!from || !to || to <= from) {
+      sheet.querySelector('#dcerr').textContent = 'The finish needs to be after the start.';
+      return;
+    }
+    run(() => save({ from, to }, noteNow()));
+  };
+  sheet.querySelector('#dcreset')?.addEventListener('click', () => run(reset));
+  sheet.querySelector('#dcpref')?.addEventListener('change', (ev) => {
+    run(() => prefer(ev.currentTarget.checked));
+  });
+  sheet.querySelector('#dccancel').onclick = closeSheet;
+}
+
+/** Saves the same answer for one or more dates, or puts them back to usual. */
+const saveDates = (userId, days, entry, note) => api('/availability/days', {
+  method: 'POST', body: { userId, days, entry, note },
+});
+const resetDates = (userId, days) => api('/availability/days', {
+  method: 'POST', body: { userId, days, reset: true },
+});
+
+/** "Tuesday 4 November" */
+const longDate = (day) => asDate(day).toLocaleDateString([], {
+  weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC',
+});
+
+/** "Tue 4 Nov" */
+const shortDate = (day) => asDate(day).toLocaleDateString([], {
+  weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
+});
+
+/* ------------------------------------- view: one person's availability */
+
+const selCount = (n) => `<strong>${n}</strong> day${n === 1 ? '' : 's'} picked`;
+
+/** How many weeks the calendar shows at once, starting from the week on top. */
+const CAL_WEEKS = 5;
+
+/**
+ * Runs of consecutive dates with the same answer and reason, so a fortnight
+ * away is one line ("Mon 3 – Fri 14 Nov") rather than twelve.
+ */
+function groupChanges(changes) {
+  const groups = [];
+  for (const c of changes) {
+    const last = groups[groups.length - 1];
+    if (last && addDays(last.days[last.days.length - 1], 1) === c.day
+      && sameEntry(last.entry, c.entry) && last.note === c.note) {
+      last.days.push(c.day);
+    } else {
+      groups.push({ days: [c.day], entry: c.entry, note: c.note, by: c.by });
+    }
+  }
+  return groups;
+}
+
+/**
+ * A person's whole availability on one screen: their usual week, a
+ * calendar showing what each date actually is once changes are taken into
+ * account, and a list of the changes coming up. Tap any day to change it.
+ * The cleaner's "My availability" and the office's view of anyone are this
+ * same screen.
+ */
+async function renderPersonAvailability(userId) {
+  const live = screen('#/availability');
+  const today = state.config.today;
+  // The weeks on screen and any half-made selection belong to the person
+  // they were made on; opening somebody else starts clean.
+  if (state.availFor !== (userId ?? 'me')) {
+    state.availFor = userId ?? 'me';
+    state.availStart = null;
+    state.availSelect = null;
+  }
+  // Rolling weeks rather than a calendar month: on the 28th a month view is
+  // mostly days already gone, and the days worth changing are all next month.
+  const thisWeek = startOfWeek(today);
+  const gridFrom = state.availStart && state.availStart > thisWeek ? state.availStart : thisWeek;
+  const gridTo = addDays(gridFrom, CAL_WEEKS * 7 - 1);
+  const lastStart = addDays(thisWeek, 52 * 7);
+  // A year ahead regardless of the weeks on screen, for the "coming up" list.
+  const until = addDays(today, 365) > gridTo ? addDays(today, 365) : gridTo;
+
+  const data = await api(`/availability/person?${userId ? `userId=${userId}&` : ''}`
+    + `from=${gridFrom}&to=${until}`);
+  if (!live()) return;
+
+  const mine = data.person.id === state.user.id;
+  const office = officeSide();
+  chrome({
+    title: mine ? 'My availability' : data.person.name,
+    back: !mine || office,
+    section: mine && !office ? planningSection() : 'schedule',
+  });
+
+  const usual = data.usual.days;
+  const changes = new Map(data.changes.map((c) => [c.day, c]));
+  const usualOn = (day) => usual[weekdayIndex(day)];
+  const actualOn = (day) => (changes.has(day) ? changes.get(day).entry : usualOn(day));
+  const editable = data.canEdit;
+  const sel = state.availSelect;
+  const selecting = Boolean(sel);
+  const upcoming = groupChanges(data.changes.filter((c) => c.day >= today));
+
+  const reload = () => renderPersonAvailability(userId);
+  const saveUsual = (days, idealHours = data.usual.idealHours) => api('/availability', {
+    method: 'POST', body: { userId: data.person.id, days, idealHours },
+  });
+
+  const dayCell = (day) => {
+    const past = day < today;
+    const entry = actualOn(day);
+    const change = changes.get(day);
+    const label = entry ? compactRange(entry.from, entry.to) || 'Any' : 'Off';
+    // The 1st carries its month, so the rows read across a month boundary.
+    const num = day.endsWith('-01')
+      ? asDate(day).toLocaleDateString([], { day: 'numeric', month: 'short', timeZone: 'UTC' })
+      : Number(day.slice(8));
+    const shifts = data.rostered[day] ?? 0;
+    const classes = ['calday', entry ? 'yes' : 'no', change ? 'changed' : '',
+      past ? 'past' : '', day === today ? 'today' : '',
+      sel?.has(day) ? 'picked' : ''].filter(Boolean).join(' ');
+    const said = [longDate(day), availabilityText(entry), change ? 'changed for this day' : '',
+      change?.note ? `"${change.note}"` : '', shifts ? 'on the roster' : '']
+      .filter(Boolean).join(' · ');
+    return `<button type="button" class="${classes}" data-day="${day}"
+      ${past || !editable ? 'disabled' : ''} title="${esc(said)}" aria-label="${esc(said)}">
+      <span class="calnum">${esc(num)}</span>
+      <span class="callabel">${esc(label)}</span>
+      ${shifts ? '<span class="calshift"></span>' : ''}
+    </button>`;
   };
 
-  root.querySelectorAll('[data-preset]').forEach((b) => {
+  const weeks = [];
+  for (let d = gridFrom; d <= gridTo; d = addDays(d, 7)) {
+    weeks.push(Array.from({ length: 7 }, (_, i) => addDays(d, i)));
+  }
+  const span = `${shortDate(gridFrom).replace(/^\S+ /, '')} – ${
+    shortDate(gridTo).replace(/^\S+ /, '')}`;
+
+  app.innerHTML = `
+    ${mine && !office ? planningTabs('availability') : ''}
+
+    <div class="card">
+      <h2><span class="grow">${selecting ? 'Pick the days' : 'Calendar'}</span>
+        ${editable ? `<button class="sm" id="selmode">${
+          selecting ? 'Cancel' : 'Change several days'}</button>` : ''}</h2>
+      <div class="pad stack">
+        <div class="periodnav">
+          <span class="pn-side pn-left">
+            ${gridFrom > thisWeek ? `<button class="ghost"
+              data-start="${addDays(gridFrom, -CAL_WEEKS * 7)}"
+              aria-label="Earlier weeks">${svgIcon('back')}</button>` : ''}
+          </span>
+          <span class="period-title">${esc(span)}
+            <span class="period-sub">${gridFrom === thisWeek ? 'From this week'
+              : `${CAL_WEEKS} weeks`}</span></span>
+          <span class="pn-side pn-right">
+            ${gridFrom !== thisWeek ? `<button class="ghost" data-start="${thisWeek}"
+              >This week</button>` : ''}
+            ${gridFrom < lastStart ? `<button class="ghost"
+              data-start="${addDays(gridFrom, CAL_WEEKS * 7)}" aria-label="Later weeks"
+              >${svgIcon('chevron')}</button>` : ''}
+          </span>
+        </div>
+        <div class="cal" role="grid">
+          ${DAY_NAMES.map((n) => `<span class="calhead">${n}</span>`).join('')}
+          ${weeks.flat().map(dayCell).join('')}
+        </div>
+        <div class="legend flat">
+          <span><i class="sw yes"></i>Can work</span>
+          <span><i class="sw no"></i>Off</span>
+          <span><i class="sw changed-sw"></i>Changed for that day</span>
+          <span><i class="sw shift-sw"></i>On the roster</span>
+        </div>
+        ${editable ? `<p class="small muted">${selecting
+          ? 'Tap each day to pick it, then choose what they all are.'
+          : 'Tap a day to change just that day. Away for a while? Use <strong>Change several days</strong>.'}</p>` : ''}
+      </div>
+    </div>
+
+    ${selecting ? `<div class="selbar">
+      <span class="grow" id="selcount">${selCount(sel.size)}</span>
+      <button class="primary" id="selset" ${sel.size ? '' : 'disabled'}>Set these days</button>
+    </div>` : ''}
+
+    <div class="card">
+      <h2>Coming up</h2>
+      ${upcoming.length ? `<div class="stack pad">
+        ${upcoming.map((g, k) => `<div class="list-item changerow">
+          <span class="grow">
+            <strong>${esc(g.days.length > 1
+              ? `${shortDate(g.days[0])} – ${shortDate(g.days[g.days.length - 1])}`
+              : shortDate(g.days[0]))}</strong>
+            <span class="pill ${g.entry ? 'done' : 'late'}">${g.entry
+              ? esc(availabilityText(g.entry)) : 'Can\'t work'}</span>
+            ${g.note ? `<span class="small muted">“${esc(g.note)}”</span>` : ''}
+            ${office && g.by ? `<span class="tiny muted">set by ${esc(g.by)}</span>` : ''}
+          </span>
+          ${editable ? `<button class="sm" data-undo="${k}">Undo</button>` : ''}
+        </div>`).join('')}
+      </div>` : `<p class="pad small muted">Nothing different coming up — every day follows
+        the usual week below.</p>`}
+    </div>
+
+    <div class="card">
+      <h2>Usual week</h2>
+      <div class="pad stack">
+        <p class="small muted">${mine ? 'Your' : 'Their'} normal week, every week.
+          ${editable ? 'Tap a day to change it.' : ''}</p>
+        <div class="usualdays">
+          ${usual.map((entry, i) => `<button type="button" class="usualday ${entry ? 'on' : ''}"
+            data-usual="${i}" ${editable ? '' : 'disabled'}>
+            <span class="myday-mark">${entry ? svgIcon('check') : svgIcon('close')}</span>
+            <span class="myday-name">${esc(DAY_FULL[i])}</span>
+            ${entry?.preferred && office ? `<span class="prefstar"
+              title="Would rather work this day">${svgIcon('star')}</span>` : ''}
+            <span class="usualday-state">${entry ? esc(timeRange(entry.from, entry.to) || 'Any time')
+              : 'Can\'t work'}</span>
+          </button>`).join('')}
+        </div>
+        ${office && editable ? `<label class="field"><span>Ideal hours a week (optional)</span>
+          <span class="row tight">
+            <input id="avhours" class="hoursbox" type="number" min="1" max="80" step="0.5"
+              inputmode="decimal"
+              value="${esc(data.usual.idealHours ?? '')}" placeholder="e.g. 25">
+            <button id="savehours">Save</button>
+          </span>
+          <span class="field-hint">Shown against what they're actually rostered, so you can
+            see at a glance who is short and who is over.</span></label>`
+          : office && data.usual.idealHours ? `<p class="small muted">Ideally
+            <strong>${esc(data.usual.idealHours)}h</strong> a week.</p>` : ''}
+      </div>
+    </div>`;
+
+  if (mine && !office) wirePlanningTabs(app);
+
+  app.querySelectorAll('[data-start]').forEach((b) => {
+    b.onclick = () => { state.availStart = b.dataset.start; reload(); };
+  });
+
+  $('#selmode')?.addEventListener('click', () => {
+    state.availSelect = selecting ? null : new Set();
+    reload();
+  });
+
+  app.querySelectorAll('.cal [data-day]').forEach((b) => {
     b.onclick = () => {
-      if (b.dataset.preset === 'clear') {
-        rows().forEach((row) => setRow(row, false));
+      const day = b.dataset.day;
+      if (selecting) {
+        if (sel.has(day)) sel.delete(day); else sel.add(day);
+        // Redrawn from what's already loaded: nothing has changed on the server.
+        b.classList.toggle('picked', sel.has(day));
+        $('#selcount').innerHTML = selCount(sel.size);
+        $('#selset').disabled = !sel.size;
         return;
       }
-      const first = rows()[0];
-      const on = first.querySelector('input[type="checkbox"]').checked;
-      const from = first.querySelector('.avfrom').value;
-      const to = first.querySelector('.avto').value;
-      const pref = first.querySelector('[data-pref]').getAttribute('aria-pressed') === 'true';
-      rows().slice(1).forEach((row) => {
-        setRow(row, on, from, to);
-        row.querySelector('[data-pref]').setAttribute('aria-pressed', String(on && pref));
+      const change = changes.get(day);
+      openDayChoice({
+        title: longDate(day),
+        sub: change ? `Changed for this day — usually ${availabilityText(usualOn(day)).toLowerCase()}`
+          : `Usual ${DAY_FULL[weekdayIndex(day)]}`,
+        current: actualOn(day),
+        usual: usualOn(day),
+        changed: Boolean(change),
+        note: change?.note ?? '',
+        save: async (entry, note) => {
+          // Picking exactly what the usual week says, with nothing to note,
+          // is the same as having no change at all - so it is stored as none.
+          if (sameEntry(entry, usualOn(day)) && !note) {
+            if (change) await resetDates(data.person.id, [day]);
+          } else {
+            await saveDates(data.person.id, [day], entry, note);
+          }
+          toast(`${shortDate(day)} saved`);
+          reload();
+        },
+        reset: async () => {
+          await resetDates(data.person.id, [day]);
+          toast(`${shortDate(day)} back to usual`);
+          reload();
+        },
       });
     };
   });
-}
 
-/** The preset buttons themselves, so both editors offer the same two. */
-const availabilityPresets = () => `<div class="row wrap tight">
-  <button type="button" data-preset="copy">Copy first day down</button>
-  <button type="button" data-preset="clear">Clear all</button>
-</div>`;
+  $('#selset')?.addEventListener('click', () => {
+    const days = [...sel].sort();
+    const anyChanged = days.some((d) => changes.has(d));
+    openDayChoice({
+      title: `${days.length} day${days.length === 1 ? '' : 's'}`,
+      sub: days.length > 1 ? `${shortDate(days[0])} – ${shortDate(days[days.length - 1])}`
+        : longDate(days[0]),
+      current: undefined,
+      changed: anyChanged,
+      note: '',
+      save: async (entry, note) => {
+        await saveDates(data.person.id, days, entry, note);
+        state.availSelect = null;
+        toast(`${days.length} day${days.length === 1 ? '' : 's'} saved`);
+        reload();
+      },
+      reset: async () => {
+        await resetDates(data.person.id, days);
+        state.availSelect = null;
+        toast('Back to the usual week');
+        reload();
+      },
+    });
+  });
 
-/**
- * The office editing somebody's availability, either as their usual week or
- * for the one week on screen.
- *
- * Both are offered every time rather than hidden behind a mode, because "she
- * is away that week" and "she has changed days" look identical while you are
- * typing them and are completely different afterwards.
- */
-function editAvailability(person, onDone, week) {
-  const weekOnly = Boolean(person.weekOnly);
-  const sheet = openSheet(`
-    <div class="sheet-head"><strong>${esc(person.name)}</strong>
-      <span class="tiny muted">availability · week of ${esc(auDate(week))}</span></div>
-    <div class="pad stack">
-      ${weekOnly ? `<div class="banner info inset">
-        <strong>This week is set separately.</strong> Their usual week is
-        untouched underneath it.</div>` : ''}
-      <p class="dialog-body">Which days <strong>can</strong> they work, and between what
-        times? Leave the times blank for a day with no set hours. Tap a star for a day
-        they'd <strong>rather</strong> work — that never blocks anything, it just puts
-        them first when you're picking someone.</p>
-      <div class="avlist">${availabilityRows(person.availability)}</div>
-      ${availabilityPresets()}
+  app.querySelectorAll('[data-undo]').forEach((b) => {
+    b.onclick = async () => {
+      const g = upcoming[Number(b.dataset.undo)];
+      b.disabled = true;
+      try {
+        await resetDates(data.person.id, g.days);
+        toast('Back to the usual week');
+        reload();
+      } catch (e) {
+        toast(e.message, true);
+        b.disabled = false;
+      }
+    };
+  });
 
-      <label class="field"><span>Ideal hours a week (optional)</span>
-        <input id="avhours" type="number" min="1" max="80" step="0.5" inputmode="decimal"
-          value="${esc(person.idealHours ?? '')}" placeholder="e.g. 25">
-        <span class="field-hint">Shown against what they're actually rostered, so you can
-          see at a glance who is short and who is over. Saved with their usual
-          week — one odd week never rewrites the target.</span></label>
+  app.querySelectorAll('[data-usual]').forEach((b) => {
+    b.onclick = () => {
+      const i = Number(b.dataset.usual);
+      const write = async (entry) => {
+        const days = usual.map((d, k) => (k === i ? entry : d));
+        await saveUsual(days);
+        toast(`Every ${DAY_FULL[i]} saved`);
+        reload();
+      };
+      openDayChoice({
+        title: `Every ${DAY_FULL[i]}`,
+        sub: `${mine ? 'Your' : 'Their'} usual week — dates changed on the calendar keep their own answer.`,
+        current: usual[i],
+        preferred: office ? Boolean(usual[i]?.preferred) : null,
+        save: (entry) => write(entry && { ...entry, preferred: Boolean(usual[i]?.preferred) }),
+        prefer: (on) => write({ ...usual[i], preferred: on }),
+      });
+    };
+  });
 
-      <p class="err" id="err"></p>
-      <button class="primary wide" id="saveweek">Save for this week only</button>
-      <button class="wide" id="save">Save as their usual week</button>
-      ${weekOnly
-        ? '<button class="wide" id="clearweek">Drop this week\'s change</button>' : ''}
-      <button class="wide" id="cancel">Cancel</button>
-    </div>`);
-
-  wireAvailabilityRows(sheet);
-  wireAvailabilityPresets(sheet);
-
-  const send = (build, done) => async (ev) => {
+  $('#savehours')?.addEventListener('click', async (ev) => {
     ev.currentTarget.disabled = true;
     try {
-      await api('/availability', { method: 'POST', body: { userId: person.id, ...build() } });
-      closeSheet();
-      toast(done);
-      onDone();
+      await saveUsual(usual, $('#avhours').value);
+      toast('Ideal hours saved');
+      reload();
     } catch (e) {
-      sheet.querySelector('#err').textContent = e.message;
+      toast(e.message, true);
       ev.currentTarget.disabled = false;
     }
-  };
-
-  sheet.querySelector('#cancel').onclick = closeSheet;
-  sheet.querySelector('#save').onclick = send(() => ({
-    days: readAvailabilityRows(sheet),
-    idealHours: sheet.querySelector('#avhours').value,
-  }), 'Usual week saved');
-  sheet.querySelector('#saveweek').onclick = send(() => ({
-    weekFrom: week,
-    days: readAvailabilityRows(sheet),
-  }), `Saved for the week of ${auDate(week)}`);
-  sheet.querySelector('#clearweek')?.addEventListener('click',
-    send(() => ({ weekFrom: week, reset: true }), 'Back to their usual week'));
+  });
 }
 
 /* ------------------------------------- view: everyone's availability */
@@ -2892,8 +3197,10 @@ async function renderAvailability() {
     return entry.from < f.to && entry.to > f.from;
   };
 
+  const entryOn = (person, index) => person.onDay[data.days[index]];
+
   const dayMatches = (person, index) => {
-    const entry = person.availability[index];
+    const entry = entryOn(person, index);
     if (f.status === 'available' && !entry) return false;
     if (f.status === 'preferred' && !entry?.preferred) return false;
     if (f.status === 'unavailable' && entry) return false;
@@ -2952,30 +3259,34 @@ async function renderAvailability() {
           <tbody>
             ${shown.map((p) => `<tr>
               <th class="rowhead">
-                ${canChange()
-                  ? `<button class="linkish" data-edit="${p.id}">${esc(p.name)}</button>`
-                  : esc(p.name)}
-                <small>${esc(roleLabel(p.role))}${p.weekOnly
-                  ? ' · <span class="weekonly">set for this week</span>' : ''}${hoursLabel(p)
+                <a class="linkish" href="#/availability/${p.id}">${esc(p.name)}</a>
+                <small>${esc(roleLabel(p.role))}${hoursLabel(p)
                   ? ` · <span class="num ${overHours(p) ? 'over' : ''}">${esc(hoursLabel(p))}</span>`
                   : ''}</small>
               </th>
-              ${p.availability.map((entry, i) => {
+              ${data.days.map((day, i) => {
+                const entry = entryOn(p, i);
+                const changed = p.changed[day];
                 const rostered = p.rostered[i];
                 // A shift booked on a day off is exactly what this screen
                 // exists to surface, so it is called out here too.
                 const clash = rostered && !entry;
+                const why = typeof changed === 'string' ? changed : '';
                 return `<td class="${dim(p, i) ? 'dimmed' : ''}">
-                  <div class="avcell ${entry ? 'yes' : 'no'}${
-                    entry?.preferred ? ' preferred' : ''}">
+                  <button type="button" class="avcell ${entry ? 'yes' : 'no'}${
+                    entry?.preferred ? ' preferred' : ''}${changed ? ' changed' : ''}"
+                    data-cell="${p.id}|${day}" ${canChange() && day >= data.today ? '' : 'disabled'}
+                    title="${esc([changed ? 'Changed for this day' : 'Usual week', why]
+                      .filter(Boolean).join(' — '))}">
                     ${entry?.preferred
                       ? `<span class="prefstar" title="Would rather work this day"
                           >${svgIcon('star')}</span>` : ''}
                     ${esc(availabilityText(entry))}
+                    ${why ? `<span class="tiny avwhy">${esc(why)}</span>` : ''}
                     ${rostered ? `<span class="tiny ${clash ? 'clash' : 'muted'}">
                       ${rostered} shift${rostered === 1 ? '' : 's'}${
                         clash ? ' — clash' : ''}</span>` : ''}
-                  </div></td>`;
+                  </button></td>`;
               }).join('')}
             </tr>`).join('') || `<tr><td colspan="8">
               <div class="empty">Nobody matches those filters.</div></td></tr>`}
@@ -2986,8 +3297,9 @@ async function renderAvailability() {
         <span><i class="sw yes"></i>Available</span>
         <span><i class="sw no"></i>Unavailable</span>
         <span><span class="prefstar">${svgIcon('star')}</span>Would rather work it</span>
-        <span><i class="sw weekonly-sw"></i>Set for this week only</span>
-        ${canChange() ? '<span>Tap a name to set days and hours</span>' : ''}
+        <span><i class="sw changed-sw"></i>Changed for that day</span>
+        ${canChange() ? '<span>Tap a square to change that day · tap a name for their usual week and calendar</span>'
+          : '<span>Tap a name for their calendar</span>'}
       </div>
     </div>`;
 
@@ -3015,205 +3327,37 @@ async function renderAvailability() {
   $('#fclear').onclick = () =>
     setFilter({ q: '', day: 'all', status: 'all', from: '', to: '' });
 
-  app.querySelectorAll('[data-edit]').forEach((b) => {
-    b.onclick = () => editAvailability(
-      data.staff.find((p) => p.id === Number(b.dataset.edit)),
-      renderAvailability,
-      data.week ?? from,
-    );
+  app.querySelectorAll('[data-cell]').forEach((b) => {
+    b.onclick = () => {
+      const [id, day] = b.dataset.cell.split('|');
+      const person = data.staff.find((p) => p.id === Number(id));
+      const usual = person.availability[weekdayIndex(day)];
+      const changed = person.changed[day];
+      openDayChoice({
+        title: `${person.name} — ${longDate(day)}`,
+        sub: changed ? `Changed for this day — usually ${availabilityText(usual).toLowerCase()}`
+          : `Their usual ${DAY_FULL[weekdayIndex(day)]}`,
+        current: person.onDay[day],
+        usual,
+        changed: Boolean(changed),
+        note: typeof changed === 'string' ? changed : '',
+        save: async (entry, note) => {
+          if (sameEntry(entry, usual) && !note) {
+            if (changed) await resetDates(person.id, [day]);
+          } else {
+            await saveDates(person.id, [day], entry, note);
+          }
+          toast(`${person.name}: ${shortDate(day)} saved`);
+          renderAvailability();
+        },
+        reset: async () => {
+          await resetDates(person.id, [day]);
+          toast(`${person.name}: ${shortDate(day)} back to usual`);
+          renderAvailability();
+        },
+      });
+    };
   });
-}
-
-/* ------------------------------------------ view: a cleaner's own availability */
-
-/**
- * The person with the exam on Thursday is the person who knows about the
- * exam, so this is theirs to change - and it has to be easy enough that they
- * actually do. One question: which days can you work? Tap a day to switch it.
- * Hours are optional and picked from a few common answers. One save button,
- * and a plain choice of "every week" or "just this week".
- *
- * Preferred days and ideal hours stay the office's tools: they are carried
- * through untouched on save, never asked about here.
- */
-
-/** Common answers to "what hours?", so nobody has to work a time picker. */
-const HOUR_CHOICES = [
-  ['', '', 'Any time'],
-  ['06:00', '12:00', 'Mornings'],
-  ['12:00', '18:00', 'Afternoons'],
-  ['08:00', '16:00', 'Day shift'],
-];
-
-async function renderMyAvailability() {
-  const live = screen('#/availability');
-  const from = weekFrom();
-  const data = await api(`/availability/mine?from=${from}`);
-  if (!live()) return;
-  chrome({ title: 'My availability', section: planningSection() });
-
-  // Work on copies; nothing is sent until Save.
-  const copy = (days) => days.map((d) => (d ? { ...d } : null));
-  const draft = {
-    // Stays where they left it when they step to another week or save.
-    mode: state.myAvailMode ?? (data.week ? 'week' : 'usual'),
-    usual: copy(data.usual.days),
-    week: copy(data.week ?? data.usual.days),
-    dirty: false,
-  };
-  const weekLabel = `${dayOfMonth(data.days[0])} – ${dayOfMonth(data.days[6])}`;
-
-  const draw = () => {
-    const days = draft[draft.mode];
-    app.innerHTML = `
-      ${planningTabs('availability')}
-
-      <div class="card">
-        <h2>When can you work?</h2>
-        <div class="pad stack">
-          <div class="seg" id="mode">
-            <button type="button" class="seg-btn" data-mode="usual"
-              aria-pressed="${draft.mode === 'usual'}">Every week</button>
-            <button type="button" class="seg-btn" data-mode="week"
-              aria-pressed="${draft.mode === 'week'}">Just one week</button>
-          </div>
-          ${draft.mode === 'week' ? `<div>${weekNav(from)}</div>
-            <p class="small muted">Only for <strong>${esc(weekLabel)}</strong> —
-              say if you're away or busy. Every other week stays the same.</p>`
-            : `<p class="small muted">Your normal week. Tap a day to change it.</p>
-              ${data.week ? `<p class="small warntext">${esc(weekLabel)} has its own days set —
-                change it under <strong>Just one week</strong>.</p>` : ''}`}
-
-          <div class="mydays">
-            ${days.map((entry, i) => {
-              const on = Boolean(entry);
-              const hours = on ? (timeRange(entry.from, entry.to) || 'Any time') : '';
-              const rostered = draft.mode === 'week' && data.rostered[i];
-              return `<div class="myday ${on ? 'on' : ''}">
-                <button type="button" class="myday-toggle" data-toggle="${i}"
-                  aria-pressed="${on}">
-                  <span class="myday-mark">${on ? svgIcon('check') : svgIcon('close')}</span>
-                  <span class="myday-name">${esc(DAY_FULL[i])}
-                    ${draft.mode === 'week' ? `<small>${esc(dayOfMonth(data.days[i]))}${
-                      rostered ? ' · on the roster' : ''}</small>` : ''}</span>
-                  ${on ? '' : '<span class="myday-state">Can\'t work</span>'}
-                </button>
-                ${on ? `<button type="button" class="myday-hours" data-hours="${i}"
-                  aria-label="${esc(DAY_FULL[i])} hours">${esc(hours)}</button>` : ''}
-              </div>`;
-            }).join('')}
-          </div>
-
-          <p class="err" id="err"></p>
-          <button class="primary wide" id="save" ${draft.dirty ? '' : 'disabled'}>
-            ${draft.dirty ? 'Save' : 'Saved'}</button>
-          ${draft.mode === 'week' && data.week ? `<button class="wide ghost" id="reset">
-            Use my normal week for ${esc(weekLabel)}</button>` : ''}
-        </div>
-      </div>
-
-      ${draft.mode === 'week' && data.rosterPublished && data.rostered.some(Boolean)
-        ? `<p class="tiny muted center">Already on the roster that week? Changing this
-           doesn't move a shift — tell the office.</p>` : ''}`;
-
-    wirePlanningTabs(app);
-    if (draft.mode === 'week') wireWeekNav(app, renderMyAvailability);
-
-    app.querySelectorAll('[data-mode]').forEach((b) => {
-      b.onclick = () => { draft.mode = state.myAvailMode = b.dataset.mode; draw(); };
-    });
-
-    app.querySelectorAll('[data-toggle]').forEach((b) => {
-      b.onclick = () => {
-        const i = Number(b.dataset.toggle);
-        const list = draft[draft.mode];
-        list[i] = list[i] ? null : { from: '', to: '', preferred: false };
-        draft.dirty = true;
-        draw();
-      };
-    });
-
-    app.querySelectorAll('[data-hours]').forEach((b) => {
-      b.onclick = () => pickHours(Number(b.dataset.hours));
-    });
-
-    $('#save').onclick = async (ev) => {
-      ev.currentTarget.disabled = true;
-      try {
-        await api('/availability', {
-          method: 'POST',
-          body: draft.mode === 'week'
-            ? { weekFrom: from, days: draft.week }
-            : { days: draft.usual, idealHours: data.usual.idealHours },
-        });
-        toast(draft.mode === 'week' ? `Saved for ${weekLabel}` : 'Saved');
-        renderMyAvailability();
-      } catch (e) {
-        $('#err').textContent = e.message;
-        ev.currentTarget.disabled = false;
-      }
-    };
-
-    $('#reset')?.addEventListener('click', async () => {
-      try {
-        await api('/availability', { method: 'POST', body: { weekFrom: from, reset: true } });
-        toast('Back to your normal week');
-        renderMyAvailability();
-      } catch (e) {
-        toast(e.message, true);
-      }
-    });
-  };
-
-  // A handful of big answers, and "set times" for anyone who needs exact ones.
-  function pickHours(i) {
-    const entry = draft[draft.mode][i];
-    const set = (fromT, toT) => {
-      draft[draft.mode][i] = { ...entry, from: fromT, to: toT };
-      draft.dirty = true;
-      closeSheet();
-      draw();
-    };
-    const sheet = openSheet(`
-      <div class="sheet-head"><strong>${esc(DAY_FULL[i])} — what hours?</strong></div>
-      <div class="pad stack">
-        ${HOUR_CHOICES.map(([f, t, label], k) => `<button class="bigchoice" data-choice="${k}"
-          ${entry.from === f && entry.to === t ? 'aria-pressed="true"' : ''}>
-          <strong>${esc(label)}</strong>
-          ${f ? `<span class="small muted">${esc(timeRange(f, t))}</span>` : ''}
-        </button>`).join('')}
-        <details class="custom-hours" ${entry.from && !HOUR_CHOICES.some(([f, t]) =>
-          f === entry.from && t === entry.to) ? 'open' : ''}>
-          <summary>Set exact times</summary>
-          <div class="row tight gap-top-sm">
-            <input type="time" id="hfrom" value="${esc(entry.from || '08:00')}" aria-label="From">
-            <span class="tiny muted">to</span>
-            <input type="time" id="hto" value="${esc(entry.to || '16:00')}" aria-label="To">
-          </div>
-          <p class="err" id="herr"></p>
-          <button class="primary wide gap-top-sm" id="hset">Use these times</button>
-        </details>
-        <button class="wide" id="hcancel">Cancel</button>
-      </div>`);
-    sheet.querySelectorAll('[data-choice]').forEach((b) => {
-      b.onclick = () => {
-        const [f, t] = HOUR_CHOICES[Number(b.dataset.choice)];
-        set(f, t);
-      };
-    });
-    sheet.querySelector('#hset').onclick = () => {
-      const f = sheet.querySelector('#hfrom').value;
-      const t = sheet.querySelector('#hto').value;
-      if (!f || !t || t <= f) {
-        sheet.querySelector('#herr').textContent = 'The finish needs to be after the start.';
-        return;
-      }
-      set(f, t);
-    };
-    sheet.querySelector('#hcancel').onclick = closeSheet;
-  }
-
-  draw();
 }
 
 /* ------------------------------------------------------- view: the roster */
@@ -4547,10 +4691,7 @@ async function renderAdmin() {
   });
 
   app.querySelectorAll('[data-days]').forEach((b) => {
-    b.onclick = () => {
-      const person = users.find((u) => u.id === Number(rowOf(b).id));
-      editAvailability(person, renderAdmin);
-    };
+    b.onclick = () => { location.hash = `#/availability/${rowOf(b).id}`; };
   });
 
   app.querySelectorAll('[data-pin]').forEach((b) => {
@@ -4771,8 +4912,9 @@ async function route() {
     if (head === 'schedule') return await renderSchedule();
     if (head === 'roster') return await renderRoster();
     if (head === 'availability') {
+      if (arg) return await renderPersonAvailability(Number(arg));
       return state.user.role === 'cleaner'
-        ? await renderMyAvailability()
+        ? await renderPersonAvailability(null)
         : await renderAvailability();
     }
     if (head === 'issues') return await renderIssues();
