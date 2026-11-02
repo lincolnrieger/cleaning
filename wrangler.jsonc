@@ -4,7 +4,7 @@
 {
   "name": "cleaning-tracker",
   "main": "src/index.js",
-  "compatibility_date": "2026-11-02",
+  "compatibility_date": "2026-08-03",
 
   // The app's pages, scripts, styles and icons. Served directly from the edge;
   // only /api/* runs the Worker. Unknown paths get index.html, the same as the
@@ -25,13 +25,9 @@
     }
   ],
 
-  // Photo storage. Remove this block if photos aren't set up.
-  "r2_buckets": [
-    {
-      "binding": "PHOTOS",
-      "bucket_name": "basecamp-cleaning-photos"
-    }
-  ],
+  // Photo storage isn't set up yet. To turn photos on, create an R2 bucket
+  // called basecamp-cleaning-photos and add this back (see SETUP.md step 2):
+  //   "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "basecamp-cleaning-photos" }],
 
   // Keep variables set in the dashboard (TIMEZONE, phone numbers, etc.)
   // instead of wiping them on each deploy.

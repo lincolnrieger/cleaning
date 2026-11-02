@@ -39,15 +39,14 @@ This is what turns on **both** kinds of photo:
    enable public access: the app serves photos through its own API so they
    need a sign-in, and a public bucket would undo that.
 
-That's it — `wrangler.jsonc` already connects a bucket of that name as
-`PHOTOS`.
+2. On GitHub, edit **`wrangler.jsonc`** and un-comment the `"r2_buckets"`
+   line under *Photo storage* (remove the `//` in front of it), then commit.
 
 R2 asks you to "add a payment method" to activate the service even on the free
-plan. There is no charge on the free tier (10 GB of storage). If you'd rather
-skip photos, delete the whole `"r2_buckets"` block from `wrangler.jsonc`
-instead — otherwise the deploy fails looking for a bucket that isn't there.
-Without it the app hides every camera button automatically; nothing else
-breaks.
+plan. There is no charge on the free tier (10 GB of storage). Skip it and the app
+hides every camera button automatically — nothing else breaks. Don't
+un-comment the line before the bucket exists, or the deploy fails looking for
+it.
 
 **Nothing else to configure.** No table to create, no size limits to set, no
 folder structure to make. The app resizes photos to 1280px in the browser
@@ -234,10 +233,10 @@ You can give it a proper address like `cleaning.yourcamp.org` — see step 4.
 | What you see | What it means | Fix |
 |---|---|---|
 | The deploy fails mentioning the database | `database_id` in `wrangler.jsonc` is still the placeholder or wrong | Step 1, point 5 |
-| The deploy fails mentioning an R2 bucket | The bucket doesn't exist, or R2 isn't activated | Create it (step 2) or delete the `"r2_buckets"` block |
+| The deploy fails mentioning an R2 bucket | The bucket doesn't exist, or R2 isn't activated | Create it (step 2) or comment the `"r2_buckets"` line out again |
 | The deploy fails mentioning the name | Project name and `"name"` in `wrangler.jsonc` differ | Make them match (step 3) |
 | "No database is connected" | The `DB` block is missing from `wrangler.jsonc` | Step 1, then redeploy (step 5) |
-| Photo buttons never appear | No `"r2_buckets"` block in `wrangler.jsonc` | Step 2, then redeploy (step 5) |
+| Photo buttons never appear | The `"r2_buckets"` line in `wrangler.jsonc` is still commented out | Step 2, then redeploy (step 5) |
 | A building's Check list is empty | It hasn't been set up yet | Step 7 — **Copy from the Full Clean** is the quick way |
 | A cleaner got the wrong checklist | The job wasn't scheduled, so they chose | Schedule it with the right type; then it's automatic |
 | Everyone's PIN suddenly fails | An `AUTH_SECRET` variable was added or changed in Settings | Remove it, redeploy, and PINs work again — or reset each PIN from the People screen |
