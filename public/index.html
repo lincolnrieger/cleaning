@@ -2,6 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- The old Cloudflare Pages address is paused: send anyone there to the live
+     site. See functions/_middleware.js, which also refuses the API there. -->
+<script>
+if (location.hostname.endsWith('.pages.dev')) {
+  location.replace('https://cleaning.woodhousestaff.app' + location.pathname + location.search + location.hash);
+}
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- The strip behind the clock and battery, matched to the app bar sitting
      under it rather than to a blue that no longer appears anywhere. -->
