@@ -1,0 +1,42 @@
+// Cloudflare Worker configuration for the cleaning tracker.
+// Cloudflare reads this file on every deploy (Workers Builds runs
+// `npx wrangler deploy` after each push to the production branch).
+{
+  "name": "cleaning-tracker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-02",
+
+  // The app's pages, scripts, styles and icons. Served directly from the edge;
+  // only /api/* runs the Worker. Unknown paths get index.html, the same as the
+  // old Pages site did.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // The existing database - same data, same accounts, same PINs.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "basecamp-cleaning",
+      "database_id": "REPLACE_WITH_DATABASE_ID"
+    }
+  ],
+
+  // Photo storage. Remove this block if photos aren't set up.
+  "r2_buckets": [
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "basecamp-cleaning-photos"
+    }
+  ],
+
+  // Keep variables set in the dashboard (TIMEZONE, phone numbers, etc.)
+  // instead of wiping them on each deploy.
+  "keep_vars": true,
+
+  // Keeps searchable logs in the dashboard (Workers -> cleaning-tracker -> Logs).
+  "observability": { "enabled": true }
+}

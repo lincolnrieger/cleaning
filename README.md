@@ -509,8 +509,8 @@ read-only — they can't tick anything. That is deliberate: you asked to see
 the individual checklist.
 
 If you'd rather the office saw nothing but the rollup, add an environment
-variable `OFFICE_ROLLUP_ONLY` set to `1` (Pages project → Settings →
-Variables and Secrets) and redeploy. Building tiles stop being clickable for
+variable `OFFICE_ROLLUP_ONLY` set to `1` (Workers & Pages →
+**cleaning-tracker** → Settings → Variables and Secrets) and redeploy. Building tiles stop being clickable for
 office accounts, and the API refuses the request too — it's a real
 restriction, not just a hidden button.
 
@@ -716,14 +716,23 @@ then not pressing the button.
 
 ```
 data/checklist.json         the checklist content — edit this
+wrangler.jsonc              Worker settings: name, database, photo bucket
+src/index.js                Worker entry point — sends /api/* to the API
 functions/api/_setup.js     creates the tables and syncs the checklist
 functions/api/[[path]].js   the rest of the API
 public/                     index.html, app.js, styles.css
 ```
 
-There's deliberately no `package.json` or `wrangler.toml`: the Cloudflare
-dashboard owns the configuration, and adding those files back would let the
-repo silently override what you set there.
+The app runs as a **Cloudflare Worker with static assets**. Files in `public/`
+are served straight from Cloudflare; only `/api/*` runs code. The API keeps
+its original Pages-style `onRequest(context)` shape (it started life as a
+Pages project) and `src/index.js` adapts the Worker's `fetch` to it.
+
+`wrangler.jsonc` owns the **bindings** (the `DB` database and the `PHOTOS`
+bucket): a deploy applies what that file says, so change them there, not in
+the dashboard. Plain **variables** (`TIMEZONE`, `OFFICE_ROLLUP_ONLY`, the phone
+numbers) stay in the dashboard — `keep_vars` stops a deploy wiping them.
+There's still no `package.json`; Cloudflare's build installs Wrangler itself.
 
 ### How the database sets itself up
 
