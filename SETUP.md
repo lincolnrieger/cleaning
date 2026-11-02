@@ -14,72 +14,19 @@ No credit card.
 
 ---
 
-## Step 1 — Create the site
-
-> ### ⚠️ Use the Pages flow, not the Workers flow
->
-> Cloudflare's dashboard pushes you towards **Workers** by default. The
-> Workers setup screen has no *Build output directory* field, so if you're
-> looking for it and can't find it, you're on the wrong screen.
->
-> On the "Create a Worker" page there's a line near the repository list:
-> **"Looking to deploy Pages? Get started"** — click that. Or go straight to
-> `dash.cloudflare.com/<your-account-id>/workers-and-pages/create/pages`.
->
-> This matters: the app's API lives in a `functions/` folder, which is a Pages
-> convention. The Workers builder doesn't understand it, so the site would
-> load but every checklist action would fail with a 404.
+## Step 1 — Create the database
 
 1. Go to <https://dash.cloudflare.com> and sign in.
-2. In the left sidebar choose **Compute** → **Workers & Pages**.
-3. Click **Create**. On the page that opens, find
-   **"Looking to deploy Pages?"** and click its **Get started** link.
-4. Choose **Connect to Git**, authorise Cloudflare to see your GitHub account,
-   then pick the **`cleaning`** repository and click **Begin setup**.
-5. Set the build settings exactly like this:
+2. In the left sidebar choose **Storage & databases** → **D1 SQL Database**.
+3. Click **Create Database**, name it `basecamp-cleaning` and click **Create**.
+4. Copy its **Database ID** (it looks like `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
+5. On GitHub, open **`wrangler.jsonc`**, click the pencil icon, replace
+   `REPLACE_WITH_DATABASE_ID` with that ID, and **Commit changes**.
 
-   | Field | Value |
-   |---|---|
-   | Project name | `cleaning` (this becomes your web address) |
-   | Production branch | `claude/cleaning-checklist-tracker-62r7u3` |
-   | Framework preset | **None** |
-   | Build command | **leave completely empty** |
-   | Build output directory | `public` |
+You do **not** need to create any tables or run any SQL — the app does that
+itself the first time it runs.
 
-   If you can't see the last two fields, expand **Build settings**. If they
-   aren't there at all, you're on the Workers screen — see the warning above.
-
-6. Click **Save and Deploy**.
-
-It finishes in under a minute and shows you a URL like
-`https://cleaning-xyz.pages.dev`. Opening it now will show an error about a
-missing database — that's expected, you make it next.
-
-> The empty build command is deliberate. Nothing needs compiling, which is a
-> large part of why the site is fast and why deploys take seconds.
-
-## Step 2 — Create the database
-
-1. In the left sidebar choose **Storage & databases** → **D1 SQL Database**.
-2. Click **Create Database**.
-3. Name it `basecamp-cleaning` and click **Create**.
-
-That's all. You do **not** need to create any tables or run any SQL — the app
-does that itself the first time it runs.
-
-## Step 3 — Connect the database to the site
-
-1. Go back to **Workers & Pages** and click your **cleaning** project.
-2. Open the **Settings** tab, then find **Bindings**.
-3. Click **Add** → **D1 database** and fill in:
-   - Variable name: **`DB`** (exactly this, capital letters)
-   - D1 database: **basecamp-cleaning**
-4. Save.
-
-If you're offered a choice between **Production** and **Preview**, add it to
-**Production**. Adding it to both is fine and means test deploys work too.
-
-## Step 4 — Photos (needed for photos on checklist items)
+## Step 2 — Photos (needed for photos on checklist items)
 
 This is what turns on **both** kinds of photo:
 
@@ -87,22 +34,20 @@ This is what turns on **both** kinds of photo:
 - **photos against individual checklist items** — the "📷 Photo required"
   feature, e.g. *Check that the fire extinguisher is present*.
 
-Skip it and the app hides every camera button automatically — nothing breaks,
-you just can't ask for photos.
-
 1. Sidebar → **R2 Object Storage** → **Create bucket**, name it
    `basecamp-cleaning-photos`. Leave it **private** (the default). Do **not**
    enable public access: the app serves photos through its own API so they
    need a sign-in, and a public bucket would undo that.
-2. Back in your Pages project → **Settings** → **Bindings** → **Add** →
-   **R2 bucket**:
-   - Variable name: **`PHOTOS`** (exactly this, capital letters)
-   - Bucket: **basecamp-cleaning-photos**
-3. Redeploy (step 5) — bindings only apply to deployments made after them.
+
+That's it — `wrangler.jsonc` already connects a bucket of that name as
+`PHOTOS`.
 
 R2 asks you to "add a payment method" to activate the service even on the free
-plan. There is no charge on the free tier (10 GB of storage), but if you'd
-rather not, skip this step — everything else works without it.
+plan. There is no charge on the free tier (10 GB of storage). If you'd rather
+skip photos, delete the whole `"r2_buckets"` block from `wrangler.jsonc`
+instead — otherwise the deploy fails looking for a bucket that isn't there.
+Without it the app hides every camera button automatically; nothing else
+breaks.
 
 **Nothing else to configure.** No table to create, no size limits to set, no
 folder structure to make. The app resizes photos to 1280px in the browser
@@ -133,16 +78,47 @@ removed, when a scheduled job's progress is wiped, when the checklist entry or
 the building is deleted, and when you clear the database from **People →
 Danger zone**. There is no orphan cleanup job because nothing is left orphaned.
 
-## Step 5 — Redeploy so the settings take effect
+## Step 3 — Create the site
 
-Bindings only apply to deployments made *after* you added them.
+1. Sidebar → **Compute** → **Workers & Pages** → **Create**.
+2. Choose **Import a repository** (Workers), authorise Cloudflare to see your
+   GitHub account if asked, pick the **`cleaning`** repository and continue.
+3. Settings:
 
-In your Pages project → **Deployments** tab → find the latest deployment →
-click the **⋯** menu → **Retry deployment**.
+   | Field | Value |
+   |---|---|
+   | Project name | `cleaning-tracker` — **must match** `"name"` in `wrangler.jsonc` |
+   | Build command | **leave empty** |
+   | Deploy command | `npx wrangler deploy` (the default) |
+
+4. Under **Advanced settings** (or afterwards in **Settings → Build**), set
+   the production **branch** to `claude/cleaning-checklist-tracker-62r7u3`.
+5. Click **Deploy**.
+
+It finishes in about a minute and gives you a URL like
+`https://cleaning-tracker.<your-name>.workers.dev`.
+
+> Everything the site is connected to — the database and the photo bucket —
+> comes from `wrangler.jsonc`, so there is no Bindings screen to fill in. Plain
+> settings like `TIMEZONE` still go under **Settings → Variables and Secrets**,
+> and a deploy leaves them alone.
+
+## Step 4 — Your own address (optional)
+
+Open **cleaning-tracker** → **Settings** → **Domains & Routes** → **Add** →
+**Custom domain**, and enter something like `cleaning.yourcamp.org`. The
+domain has to be on the same Cloudflare account. Cloudflare creates the DNS
+record and the certificate itself; the certificate can take a few minutes.
+
+## Step 5 — Redeploy after changing settings
+
+Variables only apply to deployments made *after* you add them. Either push
+any commit, or open **cleaning-tracker** → **Deployments** and deploy the
+latest version again.
 
 ## Step 6 — Create your admin account
 
-Open your `.pages.dev` URL. Because there are no accounts yet, the app shows a
+Open your site's URL. Because there are no accounts yet, the app shows a
 one-time **first-time setup** screen. Enter your name and choose a PIN.
 
 That screen disappears permanently the moment the first account exists — nobody
@@ -251,22 +227,53 @@ Everyone uses the same URL. Tell them to open it on their phone and use
 Add to home screen). It then opens like an app, full screen, with no browser
 bar.
 
-You can give it a proper address like `cleaning.yourcamp.org` under Pages
-project → **Custom domains**, if you own a domain.
+You can give it a proper address like `cleaning.yourcamp.org` — see step 4.
 
 ## If something goes wrong
 
 | What you see | What it means | Fix |
 |---|---|---|
-| "No database is connected" | The `DB` binding is missing or was added after the last deploy | Check step 3, then redeploy (step 5) |
-| Site loads but the checklist is empty | Deploy ran before the database was connected | Retry the deployment (step 5) |
-| Photo buttons never appear | No R2 bucket bound, or bound after the last deploy | That's step 4 — then redeploy (step 5) |
-| "Photo uploads are not set up on this site" | Same — the `PHOTOS` binding is missing | Step 4, then step 5 |
+| The deploy fails mentioning the database | `database_id` in `wrangler.jsonc` is still the placeholder or wrong | Step 1, point 5 |
+| The deploy fails mentioning an R2 bucket | The bucket doesn't exist, or R2 isn't activated | Create it (step 2) or delete the `"r2_buckets"` block |
+| The deploy fails mentioning the name | Project name and `"name"` in `wrangler.jsonc` differ | Make them match (step 3) |
+| "No database is connected" | The `DB` block is missing from `wrangler.jsonc` | Step 1, then redeploy (step 5) |
+| Photo buttons never appear | No `"r2_buckets"` block in `wrangler.jsonc` | Step 2, then redeploy (step 5) |
 | A building's Check list is empty | It hasn't been set up yet | Step 7 — **Copy from the Full Clean** is the quick way |
 | A cleaner got the wrong checklist | The job wasn't scheduled, so they chose | Schedule it with the right type; then it's automatic |
 | Everyone's PIN suddenly fails | An `AUTH_SECRET` variable was added or changed in Settings | Remove it, redeploy, and PINs work again — or reset each PIN from the People screen |
 | "Too many wrong PINs" | Someone mistyped 8+ times | Wait up to 5 minutes; it clears itself, and clears instantly on a correct PIN |
 
-There's nothing you can break from the dashboard that a **Retry deployment**
+There's nothing you can break from the dashboard that a **redeploy**
 won't fix. The one thing to leave alone is the `AUTH_SECRET` variable — the app
 manages that itself, and overwriting it invalidates every PIN.
+
+---
+
+## Moving an existing site from Pages to Workers
+
+The app used to run as a Cloudflare **Pages** project. If yours still does,
+this moves it across with **no data lost** — the Worker uses the same
+database, so every account, PIN, checklist and photo carries over.
+
+1. **Point the config at your existing database and bucket.** In
+   `wrangler.jsonc`, set `database_id` to the ID of the database the Pages
+   project uses (Pages project → Settings → Bindings shows its name; D1 shows
+   the ID). Check `bucket_name` matches your photo bucket, or delete the
+   `"r2_buckets"` block if you never set photos up.
+2. **Copy any variables.** Pages project → Settings → Variables and Secrets.
+   Add the same ones to the Worker after step 3. If there's an `AUTH_SECRET`
+   there, copying it is essential — without it every PIN stops working. (If
+   there isn't one, there's nothing to do: the app keeps its own key in the
+   database.)
+3. **Create the Worker** — step 3 above. Open its `workers.dev` URL and sign
+   in to check it shows your real data.
+4. **Move the address.** Pages project → **Custom domains** → remove your
+   domain. Then delete its leftover CNAME record under **DNS → Records** if
+   one remains. Then add the domain to the Worker (step 4). The address is
+   down for a minute or two in between.
+5. **Retire the Pages project** once you're happy: Pages project → Settings →
+   **Delete project**. Until then, keep it around as a fallback; both read and
+   write the same database, so it's safe either way.
+
+Installed home-screen apps keep working: they open the same address, and the
+service worker picks up the new site on its next load.
