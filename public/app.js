@@ -49,6 +49,16 @@ function time(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+/** "45 min", "1 h 05 min" - how long somebody spent on a building. */
+function duration(minutes) {
+  const m = Math.max(0, Math.round(minutes || 0));
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+}
+
+/** Minutes from an ISO time until now. */
+const minutesSince = (iso) => Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+
 /**
  * The time something was done, with its weekday when that wasn't `day` - a
  * clean finished the day after it was missed reads "Tue 9:14 am" when looking
@@ -356,6 +366,7 @@ const ICONS = {
   copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 5.5h-9a2 2 0 0 0-2 2v9"/>',
   trash: '<path d="M4.5 7h15"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12.5h9L17.5 7"/>',
   star: '<path d="m12 4.4 2.36 4.79 5.28.77-3.82 3.72.9 5.26L12 16.46l-4.72 2.48.9-5.26-3.82-3.72 5.28-.77z"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   // A standing job: this one comes back the same day every week.
   repeat: '<path d="M4.5 11a7.5 7.5 0 0 1 12.9-5.2L20 8.5"/><path d="M20 4.5v4h-4"/>'
     + '<path d="M19.5 13a7.5 7.5 0 0 1-12.9 5.2L4 15.5"/><path d="M4 19.5v-4h4"/>',
@@ -1067,12 +1078,14 @@ async function renderOverview() {
   const live = screen();
   const day = viewDay();
   const isToday = day === state.config.today;
-  const [{ buildings }, carry, roster] = await Promise.all([
+  const [{ buildings, timeTracking }, carry, roster, clock] = await Promise.all([
     api(`/overview?day=${day}`),
     // Only ever about today. A failure here costs the card, never the overview.
     isToday ? api('/carryover').catch(() => null) : null,
     // Who is on and when. Same again: no roster costs the card, nothing else.
     api(`/roster?from=${day}&days=1`).catch(() => null),
+    // Time on buildings, only while an admin has it switched on.
+    state.config.timeTracking ? api(`/sessions?day=${day}`).catch(() => null) : null,
   ]);
   if (!live()) return;
   chrome({ title: 'Overview', section: '', wide: true });
@@ -1136,6 +1149,8 @@ async function renderOverview() {
       won't see this roster until it's approved.</p>` : '',
   ) : ''}
 
+    ${timeTracking && clock ? timeCards(clock, isToday) : ''}
+
     <div class="card">
       <h2><span class="grow">Run sheet</span>
         <span class="num">${runSheet.length ? `${outstanding} of ${runSheet.length} left`
@@ -1162,11 +1177,83 @@ async function renderOverview() {
     <button class="wide ghost" id="csv">${svgIcon('download')} Download this day as CSV</button>`;
 
   $('#csv').onclick = () => download(`/report?from=${day}&to=${day}`, `cleaning-${auDate(day)}.csv`);
+  const timeCsv = $('#timecsv');
+  if (timeCsv) {
+    timeCsv.onclick = () => download(`/sessions/export?from=${day}&to=${day}`, `time-${auDate(day)}.csv`);
+  }
+  app.querySelectorAll('[data-stopsession]').forEach((btn) => {
+    btn.onclick = async (ev) => {
+      ev.stopPropagation();
+      const go = await ask({
+        title: `Stop ${btn.dataset.who}'s time?`,
+        body: `This ends their time at <strong>${esc(btn.dataset.where)}</strong> without
+          signing the building off. Use it when somebody has gone home with it running.`,
+        confirmText: 'Stop their time',
+      });
+      if (!go) return;
+      try {
+        await api('/session/stop', { method: 'POST', body: { sessionId: Number(btn.dataset.stopsession) } });
+        toast('Time stopped');
+        renderOverview();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
 
   wireTiles();
   wireDayNav(app, renderOverview);
   wireSectionToggles(app, renderOverview);
   poll(renderOverview, 30000);
+}
+
+/**
+ * Time on buildings, for the office: who is in which building right now, and
+ * every start-to-finish on the day with how long it took.
+ */
+function timeCards(clock, isToday) {
+  const canStop = ['office', 'admin'].includes(state.user.role);
+  const finished = clock.sessions.filter((x) => x.finishedAt);
+  const total = clock.sessions.reduce((n, x) => n + x.minutes, 0);
+  const sinceLabelFor = (x) => (x.day === state.config.today
+    ? time(x.startedAt) : `${DAY_FULL[weekdayIndex(x.day)]} ${time(x.startedAt)}`);
+
+  return `<div class="card">
+    <h2><span class="grow">${svgIcon('clock')} Cleaning now</span>
+      <span class="num">${clock.active.length}</span></h2>
+    ${clock.active.length ? clock.active.map((x) => `<div class="list-item row loose time-row">
+      ${avatar(x.userName)}
+      <span class="grow">
+        <strong>${esc(firstName(x.userName))}</strong> — ${esc(x.building)}
+        <span class="tiny muted">${esc(typeLabel(x.cleanType))} · started
+          ${esc(sinceLabelFor(x))}${x.day !== state.config.today
+            ? ' · <strong>still running from an earlier day</strong>' : ''}</span>
+      </span>
+      <span class="pill open num">${esc(duration(x.minutes))}</span>
+      ${canStop ? `<button class="sm ghost" data-stopsession="${x.id}"
+        data-who="${esc(firstName(x.userName))}" data-where="${esc(x.building)}">Stop</button>` : ''}
+    </div>`).join('') : `<div class="empty"><b>Nobody is on the clock</b>
+      ${isToday ? 'Cleaners appear here the moment they tap Start on a building.'
+        : 'Nobody was still on the clock for this day.'}</div>`}
+  </div>
+
+  <div class="card">
+    <h2><span class="grow">Time on buildings</span>
+      <span class="num">${esc(duration(total))}</span></h2>
+    ${finished.length ? finished.map((x) => `<div class="list-item row loose time-row">
+      <span class="grow">
+        <strong>${esc(x.building)}</strong>
+        <span class="tiny muted">${esc(firstName(x.userName))} · ${esc(typeLabel(x.cleanType))}
+          · ${esc(time(x.startedAt))}–${esc(time(x.finishedAt))}
+          · ${x.signedOff ? 'signed off' : 'stopped for now'}</span>
+      </span>
+      <span class="pill ${x.signedOff ? 'done' : 'idle'} num">${esc(duration(x.minutes))}</span>
+    </div>`).join('') : `<div class="empty"><b>Nothing finished yet</b>
+      Each building shows here, with how long it took, once it is signed off.</div>`}
+    ${clock.sessions.length ? `<div class="pad tight">
+      <button class="wide ghost" id="timecsv">${svgIcon('download')} Download time as CSV</button>
+    </div>` : ''}
+  </div>`;
 }
 
 /**
@@ -1251,6 +1338,9 @@ function overviewTile(b) {
   const alsoDone = b.signedOff.filter((s) => s.cleanType !== b.cleanType);
 
   const meta = [
+    b.onClock?.length
+      ? `${b.onClock.map((c) => esc(firstName(c.name))).join(', ')} on it now` : null,
+    b.minutes ? `${esc(duration(b.minutes))} spent` : null,
     b.crew.length ? `worked by ${b.crew.map((c) => esc(firstName(c))).join(', ')}` : null,
     b.last_at ? `last ${esc(time(b.last_at))}` : null,
     b.open_issues ? `${b.open_issues} open issue${b.open_issues > 1 ? 's' : ''}` : null,
@@ -1459,7 +1549,7 @@ async function renderCleanerHome() {
   // stays a today-only job, so anything but today is read-only here.
   const day = viewDay();
   const isToday = day === state.config.today;
-  const [{ buildings, planPublished }, roster, carry] = await Promise.all([
+  const [{ buildings, planPublished, mySession }, roster, carry] = await Promise.all([
     api(`/overview?day=${day}`),
     // null, not an empty roster: a failed request must not be mistaken for
     // "you aren't on today", which is a thing the screen now says out loud.
@@ -1496,6 +1586,17 @@ async function renderCleanerHome() {
 
   app.innerHTML = `
     <div class="card"><div class="pad tight">${dayNav(day)}</div></div>
+
+    ${mySession ? `<div class="card"><button class="tile onclock" data-b="${mySession.buildingId}"
+        data-type="${esc(mySession.cleanType)}">
+      <span class="tile-main">
+        <span class="tile-title">${svgIcon('clock')}
+          <span class="name">You're on ${esc(mySession.building)}</span></span>
+        <span class="tile-meta"><span class="grow">Started ${esc(time(mySession.startedAt))}
+          · ${esc(duration(mySession.minutes))} so far · tap to carry on</span></span>
+      </span>
+      ${svgIcon('chevron', 'lg tile-chev')}
+    </button></div>` : ''}
 
     <div class="card">
       <div class="pad">
@@ -1582,10 +1683,12 @@ function jobTile(b, canOpen = true) {
              : '<span class="pill idle">Not started</span>';
 
   // Who is already on it, so two people don't start the same building.
-  const who = b.crew.length
-    ? `${b.completed_at ? 'by' : 'started by'} ${
-      b.crew.map((c) => esc(firstName(c))).join(', ')}`
-    : '';
+  const who = b.onClock?.length && !b.completed_at
+    ? `${b.onClock.map((c) => esc(firstName(c.name))).join(', ')} on it now`
+    : b.crew.length
+      ? `${b.completed_at ? 'by' : 'started by'} ${
+        b.crew.map((c) => esc(firstName(c))).join(', ')}`
+      : '';
 
   return `<button class="tile${b.completed_at ? ' finished' : ''}"
       ${canOpen ? `data-b="${b.id}" data-type="${esc(b.cleanType)}"` : 'disabled'}>
@@ -2073,6 +2176,7 @@ async function renderBuilding(id, wantType) {
       ${data.scheduleNote ? `<div class="banner info">
         <strong>From the office:</strong> ${esc(data.scheduleNote)}</div>` : ''}
       <p class="pad tight small" id="signoff" hidden></p>
+      <div id="clockbar" hidden></div>
     </div>
 
     ${nothingToTick ? '' : `
@@ -2125,14 +2229,71 @@ async function renderBuilding(id, wantType) {
 
   if (!locked) {
     app.querySelectorAll('.task').forEach((el) => {
-      el.onclick = () => toggleTask(el, id, day);
+      el.onclick = () => (needsStart(state.building)
+        ? startHere(id, day, type, data)
+        : toggleTask(el, id, day));
     });
     $('#report').onclick = () => renderReport(data);
-    $('#complete').onclick = () => completeBuilding(id, day, type, data, locked);
+    $('#complete').onclick = () => (needsStart(state.building)
+      ? startHere(id, day, type, data)
+      : completeBuilding(id, day, type, data, locked));
   }
 
   // Frequent enough that two cleaners in the same room see each other's ticks.
   poll(() => refreshBuilding(id, day, type, locked), 20000);
+}
+
+/**
+ * True when time tracking wants this cleaner to tap Start before working
+ * here: tracking is on, they aren't already timing this building, and it
+ * isn't signed off. The office and admins are never held up by it.
+ */
+function needsStart(data) {
+  return Boolean(data?.timeTracking) && state.user.role === 'cleaner' && !data.readOnly
+    && !data.completed && data.mySession?.buildingId !== data.building.id;
+}
+
+async function startHere(id, day, type, data) {
+  const elsewhere = data.mySession && data.mySession.buildingId !== id ? data.mySession : null;
+  if (elsewhere) {
+    const go = await ask({
+      title: `You're still on ${elsewhere.building}`,
+      body: `Start ${esc(data.building.name)} instead? Your time at
+        <strong>${esc(elsewhere.building)}</strong> stops now
+        (${esc(duration(minutesSince(elsewhere.startedAt)))}) and it stays unfinished
+        for somebody to pick up.`,
+      confirmText: `Start ${data.building.name}`,
+      cancelText: 'Not yet',
+    });
+    if (!go) return;
+  }
+  try {
+    await api('/session/start', {
+      method: 'POST',
+      body: { buildingId: id, day, cleanType: type, switch: Boolean(elsewhere) },
+    });
+    toast(`Started ${data.building.name}`);
+    renderBuilding(id, type);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function stopHere(id, type, data) {
+  const go = await ask({
+    title: `Stop for now at ${data.building.name}?`,
+    body: 'Your time stops here and the building stays unfinished — use this at the '
+      + 'end of a shift or when you are called away. To finish it, mark it complete instead.',
+    confirmText: 'Stop for now',
+  });
+  if (!go) return;
+  try {
+    await api('/session/stop', { method: 'POST', body: {} });
+    toast('Time stopped');
+    renderBuilding(id, type);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function completeBuilding(id, day, type, data, locked) {
@@ -2373,11 +2534,16 @@ function paintBuilding(data, locked) {
       <div class="tiny muted">${esc(i.reported_by)} · ${esc(time(i.reported_at))}</div>
     </div>`).join('');
 
+  const waiting = needsStart(data);
   if (!locked) {
-    $('#complete').textContent = data.completed
-      ? `Reopen this ${typeLabel(data.cleanType).toLowerCase()}`
-      : `Mark ${typeLabel(data.cleanType).toLowerCase()} complete`;
+    $('#complete').textContent = waiting
+      ? `Start ${data.building.name}`
+      : data.completed
+        ? `Reopen this ${typeLabel(data.cleanType).toLowerCase()}`
+        : `Mark ${typeLabel(data.cleanType).toLowerCase()} complete`;
   }
+  app.querySelector('#items')?.classList.toggle('needs-start', waiting);
+  paintClock(data);
 
   // On a building with nothing to tick the card is the only status there is,
   // so it turns green rather than leaving the pill above to carry it alone,
@@ -2393,6 +2559,50 @@ function paintBuilding(data, locked) {
   }
 }
 
+/**
+ * The time-tracking strip on a building: for a cleaner, whether they have
+ * started and how long they have been at it; for the office, who is timing
+ * it and how long it has taken so far today.
+ */
+function paintClock(data) {
+  const bar = $('#clockbar');
+  if (!bar) return;
+  if (!data.timeTracking) { bar.hidden = true; return; }
+  const here = data.mySession?.buildingId === data.building.id ? data.mySession : null;
+  const sessions = data.sessions ?? [];
+  const total = sessions.filter((x) => x.day === data.day)
+    .reduce((n, x) => n + (x.finishedAt ? x.minutes : minutesSince(x.startedAt)), 0);
+  const others = sessions.filter((x) => !x.finishedAt && x.userId !== state.user.id);
+
+  let html = '';
+  if (state.user.role === 'cleaner' && !data.readOnly) {
+    if (here) {
+      html = `<div class="banner info clock-row">
+        <span class="grow">${svgIcon('clock')} <strong>On the clock</strong> since
+          ${esc(time(here.startedAt))} · <span class="num">${
+          esc(duration(minutesSince(here.startedAt)))}</span></span>
+        <button class="sm ghost" id="stopclock">Stop for now</button>
+      </div>`;
+    } else if (needsStart(data)) {
+      html = `<div class="banner warn">${svgIcon('clock')}
+        <strong>Tap Start when you get here.</strong> The office sees how long each
+        building takes${data.mySession
+          ? ` — you're still on <strong>${esc(data.mySession.building)}</strong>` : ''}.
+      </div>`;
+    }
+  }
+  const line = [
+    others.length ? `${others.map((x) => esc(firstName(x.userName))).join(', ')} on it now` : '',
+    total ? `${esc(duration(total))} spent here today` : '',
+  ].filter(Boolean).join(' · ');
+  if (line) html += `<p class="pad tight small muted">${svgIcon('clock')} ${line}</p>`;
+
+  bar.hidden = !html;
+  bar.innerHTML = html;
+  const stop = $('#stopclock');
+  if (stop) stop.onclick = () => stopHere(data.building.id, data.cleanType, data);
+}
+
 /** Polling refresh: patch the DOM rather than rebuild it, so nobody's scroll
     position or half-finished tap gets thrown away mid-shift. */
 async function refreshBuilding(id, day, type, locked, force = false) {
@@ -2403,7 +2613,10 @@ async function refreshBuilding(id, day, type, locked, force = false) {
     return; // transient - the next tick will catch up
   }
 
-  const shape = (d) => d.items.map((t) => `${t.id}:${t.photos.length}`).join();
+  const shape = (d) => d.items.map((t) => `${t.id}:${t.photos.length}`).join()
+    // Starting, stopping or being stopped by the office changes what the
+    // screen lets you do, so it redraws rather than patching.
+    + `|${d.timeTracking}|${d.mySession?.id ?? ''}`;
   // A changed checklist (or a photo added or removed) means the markup itself
   // is out of date, so a full redraw is the only correct answer.
   if (force || shape(state.building) !== shape(data)) return renderBuilding(id, type);
@@ -4484,6 +4697,20 @@ async function renderAdmin() {
     </div>
 
     <div class="card">
+      <h2>Time on buildings</h2>
+      <label class="switch-row">
+        <input type="checkbox" id="timetrack" ${state.config.timeTracking ? 'checked' : ''}>
+        <span class="grow">
+          <strong>Cleaners start and finish each building</strong>
+          <span class="small muted">Cleaners tap <strong>Start</strong> when they arrive
+            at a building before they can tick anything off, and marking it complete
+            stops the clock. The Overview then shows who is in which building right
+            now and how long each one took.</span>
+        </span>
+      </label>
+    </div>
+
+    <div class="card">
       <h2>Maintenance alerts</h2>
       <div class="pad stack narrow">
         <p class="small muted">Push a free phone notification the moment a
@@ -4553,6 +4780,20 @@ async function renderAdmin() {
       state.configAt = Date.now();
       toast(on ? 'Test mode on — no PIN needed' : 'Test mode off — PIN required');
       renderAdmin();
+    } catch (e) {
+      ev.currentTarget.checked = !on;
+      toast(e.message, true);
+    }
+  };
+
+  $('#timetrack').onchange = async (ev) => {
+    const on = ev.currentTarget.checked;
+    try {
+      const res = await api('/settings', { method: 'POST', body: { timeTracking: on } });
+      state.config.timeTracking = res.timeTracking;
+      state.configAt = Date.now();
+      toast(on ? 'Time tracking on — cleaners tap Start at each building'
+        : 'Time tracking off');
     } catch (e) {
       ev.currentTarget.checked = !on;
       toast(e.message, true);
