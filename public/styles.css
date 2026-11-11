@@ -2283,3 +2283,13 @@ button.usualday.on .usualday-state { color: var(--done); }
 
 .custom-hours summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 6px 0; }
 .custom-hours input[type="time"] { flex: 1; min-width: 0; }
+
+/* --------------------------------------------------- time on buildings */
+
+/* Before Start is tapped the list is there to read, not to tick. */
+#items.needs-start .task { opacity: .55; }
+.clock-row { display: flex; align-items: center; gap: var(--s3); }
+.clock-row .ico, #clockbar p .ico { vertical-align: -3px; }
+.tile.onclock { box-shadow: inset 4px 0 0 var(--accent); }
+.tile.onclock .tile-title .ico { color: var(--accent); }
+.time-row .grow > .tiny { display: block; margin-top: 2px; }

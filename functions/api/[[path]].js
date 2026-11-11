@@ -610,6 +610,66 @@ const quickSigninOn = async (env) => (await getSetting(env, 'quick_signin', '1')
 /** Editing the checklist in the app takes ownership away from the file. */
 const ownChecklist = (env) => setSetting(env, 'checklist_source', 'app');
 
+/**
+ * Time tracking: cleaners tap Start on a building before ticking anything,
+ * and signing it off stops the clock. The office sees who is in which
+ * building right now and how long each one took. Off unless an admin turns
+ * it on under People.
+ */
+const timeTrackingOn = async (env) => (await getSetting(env, 'time_tracking', '0')) === '1';
+
+/* ------------------------------------------------------- time on buildings */
+
+/** This person's open session, wherever it is, or null. */
+async function openSessionFor(env, userId) {
+  return env.DB.prepare(
+    `SELECT s.*, b.name AS building
+     FROM building_sessions s JOIN buildings b ON b.id = s.building_id
+     WHERE s.user_id = ? AND s.finished_at IS NULL
+     ORDER BY s.id DESC LIMIT 1`,
+  ).bind(userId).first();
+}
+
+/**
+ * Refuses a cleaner who hasn't started this building while time tracking is
+ * on. The office and admins are let through: they sign off on behalf of
+ * somebody who rang in, and aren't the ones being timed.
+ */
+async function requireStarted(env, user, buildingId) {
+  if (user.role !== 'cleaner' || !(await timeTrackingOn(env))) return;
+  const open = await openSessionFor(env, user.id);
+  if (open?.building_id === buildingId) return;
+  throw new HttpError(409, open
+    ? `You're still on ${open.building}. Finish or stop it before working here.`
+    : 'Tap Start before ticking anything off here.', { needsStart: true });
+}
+
+/** Closes open sessions. `where` picks them; `signedOff` records why. */
+async function closeSessions(env, where, binds, signedOff) {
+  await env.DB.prepare(
+    `UPDATE building_sessions SET finished_at = ?, signed_off = ?
+     WHERE finished_at IS NULL AND ${where}`,
+  ).bind(now(), signedOff ? 1 : 0, ...binds).run();
+}
+
+/** A session as the client sees it. `minutes` runs to now while it is open. */
+function sessionView(r) {
+  const end = r.finished_at ? new Date(r.finished_at) : new Date();
+  return {
+    id: r.id,
+    buildingId: r.building_id,
+    building: r.building,
+    day: r.day,
+    cleanType: r.clean_type,
+    userId: r.user_id,
+    userName: r.user_name,
+    startedAt: r.started_at,
+    finishedAt: r.finished_at ?? null,
+    signedOff: Boolean(r.signed_off),
+    minutes: Math.max(0, Math.round((end - new Date(r.started_at)) / 60000)),
+  };
+}
+
 /* -------------------------------------------------------- push notifications */
 
 const NTFY_SERVER = 'https://ntfy.sh';
@@ -835,6 +895,7 @@ const routes = {
     return json({
       needsBootstrap: !bootstrapped,
       quickSignin: await quickSigninOn(env),
+      timeTracking: await timeTrackingOn(env),
       photos: Boolean(env.PHOTOS),
       rollupOnly: env.OFFICE_ROLLUP_ONLY === '1',
       officePhone: env.OFFICE_PHONE || contacts.office || '',
@@ -1012,6 +1073,23 @@ const routes = {
       if (!prev || c.last_at > prev) lastAt.set(c.building_id, c.last_at);
     }
 
+    // Time on buildings: what each one took today, and who is in it now.
+    const tracking = await timeTrackingOn(env);
+    const { results: sessionRows } = tracking ? await env.DB.prepare(
+      `SELECT s.*, b.name AS building FROM building_sessions s
+       JOIN buildings b ON b.id = s.building_id
+       WHERE s.day = ? OR s.finished_at IS NULL`,
+    ).bind(day).all() : { results: [] };
+    const sessions = sessionRows.map(sessionView);
+    const timeFor = (id) => {
+      const mineHere = sessions.filter((x) => x.buildingId === id);
+      return {
+        minutes: mineHere.filter((x) => x.day === day).reduce((n, x) => n + x.minutes, 0),
+        onClock: mineHere.filter((x) => !x.finishedAt)
+          .map((x) => ({ name: x.userName, since: x.startedAt, minutes: x.minutes })),
+      };
+    };
+
     const planFor = new Map(planned.results.map((p) => [p.building_id, p]));
     const lastFor = new Map(lastDone.results.map((r) => [r.building_id, r.last_day]));
     const issuesFor = new Map(issues.results.map((r) => [r.building_id, r.n]));
@@ -1047,6 +1125,7 @@ const routes = {
         checkin: Boolean(plan?.checkin),
         note: plan?.note ?? null,
         lastCleaned: lastFor.get(b.id) ?? null,
+        ...(tracking ? timeFor(b.id) : {}),
       };
     });
 
@@ -1060,7 +1139,13 @@ const routes = {
       return rank(x) - rank(y);
     });
 
-    return json({ day, buildings: enriched, planPublished });
+    return json({
+      day,
+      buildings: enriched,
+      planPublished,
+      timeTracking: tracking,
+      mySession: sessions.find((x) => !x.finishedAt && x.userId === user.id) ?? null,
+    });
   },
 
   /* --- the weekly cleaning plan --- */
@@ -1505,11 +1590,25 @@ const routes = {
        ORDER BY id DESC`,
     ).bind(id).all();
 
+    const tracking = await timeTrackingOn(env);
+    const mine = tracking ? await openSessionFor(env, user.id) : null;
+    const { results: here } = tracking ? await env.DB.prepare(
+      `SELECT s.*, b.name AS building FROM building_sessions s
+       JOIN buildings b ON b.id = s.building_id
+       WHERE s.building_id = ? AND (s.day = ? OR s.finished_at IS NULL)
+       ORDER BY s.id`,
+    ).bind(id, day).all() : { results: [] };
+
     return json({
       day,
       building,
       cleanType,
       cleanTypeLabel: typeLabel(cleanType),
+      timeTracking: tracking,
+      // Where this person is on the clock, here or elsewhere.
+      mySession: mine ? sessionView(mine) : null,
+      // Everyone's time on this building that day, open sessions included.
+      sessions: here.map(sessionView),
       sizes: { full: sizeOf('full'), check: sizeOf('check') },
       scheduledType: plan ? typeOf(plan.clean_type) : null,
       scheduleCheckin: Boolean(plan?.checkin),
@@ -1527,6 +1626,7 @@ const routes = {
     const { taskId, done, day: rawDay } = await req.json();
     const day = isDay(rawDay) ? rawDay : localDay(env);
     const task = await taskContext(env, Number(taskId));
+    await requireStarted(env, user, task.building_id);
     const ts = now();
 
     await env.DB.prepare(
@@ -1670,6 +1770,8 @@ const routes = {
       return json({ ok: true, completed: null });
     }
 
+    await requireStarted(env, user, id);
+
     // Items the admin marked "photo required" that have no photo today. Not a
     // hard block - a dead camera phone shouldn't strand a finished building -
     // but the office sees it was signed off short. A photo taken on the day an
@@ -1716,6 +1818,10 @@ const routes = {
       });
     }
 
+    // Signing off stops the clock for everyone working here, so a building two
+    // people cleaned together doesn't leave one of them still timing it.
+    await closeSessions(env, 'building_id = ?', [id], true);
+
     await logActivity(env, {
       day, buildingId: id, kind: 'completed',
       detail: missing.length
@@ -1725,6 +1831,133 @@ const routes = {
       userName: user.name,
     });
     return json({ ok: true, completed: { completed_at: ts, completed_by: user.name } });
+  },
+
+  /* --- time on buildings --- */
+
+  /**
+   * Starts the clock on a building. Starting somewhere new while still on
+   * another building only happens with `switch` set, which stops the old one
+   * first - the screen asks before sending it.
+   */
+  'POST /session/start': async (req, env, { user }) => {
+    canTick(user);
+    if (!(await timeTrackingOn(env))) throw new HttpError(400, 'Time tracking is switched off.');
+    const { buildingId, cleanType, day: rawDay, switch: moveOn } = await req.json();
+    const id = Number(buildingId);
+    const day = isDay(rawDay) ? rawDay : localDay(env);
+    const building = await env.DB.prepare('SELECT id, name FROM buildings WHERE id = ? AND active = 1')
+      .bind(id).first();
+    if (!building) throw new HttpError(404, 'Building not found.');
+
+    const open = await openSessionFor(env, user.id);
+    if (open?.building_id === id) {
+      return json({ ok: true, session: sessionView(open) });
+    }
+    if (open && !moveOn) {
+      throw new HttpError(409, `You're still on ${open.building}.`, { current: open.building });
+    }
+    if (open) {
+      await closeSessions(env, 'id = ?', [open.id], false);
+      await logActivity(env, {
+        day: open.day, buildingId: open.building_id, kind: 'stopped',
+        detail: 'Stopped for now', userName: user.name,
+      });
+    }
+
+    const ts = now();
+    const type = typeOf(cleanType);
+    const res = await env.DB.prepare(
+      `INSERT INTO building_sessions (building_id, day, clean_type, user_id, user_name, started_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(id, day, type, user.id, user.name, ts).run();
+    await logActivity(env, {
+      day, buildingId: id, kind: 'started',
+      detail: `${typeLabel(type)} started`, userName: user.name,
+    });
+    return json({
+      ok: true,
+      session: sessionView({
+        id: res.meta.last_row_id, building_id: id, building: building.name, day,
+        clean_type: type, user_id: user.id, user_name: user.name, started_at: ts,
+      }),
+    });
+  },
+
+  /**
+   * Stops the clock without signing off: end of a shift, or called away.
+   * The office can stop anyone's (somebody went home with it running);
+   * a cleaner only their own.
+   */
+  'POST /session/stop': async (req, env, { user }) => {
+    canTick(user);
+    const { sessionId } = await req.json();
+    const row = sessionId
+      ? await env.DB.prepare(
+        'SELECT * FROM building_sessions WHERE id = ? AND finished_at IS NULL',
+      ).bind(Number(sessionId)).first()
+      : await openSessionFor(env, user.id);
+    if (!row) return json({ ok: true });
+    if (row.user_id !== user.id && user.role === 'cleaner') {
+      throw new HttpError(403, 'You can only stop your own time.');
+    }
+    await closeSessions(env, 'id = ?', [row.id], false);
+    await logActivity(env, {
+      day: row.day, buildingId: row.building_id, kind: 'stopped',
+      detail: row.user_id !== user.id
+        ? `Stopped ${firstName(row.user_name)}'s time` : 'Stopped for now',
+      userName: user.name,
+    });
+    return json({ ok: true });
+  },
+
+  /**
+   * The office's view of time: who is in which building right now, and every
+   * session on a day with how long it ran.
+   */
+  'GET /sessions': async (_req, env, { user, url }) => {
+    canSeeOffice(user);
+    const day = dayParam(url, env);
+    const { results } = await env.DB.prepare(
+      `SELECT s.*, b.name AS building FROM building_sessions s
+       JOIN buildings b ON b.id = s.building_id
+       WHERE s.day = ? OR s.finished_at IS NULL
+       ORDER BY s.started_at`,
+    ).bind(day).all();
+    const all = results.map(sessionView);
+    return json({
+      day,
+      timeTracking: await timeTrackingOn(env),
+      active: all.filter((s) => !s.finishedAt),
+      sessions: all.filter((s) => s.day === day),
+    });
+  },
+
+  'GET /sessions/export': async (_req, env, { user, url }) => {
+    canSeeOffice(user);
+    const from = isDay(url.searchParams.get('from')) ? url.searchParams.get('from') : localDay(env);
+    const to = isDay(url.searchParams.get('to')) ? url.searchParams.get('to') : localDay(env);
+    const { results } = await env.DB.prepare(
+      `SELECT s.*, b.name AS building FROM building_sessions s
+       JOIN buildings b ON b.id = s.building_id
+       WHERE s.day BETWEEN ? AND ? ORDER BY s.day, s.started_at`,
+    ).bind(from, to).all();
+    const auDay = (d) => (d ? d.split('-').reverse().join('-') : '');
+    const clock = (iso) => (iso ? new Intl.DateTimeFormat('en-AU', {
+      timeZone: env.TIMEZONE || 'Australia/Sydney', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(new Date(iso)) : '');
+    const header = 'Date,Building,Checklist,Cleaner,Started,Finished,Minutes,How it ended\n';
+    const csv = results.map(sessionView).map((r) => [
+      auDay(r.day), r.building, typeLabel(r.cleanType), r.userName,
+      clock(r.startedAt), clock(r.finishedAt), r.minutes,
+      !r.finishedAt ? 'Still going' : r.signedOff ? 'Signed off' : 'Stopped',
+    ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    return new Response(header + csv, {
+      headers: {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': `attachment; filename="time-${auDay(from)}-to-${auDay(to)}.csv"`,
+      },
+    });
   },
 
   /* --- maintenance reports --- */
@@ -2845,11 +3078,18 @@ const routes = {
 
   'POST /settings': async (req, env, { user }) => {
     require(user, 'admin');
-    const { quickSignin } = await req.json();
+    const { quickSignin, timeTracking } = await req.json();
     if (quickSignin !== undefined) {
       await setSetting(env, 'quick_signin', quickSignin ? '1' : '0');
     }
-    return json({ ok: true, quickSignin: await quickSigninOn(env) });
+    if (timeTracking !== undefined) {
+      await setSetting(env, 'time_tracking', timeTracking ? '1' : '0');
+    }
+    return json({
+      ok: true,
+      quickSignin: await quickSigninOn(env),
+      timeTracking: await timeTrackingOn(env),
+    });
   },
 
   /* --- maintenance push notifications (ntfy.sh) --- */
@@ -2917,7 +3157,7 @@ const routes = {
     const tables = [
       'schedule', 'schedule_repeat', 'roster', 'published_weeks', 'availability_days',
       'task_photos', 'task_log',
-      'activity', 'building_status', 'maintenance', 'login_attempts',
+      'activity', 'building_status', 'maintenance', 'login_attempts', 'building_sessions',
     ];
     await env.DB.batch(tables.map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
 

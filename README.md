@@ -32,6 +32,9 @@ browser, no software to install and no commands to run.
 | Add people, set PINs, change roles, delete accounts | — | — | — | ✅ |
 | Set the order names appear in | — | — | — | ✅ |
 | Edit buildings and their checklists | — | — | — | ✅ |
+| Start and finish a building (when time tracking is on) | ✅ | — | — | — |
+| See who is in which building now, and how long each took | — | ✅ | ✅ | ✅ |
+| Turn time tracking on or off | — | — | — | ✅ |
 
 **View only** is for the shared office computer: it sees every office
 screen — the overview, the plan, the roster, availability, reports — and has
@@ -73,6 +76,35 @@ It is also a wide open door: anyone with the link can sign in as anyone,
 including an admin. While it's on, an orange banner sits across the top of
 every screen so it can't be forgotten. **Turn it off before the cleaners start
 using it for real** — one switch, and PINs are required again immediately.
+
+### Time on buildings
+
+**People → Time on buildings** has a switch, off by default. Turn it on and:
+
+- **Cleaners tap Start** when they arrive at a building. Until they do, the
+  checklist is there to read but can't be ticked, and the big button at the
+  bottom says *Start …* instead of *Mark complete*. The server refuses ticks
+  and sign-offs too, so an old copy of the app can't skip it.
+- **Marking the building complete stops the clock.** If two cleaners did a
+  building together, one sign-off stops both.
+- **Stop for now** ends the time without signing off — the end of a shift, or
+  being called away. Starting a different building asks first, then does the
+  same to the one they were on.
+- The cleaner's home screen shows *You're on …* with how long so far, one tap
+  back into it.
+
+On the **Overview** the office sees:
+
+- **Cleaning now** — each cleaner on the clock, which building, since when,
+  and for how long. A **Stop** button ends someone's time if they went home
+  with it running (it doesn't sign the building off).
+- **Time on buildings** — every start-to-finish on that day with how long it
+  took and whether it ended in a sign-off, plus **Download time as CSV**.
+- Each run-sheet row adds *Casey on it now* and *45 min spent*.
+
+Office and admin accounts are never asked to Start: they sign off on behalf
+of someone who rang in, and aren't the ones being timed. Turning the switch
+off hides all of this again; the recorded times are kept.
 
 ---
 

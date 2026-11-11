@@ -210,6 +210,22 @@ const TABLES = [
      UNIQUE (user_id, day)
    )`,
 
+  // Time on buildings: a cleaner taps Start when they arrive and the session
+  // closes when they sign the building off (or stop for now). Only used while
+  // an admin has time tracking switched on. The name is kept alongside the id
+  // so the record still reads right after the person is deleted.
+  `CREATE TABLE IF NOT EXISTS building_sessions (
+     id          INTEGER PRIMARY KEY,
+     building_id INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+     day         TEXT    NOT NULL,
+     clean_type  TEXT    NOT NULL DEFAULT 'full',
+     user_id     INTEGER NOT NULL,
+     user_name   TEXT    NOT NULL,
+     started_at  TEXT    NOT NULL,
+     finished_at TEXT,
+     signed_off  INTEGER NOT NULL DEFAULT 0
+   )`,
+
   `CREATE TABLE IF NOT EXISTS login_attempts (
      ip       TEXT PRIMARY KEY,
      fails    INTEGER NOT NULL DEFAULT 0,
@@ -233,6 +249,8 @@ const INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_roster_user ON roster (user_id, day)`,
   `CREATE INDEX IF NOT EXISTS idx_availability_days ON availability_days (day)`,
   `CREATE INDEX IF NOT EXISTS idx_schedule_repeat ON schedule_repeat (weekday)`,
+  `CREATE INDEX IF NOT EXISTS idx_sessions_day ON building_sessions (day, started_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_sessions_open ON building_sessions (user_id, finished_at)`,
 ];
 
 
